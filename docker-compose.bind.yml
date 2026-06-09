@@ -1,0 +1,5 @@
+# Optional host bind mount for cursor-sdk workspace (not Postgres data)
+services:
+  bot:
+    volumes:
+      - ./data:/data
