@@ -1,4 +1,4 @@
-/** Russian UI copy and status labels for the Mini App control room. */
+/** Russian UI copy and status labels for the BeachOps Mini App. */
 
 const STATUS_RU: Record<string, string> = {
   queued: 'В очереди',

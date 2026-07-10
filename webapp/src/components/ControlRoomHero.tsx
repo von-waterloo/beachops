@@ -26,18 +26,18 @@ export function ControlRoomHero({
   }
 
   return (
-    <section className="control-hero" aria-label="Статус пульта">
+    <section className="control-hero" aria-label="Статус агентов">
       <motion.div
         className="control-hero-glow"
         animate={{ opacity: running > 0 ? [0.4, 0.75, 0.4] : 0.28 }}
         transition={{ duration: 2.6, repeat: Infinity, ease: 'easeInOut' }}
       />
       <div className="control-hero-copy">
-        <p className="eyebrow">War room</p>
-        <h1>Cloud и Windows — одно командование</h1>
-        <p>Жмите метрики — откроется нужный срез задач.</p>
+        <p className="eyebrow">Ваши агенты</p>
+        <h1>Cloud и Windows — все рядом</h1>
+        <p>Жмите метрики — откроется нужный срез.</p>
       </div>
-      <div className="control-metrics" role="toolbar" aria-label="Фильтр плоскости">
+      <div className="control-metrics" role="toolbar" aria-label="Фильтр агентов">
         <button
           type="button"
           className={runtimeFilter === 'cloud' ? 'live' : ''}

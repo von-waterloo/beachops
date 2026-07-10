@@ -8,7 +8,7 @@
 - **PostgreSQL 16 + pgvector** — пользователи, репозитории, сессии агентов, семантическая память.
 - **Redis + ARQ** — durable jobs, distributed actor locks, rate limits, replay protection,
   short-lived hot cache (dashboard, auth bootstrap, panic write-through, embeddings).
-- **FastAPI + React Mini App** — dashboard, approvals, realtime voice, worker control plane.
+- **FastAPI + React Mini App** — dashboard, approvals, realtime voice, Windows worker.
 - **OpenAI API** — realtime STT, streaming TTS, эмбеддинги.
 - **Workspace volume** — локальная рабочая директория для cursor-sdk bridge (`WORKSPACE_PATH`).
 
@@ -36,7 +36,7 @@
 | Handlers | `src/beachops/bot/handlers/` | команды Telegram, текст, голос, фото, callbacks |
 | Services | `src/beachops/services/` | policy, durable dispatch, агент, память, стрим UI |
 | API/worker | `src/beachops/web/`, `worker.py` | Mini App API и ARQ execution |
-| Frontend | `webapp/` | React/Vite Control Room Mini App (voice, queue, agents, approvals) |
+| Frontend | `webapp/` | React/Vite Mini App (голос, очередь, агенты, approvals) |
 | Domain | `src/beachops/domain/` | модели, шаблоны промптов |
 | DB | `src/beachops/db/` | asyncpg pool, repositories |
 | Config | `src/beachops/config/settings.py` | pydantic-settings из `.env` |

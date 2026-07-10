@@ -35,7 +35,7 @@ export function AuthScreen({
         <div className="auth-copy">
           <span className="auth-kicker">
             <ShieldCheck size={15} />
-            Закрытый пульт
+            Личный доступ
           </span>
           <h1>
             {checking

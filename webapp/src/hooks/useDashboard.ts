@@ -54,7 +54,7 @@ export function useDashboard(pollMs = 15_000) {
       setData(normalize(snapshot))
       setError(null)
     } catch {
-      setError(navigator.onLine ? 'Пульт временно недоступен' : 'Нет сети')
+      setError(navigator.onLine ? 'BeachOps временно недоступен' : 'Нет сети')
     }
     setLoading(false)
   }, [])

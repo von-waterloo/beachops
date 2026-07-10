@@ -1,7 +1,7 @@
 # BeachOps
 
-Private Telegram control plane for Cursor Cloud Agents: ask/plan/do, durable ARQ
-jobs, audit/redaction, panic lock, and a voice-first Telegram Mini App.
+Telegram-бот и Mini App для диалога с вашими Cursor-агентами: ask/plan/do,
+несколько слотов, голос, очередь задач и approvals — в одном приятном чате.
 
 **Полная документация:** [docs/README.md](./docs/README.md)
 

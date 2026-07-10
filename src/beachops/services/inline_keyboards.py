@@ -253,7 +253,7 @@ def welcome_keyboard(
     url = (webapp_url or "").strip()
     if url.lower().startswith("https://"):
         rows.append(
-            [InlineKeyboardButton("🎛 Control Room", web_app=WebAppInfo(url=url))]
+            [InlineKeyboardButton("🎛 Агенты", web_app=WebAppInfo(url=url))]
         )
     rows.append(_mode_buttons(is_admin=is_admin, current=current))
     rows.extend(_model_buttons(current_model_key=current_model_key))

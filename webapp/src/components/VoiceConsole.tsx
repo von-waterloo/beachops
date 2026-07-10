@@ -120,7 +120,7 @@ export function VoiceConsole({
     <section className="voice-console" aria-labelledby="voice-heading">
       <header className="voice-heading">
         <div>
-          <p className="eyebrow">War room</p>
+          <p className="eyebrow">Диалог</p>
           <h1 id="voice-heading">BeachOps</h1>
         </div>
         <button

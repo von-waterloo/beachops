@@ -679,7 +679,7 @@ export function DashboardPanels({
     <section className="panel-page">
       <header className="panel-header">
         <div>
-          <p className="eyebrow">Пульт BeachOps</p>
+          <p className="eyebrow">BeachOps</p>
           <h1>{PANEL_TITLES[tab]}</h1>
         </div>
         <button

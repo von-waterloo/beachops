@@ -57,7 +57,7 @@
 | `/approvals` | Ожидающие owner decisions |
 | `/panic`, `/unpanic` | Аварийная остановка и одноразовое подтверждение возврата writes |
 | `/rollback` | Откат прода на предыдущий (или указанный) SHA — только owner, с кнопкой подтверждения |
-| `/dashboard` | Control Room Mini App (голос, агенты, репо, чаты Cursor, очередь) |
+| `/dashboard` | Mini App: голос, агенты, репо, чаты Cursor, очередь |
 
 ### Модель Cursor
 
@@ -117,7 +117,7 @@ Windows-агенты: слот с `runtime=windows` + worker на ПК
 ### Голос
 
 В чате: голос транскрибируется и проходит обычную безопасную plan-first схему.
-В Mini App (Control Room): realtime transcript, текстовый composer, animated waveform/orb,
+В Mini App: realtime transcript, текстовый composer, animated waveform/orb,
 Cloud/Windows agent cards со ссылкой «Открыть в Cursor», вкладка **Репо** (добавить URL +
 базовая ветка), live queue, approvals, timeline и worker health.
 Голос не может approve/panic/unpanic.

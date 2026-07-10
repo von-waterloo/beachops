@@ -1,7 +1,7 @@
 # BeachOps — документация
 
-Private control plane: Telegram + voice Mini App, Cursor Cloud Agents,
-plan/owner approval workflow, Redis/ARQ, audit/redaction and panic lock.
+Диалог программиста с Cursor-агентами: Telegram + voice Mini App, ask/plan/do,
+слоты агентов, Cloud/Windows runtime, plan/owner approval, durable jobs и audit.
 
 ## Содержание
 
