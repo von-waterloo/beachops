@@ -199,6 +199,47 @@ class AgentSlotRepository:
             )
         return result.endswith("1")
 
+    async def update_execution(
+        self,
+        tg_user_id: int,
+        slot_id: int,
+        *,
+        runtime: str | None = None,
+        local_path: str | None | object = ...,
+        preferred_worker_id: str | None | object = ...,
+    ) -> AgentSlot | None:
+        """Update runtime/local_path/preferred_worker_id for a slot.
+
+        `...` (Ellipsis) for `local_path`/`preferred_worker_id` means "leave
+        unchanged"; `None` explicitly clears the column. Switching to cloud
+        always clears both, since they only make sense for a Windows slot.
+        """
+        if runtime == "cloud":
+            local_path = None
+            preferred_worker_id = None
+
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE user_agent_slots
+                SET runtime = COALESCE($3, runtime),
+                    local_path = CASE WHEN $4 THEN $5 ELSE local_path END,
+                    preferred_worker_id = CASE WHEN $6 THEN $7::uuid ELSE preferred_worker_id END,
+                    updated_at = now()
+                WHERE id = $1 AND tg_user_id = $2
+                """,
+                slot_id,
+                tg_user_id,
+                runtime,
+                local_path is not ...,
+                None if local_path is ... else local_path,
+                preferred_worker_id is not ...,
+                None if preferred_worker_id is ... else preferred_worker_id,
+            )
+        if not result.endswith("1"):
+            return None
+        return await self.get_by_id(tg_user_id, slot_id)
+
     async def delete_slot(self, tg_user_id: int, slot_id: int) -> AgentSlot | None:
         """Delete slot; activate another if the deleted one was active."""
         async with self._pool.acquire() as conn:

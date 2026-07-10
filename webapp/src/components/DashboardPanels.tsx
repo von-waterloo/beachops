@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import type { AgentSlot, DashboardSnapshot, Event, Job, WorkerNode } from '../types/api'
 import { isActiveJobStatus } from '../types/api'
+import { AgentControlPanel, JobChatPanel } from './AgentControlPanel'
 import { feedback } from '../lib/feedback'
 import {
   matchesRuntimeFilter,
@@ -55,6 +56,17 @@ interface Props {
   onAddRepository?: (input: { url: string; branch?: string }) => Promise<void>
   onUpdateRepository?: (repoId: string, input: { branch?: string; makeActive?: boolean }) => Promise<void>
   onActivateSelfImprove?: () => Promise<void>
+  onUpdateAgent?: (slotId: string, input: {
+    runtime?: string
+    localPath?: string | null
+    preferredWorkerId?: string | null
+    makeActive?: boolean
+  }) => Promise<void>
+  onSubmitPrompt?: (input: {
+    prompt: string
+    mode?: 'ask' | 'plan' | 'do'
+    slotId?: string
+  }) => Promise<{ job: { id: string }; enqueued: boolean; reason?: string }>
 }
 
 function Empty({ icon, title, copy }: { icon: React.ReactNode; title: string; copy: string }) {
@@ -373,6 +385,8 @@ function Overview({
   focusedJobId,
   onRuntimeFilterChange,
   onSelectJob,
+  onUpdateAgent,
+  onSubmitPrompt,
 }: {
   data: DashboardSnapshot
   liveEvents: Event[]
@@ -382,6 +396,8 @@ function Overview({
   focusedJobId?: string | null
   onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: TabId) => void
   onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
+  onUpdateAgent?: Props['onUpdateAgent']
+  onSubmitPrompt?: Props['onSubmitPrompt']
 }) {
   const activeJobs = data.jobs
     .filter((job) => isActiveJobStatus(job.status))
@@ -403,6 +419,18 @@ function Overview({
 
   return (
     <div className="control-feed">
+      {onUpdateAgent && onSubmitPrompt && (data.agents?.length ?? 0) > 0 && (
+        <AgentControlPanel
+          slots={data.agents}
+          workers={data.workers}
+          role={data.role}
+          onUpdateAgent={onUpdateAgent}
+          onSubmitPrompt={onSubmitPrompt}
+          onJobDispatched={(jobId, runtime) => onSelectJob?.(jobId, runtime)}
+        />
+      )}
+      {focusedJobId && <JobChatPanel jobId={focusedJobId} />}
+
       <div className="stats-strip" aria-label="Сводка очереди">
         <button type="button" onClick={() => onRuntimeFilterChange?.('all', 'active')}>
           <strong>{active}</strong>
@@ -614,6 +642,8 @@ export function DashboardPanels({
   onAddRepository,
   onUpdateRepository,
   onActivateSelfImprove,
+  onUpdateAgent,
+  onSubmitPrompt,
 }: Props) {
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
   const [repoUrl, setRepoUrl] = useState('')
@@ -732,6 +762,8 @@ export function DashboardPanels({
           focusedJobId={focusedJobId}
           onRuntimeFilterChange={onRuntimeFilterChange}
           onSelectJob={onSelectJob}
+          onUpdateAgent={onUpdateAgent}
+          onSubmitPrompt={onSubmitPrompt}
         />
       </section>
     )

@@ -96,3 +96,16 @@ class RepoCreateRequest(ApiModel):
 class RepoUpdateRequest(ApiModel):
     branch: str | None = Field(default=None, max_length=200)
     makeActive: bool | None = None
+
+
+class AgentUpdateRequest(ApiModel):
+    runtime: str | None = Field(default=None, pattern="^(cloud|windows)$")
+    localPath: str | None = Field(default=None, max_length=500)
+    preferredWorkerId: str | None = Field(default=None, max_length=64)
+    makeActive: bool | None = None
+
+
+class PromptRequest(ApiModel):
+    prompt: str = Field(min_length=1, max_length=8000)
+    mode: str = Field(default="ask", pattern="^(ask|plan|do)$")
+    slotId: int | None = None

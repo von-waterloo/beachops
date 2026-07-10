@@ -308,6 +308,8 @@ function ControlRoom({
                     dashboard.updateRepository(repoId, input)
                   }
                   onActivateSelfImprove={() => dashboard.activateSelfImprove()}
+                  onUpdateAgent={(slotId, input) => dashboard.updateAgent(slotId, input)}
+                  onSubmitPrompt={(input) => dashboard.submitPrompt(input)}
                 />
               </>
             ) : (
@@ -330,6 +332,8 @@ function ControlRoom({
                   dashboard.updateRepository(repoId, input)
                 }
                 onActivateSelfImprove={() => dashboard.activateSelfImprove()}
+                onUpdateAgent={(slotId, input) => dashboard.updateAgent(slotId, input)}
+                onSubmitPrompt={(input) => dashboard.submitPrompt(input)}
               />
             )}
           </motion.div>

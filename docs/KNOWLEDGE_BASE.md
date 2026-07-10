@@ -169,7 +169,16 @@ Legacy без Docker: `.\scripts\install-windows-worker.ps1 -Native` (Scheduled 
 
 Jobs берут runtime со **слота** (`user_agent_slots.runtime` + `local_path`).
 По умолчанию слоты — `cloud`. Для Windows-слота задайте путь **внутри
-контейнера worker** (том `BEACHOPS_HOST_WORK_ROOT` → `/host-work`):
+контейнера worker** (том `BEACHOPS_HOST_WORK_ROOT` → `/host-work`).
+
+**Через Mini App (без SQL):** вкладка **Голос** → блок «Управление» вверху
+ленты → переключатель Cloud/Windows + поле пути → «Сохранить». Тот же блок
+отправляет `/ask` · `/plan` · `/do` прямо со слота (кнопка «Отправить»),
+без похода в Telegram. Под капотом: `PATCH /api/agents/{slot_id}`
+(`runtime`, `localPath`, `preferredWorkerId`) и `POST /api/prompts`
+(`prompt`, `mode`, `slotId`) — см. [ARCHITECTURE.md](./ARCHITECTURE.md).
+
+**Через SQL (fallback / bulk):**
 
 ```sql
 UPDATE user_agent_slots
@@ -178,10 +187,16 @@ SET runtime = 'windows',
 WHERE id = <slot_id> AND tg_user_id = <ваш_tg_id>;
 ```
 
-`local_path` обязателен: без него Windows-job завершится с ошибкой.
+`local_path` обязателен: без него Windows-job завершится с ошибкой (и
+`PATCH /api/agents/{slot_id}` вернёт 400, если его не передать).
 Дальше обычные `/ask` · `/plan` · `/do` · голос — уйдут на ПК, не в ARQ cloud.
 
-Вернуть в облако: `runtime = 'cloud'`, `local_path = NULL`.
+Вернуть в облако: `runtime = 'cloud'`, `local_path = NULL` (или переключатель
+**Cloud** в Mini App — путь очистится автоматически).
+
+Эфир конкретного прогона (транскрипт ответов агента) виден в Mini App под
+блоком «Управление», как только задача выбрана — `GET /api/jobs/{job_id}/stream`
+собирает текст из `beachops_run_events` (`assistantText` / `finalText` / `text`).
 
 ---
 

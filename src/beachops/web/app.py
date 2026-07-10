@@ -34,6 +34,7 @@ from beachops.domain.security import (
     JobStatus,
     Role,
 )
+from beachops.services.agent_slots import RunContext
 from beachops.services.approval_actions import approve_job, reject_job, request_revision
 from beachops.services.durable_dispatch import dispatch_prompt
 from beachops.services.logging_config import (
@@ -48,9 +49,11 @@ from beachops.web.passkey_auth import (
     router as passkey_auth_router,
 )
 from beachops.web.schemas import (
+    AgentUpdateRequest,
     DecisionRequest,
     DeployDispatchRequest,
     PanicRequest,
+    PromptRequest,
     RepoCreateRequest,
     RepoUpdateRequest,
 )
@@ -415,6 +418,122 @@ def create_app() -> FastAPI:
             "selfImprove": _self_improve_json(context.settings, user_repos),
         }
 
+    @app.patch("/api/agents/{slot_id}")
+    async def update_agent(
+        slot_id: int,
+        body: AgentUpdateRequest,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        """Owner/operator: switch a slot between cloud and Windows runtimes."""
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        if role not in {Role.OPERATOR, Role.OWNER}:
+            raise HTTPException(status_code=403, detail="operator role required")
+
+        current = await context.agent_slots.get_slot(principal.user_id, slot_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="agent slot not found")
+
+        fields = body.model_fields_set
+        local_path = body.localPath.strip() if body.localPath else body.localPath
+        try:
+            slot = await context.agent_slots.configure_execution(
+                principal.user_id,
+                slot_id,
+                runtime=body.runtime,
+                local_path=local_path if "localPath" in fields else ...,
+                preferred_worker_id=(
+                    body.preferredWorkerId if "preferredWorkerId" in fields else ...
+                ),
+                make_active=bool(body.makeActive),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if slot is None:
+            raise HTTPException(status_code=404, detail="agent slot not found")
+        await context.hot_cache.bump_dashboard_generation()
+        logger.info(
+            "Agent slot execution updated",
+            extra={
+                "user_id": principal.user_id,
+                "action": "update_agent",
+            },
+        )
+        return _agent_slot_json(slot)
+
+    @app.post("/api/prompts")
+    async def submit_prompt(
+        body: PromptRequest,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+        idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    ) -> dict:
+        """Operator/owner: dispatch an ask/plan/do prompt from the Mini App."""
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        if role not in {Role.OPERATOR, Role.OWNER}:
+            raise HTTPException(status_code=403, detail="operator role required")
+        if not idempotency_key or not await context.idempotency.claim(
+            "prompt", idempotency_key, ttl_sec=3600
+        ):
+            raise HTTPException(status_code=409, detail="duplicate or missing idempotency key")
+
+        try:
+            mode = UserMode(body.mode)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid mode") from exc
+        if mode == UserMode.DO and role != Role.OWNER:
+            raise HTTPException(status_code=403, detail="owner role required for /do")
+
+        if body.slotId is not None:
+            slot = await context.agent_slots.get_slot(principal.user_id, body.slotId)
+            if slot is None:
+                raise HTTPException(status_code=404, detail="agent slot not found")
+            if slot.is_active:
+                run_context = await context.agent_slots.get_run_context(principal.user_id)
+            else:
+                repo = (
+                    await context.repos.get_by_id(principal.user_id, slot.repo_id)
+                    if slot.repo_id is not None
+                    else None
+                )
+                if repo is None:
+                    repo = await context.repos.resolve_active_repo(
+                        principal.user_id, context.settings
+                    )
+                run_context = (
+                    RunContext(slot=slot, repo=repo) if repo is not None else None
+                )
+        else:
+            run_context = await context.agent_slots.get_run_context(principal.user_id)
+        if run_context is None:
+            raise HTTPException(status_code=400, detail="no repository configured")
+
+        if run_context.slot.runtime == "windows" and not run_context.slot.local_path:
+            raise HTTPException(
+                status_code=400,
+                detail="local_path is required for the windows runtime",
+            )
+
+        dispatched = await dispatch_prompt(
+            context,
+            actor_id=principal.user_id,
+            prompt=body.prompt,
+            mode=mode,
+            run_context=run_context,
+            idempotency_key=idempotency_key,
+        )
+        await context.agent_slots.maybe_autoname_active(principal.user_id, body.prompt)
+        await context.hot_cache.bump_dashboard_generation()
+        if not dispatched.enqueued:
+            return {
+                "job": _job_json(dispatched.job),
+                "enqueued": False,
+                "reason": dispatched.reason,
+            }
+        return {"job": _job_json(dispatched.job), "enqueued": True}
+
     @app.get("/api/jobs/{job_id}/events")
     async def job_events(
         job_id: UUID,
@@ -443,6 +562,25 @@ def create_app() -> FastAPI:
             }
             for item in events
         ]
+
+    @app.get("/api/jobs/{job_id}/stream")
+    async def job_stream(
+        job_id: UUID,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+        after: int = 0,
+    ) -> dict:
+        """Transcript of a run assembled from `beachops_run_events`."""
+        context = _context(request)
+        job = await context.jobs.get(principal.user_id, job_id)
+        if job is None and context.settings.role_for(principal.user_id) != Role.OWNER:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job is None:
+            job = await context.jobs.get_internal(job_id)
+            if job is None:
+                raise HTTPException(status_code=404, detail="job not found")
+        events = await context.run_events.list_for_job(job_id, after_id=max(0, after))
+        return _assemble_transcript(job, events)
 
     @app.post("/api/approvals/{approval_id}/decision")
     async def decide_approval(
@@ -1225,6 +1363,58 @@ def _agent_slot_json(slot) -> dict:
         "repository": slot.repo_alias,
         "cursorAgentId": slot.cursor_agent_id,
         "cursorUrl": cursor_agent_url(slot.cursor_agent_id),
+        "localPath": slot.local_path,
+        "preferredWorkerId": slot.preferred_worker_id,
+    }
+
+
+def _run_stream_event_json(row: dict) -> dict:
+    payload = row.get("payload") or {}
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    text = (
+        payload.get("finalText")
+        or payload.get("assistantText")
+        or payload.get("text")
+        or None
+    )
+    return {
+        "id": str(row["id"]),
+        "eventType": row["event_type"],
+        "text": text,
+        "createdAt": row["created_at"].isoformat(),
+    }
+
+
+_TERMINAL_STREAM_EVENTS = {
+    "run.finished",
+    "run.failed",
+    "worker.finished",
+    "worker.failed",
+}
+
+
+def _assemble_transcript(job, events: list[dict]) -> dict:
+    """Build a job transcript snapshot from raw `beachops_run_events` rows."""
+    stream_events = [_run_stream_event_json(row) for row in events]
+    with_text = [event for event in stream_events if event["text"]]
+    final_event = next(
+        (
+            event
+            for event in reversed(with_text)
+            if event["eventType"] in _TERMINAL_STREAM_EVENTS
+        ),
+        None,
+    )
+    latest_event = with_text[-1] if with_text else None
+    status = job.status.value if hasattr(job.status, "value") else str(job.status)
+    return {
+        "jobId": str(job.id),
+        "status": status,
+        "events": stream_events,
+        "lastEventId": stream_events[-1]["id"] if stream_events else "0",
+        "latestText": latest_event["text"] if latest_event else None,
+        "finalText": final_event["text"] if final_event else None,
     }
 
 

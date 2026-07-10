@@ -74,6 +74,8 @@ export interface AgentSlot {
   repository?: string | null
   cursorAgentId?: string | null
   cursorUrl?: string | null
+  localPath?: string | null
+  preferredWorkerId?: string | null
 }
 
 export interface Usage {
@@ -90,6 +92,23 @@ export interface WorkerNode {
   platform: string
   status: string
   lastHeartbeatAt?: string | null
+  capabilities?: Record<string, unknown>
+}
+
+export interface StreamEvent {
+  id: string
+  eventType: string
+  text: string | null
+  createdAt: string
+}
+
+export interface JobStreamSnapshot {
+  jobId: string
+  status: JobStatus | string
+  events: StreamEvent[]
+  lastEventId: string
+  latestText: string | null
+  finalText: string | null
 }
 
 export interface QueueSnapshot {

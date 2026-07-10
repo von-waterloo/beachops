@@ -122,7 +122,10 @@ Windows-агенты: слот с `runtime=windows` + worker на ПК
 В чате: голос транскрибируется и проходит обычную безопасную plan-first схему.
 В Mini App: realtime transcript, текстовый composer, animated waveform/orb,
 Cloud/Windows agent cards со ссылкой «Открыть в Cursor», вкладка **Репо** (добавить URL +
-базовая ветка), live queue, approvals, timeline и worker health.
+базовая ветка), live queue, approvals, timeline и worker health. Блок
+**Управление** на вкладке «Голос» переключает слот Cloud ↔ Windows, задаёт
+путь к репо и отправляет `/ask` · `/plan` · `/do` без SQL и без Telegram;
+рядом — эфир выбранной задачи (транскрипт ответов агента).
 Голос не может approve/panic/unpanic.
 
 ### Вход в Mini App

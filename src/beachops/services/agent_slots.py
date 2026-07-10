@@ -156,6 +156,43 @@ class AgentSlotService:
             return None
         return await self._slots.get_by_id(tg_user_id, slot_id)
 
+    async def configure_execution(
+        self,
+        tg_user_id: int,
+        slot_id: int,
+        *,
+        runtime: str | None = None,
+        local_path: str | None | object = ...,
+        preferred_worker_id: str | None | object = ...,
+        make_active: bool = False,
+    ) -> AgentSlot | None:
+        """Validate and persist runtime/local_path for a slot from the Mini App."""
+        if runtime is not None and runtime not in {"cloud", "windows"}:
+            raise ValueError("runtime must be 'cloud' or 'windows'")
+
+        if runtime == "windows":
+            resolved_path = local_path
+            if resolved_path is ...:
+                current = await self._slots.get_by_id(tg_user_id, slot_id)
+                resolved_path = current.local_path if current else None
+            if not resolved_path or not str(resolved_path).strip():
+                raise ValueError("local_path is required for the windows runtime")
+
+        slot = await self._slots.update_execution(
+            tg_user_id,
+            slot_id,
+            runtime=runtime,
+            local_path=local_path,
+            preferred_worker_id=preferred_worker_id,
+        )
+        if slot is None:
+            return None
+        if make_active:
+            activated = await self.activate_slot(tg_user_id, slot_id)
+            if activated is not None:
+                slot = activated
+        return slot
+
     async def maybe_autoname_active(self, tg_user_id: int, prompt: str) -> None:
         slot = await self.get_active(tg_user_id)
         if slot is None or not is_auto_slot_label(slot.label):
