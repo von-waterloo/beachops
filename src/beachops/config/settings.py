@@ -91,10 +91,18 @@ class Settings(BaseSettings):
     voice_realtime_model: str = Field(
         default="gpt-realtime-whisper", alias="VOICE_REALTIME_MODEL"
     )
-    voice_tts_model: str = Field(default="gpt-4o-mini-tts", alias="VOICE_TTS_MODEL")
+    # Nested STT inside Realtime transcription session (Dec 2025 snapshot).
+    voice_input_transcribe_model: str = Field(
+        default="gpt-4o-mini-transcribe-2025-12-15",
+        alias="VOICE_INPUT_TRANSCRIBE_MODEL",
+    )
+    # Pin Dec 2025 TTS snapshot (alias gpt-4o-mini-tts → same; pin for stability).
+    voice_tts_model: str = Field(
+        default="gpt-4o-mini-tts-2025-12-15", alias="VOICE_TTS_MODEL"
+    )
     # marin / cedar = best quality per OpenAI; cedar reads more "commander".
     voice_tts_voice: str = Field(default="cedar", alias="VOICE_TTS_VOICE")
-    # Empty = built-in Spartan orchestrator instructions (domain/voice_persona.py).
+    # Empty = built-in BeachOps orchestrator instructions (domain/voice_persona.py).
     voice_tts_instructions: str = Field(default="", alias="VOICE_TTS_INSTRUCTIONS")
     voice_spoken_max_chars: int = Field(
         default=900, alias="VOICE_SPOKEN_MAX_CHARS", ge=120, le=4000
@@ -113,7 +121,9 @@ class Settings(BaseSettings):
     )
     workspace_path: Path = Field(default=Path("./data/workspace"), alias="WORKSPACE_PATH")
     cursor_model: str = Field(default="composer-2.5", alias="CURSOR_MODEL")
-    transcribe_model: str = Field(default="gpt-4o-mini-transcribe", alias="TRANSCRIBE_MODEL")
+    transcribe_model: str = Field(
+        default="gpt-4o-mini-transcribe-2025-12-15", alias="TRANSCRIBE_MODEL"
+    )
     embedding_model: str = Field(default="text-embedding-3-small", alias="EMBEDDING_MODEL")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     default_branch: str = Field(default="dev", alias="DEFAULT_BRANCH")

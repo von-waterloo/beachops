@@ -69,12 +69,13 @@ Docker compose переопределяет `DATABASE_URL` на `@postgres:5432`
 
 | Переменная | По умолчанию | Описание |
 |------------|--------------|----------|
-| `TRANSCRIBE_MODEL` | `gpt-4o-mini-transcribe` | STT для голосовых |
+| `TRANSCRIBE_MODEL` | `gpt-4o-mini-transcribe-2025-12-15` | STT для голосовых Telegram |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | векторы памяти (1536 dim) |
-| `VOICE_REALTIME_MODEL` | `gpt-realtime-whisper` | partial/final transcript Mini App |
-| `VOICE_TTS_MODEL` | `gpt-4o-mini-tts` | голосовой ответ (steerable TTS) |
+| `VOICE_REALTIME_MODEL` | `gpt-realtime-whisper` | Realtime-сессия Mini App |
+| `VOICE_INPUT_TRANSCRIBE_MODEL` | `gpt-4o-mini-transcribe-2025-12-15` | STT внутри Realtime-сессии |
+| `VOICE_TTS_MODEL` | `gpt-4o-mini-tts-2025-12-15` | голосовой ответ (steerable TTS) |
 | `VOICE_TTS_VOICE` | `cedar` | голос; `cedar`/`marin` — лучшее качество OpenAI |
-| `VOICE_TTS_INSTRUCTIONS` | Spartan (в коде) | стиль подачи; пусто = встроенный спартанский TOV |
+| `VOICE_TTS_INSTRUCTIONS` | laconic (в коде) | стиль подачи; пусто = встроенный TOV |
 | `VOICE_SPOKEN_MAX_CHARS` | `900` | лимит символов после сжатия ответа в брифинг |
 | `VOICE_MAX_SESSION_SEC` | `300` | max voice session |
 

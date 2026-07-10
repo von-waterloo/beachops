@@ -11,8 +11,8 @@ import {
 import { initialVoiceState, voiceReducer } from './state'
 
 const MAX_RECORDING_MS = 60_000
-const AUTH_FAILED = 'Session expired or invalid'
-const RATE_LIMITED = 'Voice session rate limited — try again shortly'
+const AUTH_FAILED = 'Сессия истекла или недействительна'
+const RATE_LIMITED = 'Слишком много голосовых сессий — подождите немного'
 
 interface VoiceEvent {
   type: string
@@ -25,16 +25,16 @@ interface VoiceEvent {
 }
 
 const VOICE_ERROR_MESSAGES: Record<string, string> = {
-  provider_unavailable: 'Voice service unavailable',
-  chunk_too_large: 'Audio chunk too large',
-  session_limit: 'Voice session limit reached',
-  invalid_event: 'Invalid voice event',
-  invalid_transcript: 'Transcript is empty or too long',
-  job_missing: 'Task disappeared',
-  missing_run_id: 'Task finished without a run id',
-  memory_missing: 'Task result is not ready yet',
-  no_repository: 'Select a repository first',
-  dispatch_blocked: 'Request blocked',
+  provider_unavailable: 'Голосовой сервис недоступен',
+  chunk_too_large: 'Слишком большой аудио-чанк',
+  session_limit: 'Лимит голосовой сессии исчерпан',
+  invalid_event: 'Некорректное голосовое событие',
+  invalid_transcript: 'Пустой или слишком длинный транскрипт',
+  job_missing: 'Задача исчезла',
+  missing_run_id: 'Задача завершилась без run id',
+  memory_missing: 'Результат задачи ещё не готов',
+  no_repository: 'Сначала выберите репозиторий',
+  dispatch_blocked: 'Запрос заблокирован политикой',
 }
 
 function voiceErrorMessage(event: VoiceEvent): string {
@@ -42,8 +42,8 @@ function voiceErrorMessage(event: VoiceEvent): string {
   if (event.code && VOICE_ERROR_MESSAGES[event.code]) {
     return VOICE_ERROR_MESSAGES[event.code]
   }
-  if (event.code) return `Voice error: ${event.code}`
-  return 'Voice service unavailable'
+  if (event.code) return `Ошибка голоса: ${event.code}`
+  return 'Голосовой сервис недоступен'
 }
 
 export function useVoiceSession() {
@@ -183,7 +183,7 @@ export function useVoiceSession() {
       try {
         handleServerEvent(JSON.parse(message.data) as VoiceEvent)
       } catch {
-        dispatch({ type: 'FAIL', message: 'Received an invalid voice event' })
+        dispatch({ type: 'FAIL', message: 'Получено некорректное голосовое событие' })
       }
     }
     socket.onerror = () => socket.close()

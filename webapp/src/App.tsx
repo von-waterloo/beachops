@@ -11,6 +11,7 @@ import {
   Monitor,
   ShieldCheck,
   Siren,
+  Sparkles,
   Volume2,
   VolumeX,
 } from 'lucide-react'
@@ -39,7 +40,7 @@ const tabs: Array<{ id: TabId; label: string; icon: typeof LayoutDashboard }> = 
   { id: 'voice', label: 'Голос', icon: LayoutDashboard },
   { id: 'active', label: 'Актив', icon: Activity },
   { id: 'history', label: 'Лента', icon: Clock3 },
-  { id: 'approvals', label: 'Решения', icon: ShieldCheck },
+  { id: 'approvals', label: 'Пульт', icon: Sparkles },
   { id: 'repositories', label: 'Репо', icon: GitBranch },
 ]
 

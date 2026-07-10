@@ -22,12 +22,12 @@ import type { Event, Job } from '../types/api'
 import { runtimeLabel, statusLabel } from '../lib/uiCopy'
 
 const phaseLabels: Record<VoicePhase, string> = {
-  idle: 'На посту',
+  idle: 'Готов',
   listening: 'Слушаю',
   transcribing: 'Разбираю',
   confirming: 'Подтверди',
   planning: 'Строю план',
-  speaking: 'Брифинг',
+  speaking: 'Отвечаю',
   error: 'Сбой',
 }
 
@@ -234,14 +234,14 @@ export function VoiceConsole({
 
       {showComposer && (
         <div className="composer-card">
-          <label htmlFor="voice-composer">Приказ</label>
+          <label htmlFor="voice-composer">Задача</label>
           <div className="composer-row">
             <input
               id="voice-composer"
               type="text"
               value={composer}
               maxLength={4000}
-              placeholder="Коротко. Что сделать."
+              placeholder="Коротко: что сделать"
               onChange={(event) => setComposer(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {

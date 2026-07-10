@@ -22,5 +22,6 @@ def test_spoken_briefing_respects_max_chars_at_sentence() -> None:
 
 def test_spartan_instructions_are_laconic() -> None:
     lower = SPARTAN_TTS_INSTRUCTIONS.lower()
-    assert "spartan" in lower
+    assert "laconic" in lower or "spartan" in lower or "calm" in lower
     assert "cheerfulness" in lower or "filler" in lower
+    assert "war-room" not in lower and "war room" not in lower

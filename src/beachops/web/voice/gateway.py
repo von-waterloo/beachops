@@ -33,11 +33,13 @@ class RealtimeVoiceGateway:
         *,
         api_key: str,
         model: str = "gpt-realtime-whisper",
+        input_transcribe_model: str = "gpt-4o-mini-transcribe-2025-12-15",
         language: str = "ru",
         limits: VoiceGatewayLimits | None = None,
     ) -> None:
         self._client = AsyncOpenAI(api_key=api_key)
         self._model = model
+        self._input_transcribe_model = input_transcribe_model
         self._language = language
         self._limits = limits or VoiceGatewayLimits()
 
@@ -75,7 +77,7 @@ class RealtimeVoiceGateway:
                             "format": {"type": "audio/pcm", "rate": 24000},
                             "noise_reduction": {"type": "near_field"},
                             "transcription": {
-                                "model": self._model,
+                                "model": self._input_transcribe_model,
                                 "delay": "minimal",
                                 "language": self._language,
                             },
@@ -107,7 +109,7 @@ class RealtimeVoiceGateway:
                                 {
                                     "type": "error",
                                     "code": "chunk_too_large",
-                                    "message": "Audio chunk too large",
+                                    "message": "Слишком большой аудио-чанк",
                                 }
                             )
                             continue
@@ -124,7 +126,7 @@ class RealtimeVoiceGateway:
                                 {
                                     "type": "error",
                                     "code": "session_limit",
-                                    "message": "Voice session limit reached",
+                                    "message": "Лимит голосовой сессии исчерпан",
                                 }
                             )
                             await websocket.close(code=1009)
@@ -146,7 +148,7 @@ class RealtimeVoiceGateway:
                             {
                                 "type": "error",
                                 "code": "invalid_event",
-                                "message": "Invalid voice event",
+                                "message": "Некорректное голосовое событие",
                             }
                         )
                         continue
@@ -167,7 +169,7 @@ class RealtimeVoiceGateway:
                                 {
                                     "type": "error",
                                     "code": "invalid_transcript",
-                                    "message": "Transcript is empty or too long",
+                                    "message": "Пустой или слишком длинный транскрипт",
                                 }
                             )
                             continue

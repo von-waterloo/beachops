@@ -185,6 +185,23 @@ class AgentSlotRepository:
                 repo_id,
             )
 
+    async def rebind_repo(self, slot_id: int, repo_id: int) -> None:
+        """Point slot at a different repo; drop Cursor agent (repo-bound)."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE user_agent_slots
+                SET repo_id = $2,
+                    cursor_agent_id = NULL,
+                    cursor_token_key = NULL,
+                    active_run_id = NULL,
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                slot_id,
+                repo_id,
+            )
+
     async def update_label(self, tg_user_id: int, slot_id: int, label: str) -> bool:
         async with self._pool.acquire() as conn:
             result = await conn.execute(

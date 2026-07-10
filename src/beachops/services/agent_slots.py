@@ -110,10 +110,15 @@ class AgentSlotService:
         return RunContext(slot=slot, repo=repo)
 
     async def sync_active_slot_repo(self, tg_user_id: int, repo: RepoConfig) -> None:
-        """After manual repo switch: update empty active slot to new repo."""
+        """After manual repo switch: bind active slot to the new repo.
+
+        Cursor agents are repo-scoped — if the slot already had an agent on
+        another repo, clear it so the next run creates a fresh agent.
+        """
         slot = await self.ensure_default_slot(tg_user_id)
-        if slot.cursor_agent_id is None:
-            await self._slots.update_repo_id(slot.id, repo.id)
+        if slot.repo_id == repo.id:
+            return
+        await self._slots.rebind_repo(slot.id, repo.id)
 
     async def update_cursor_agent(
         self,

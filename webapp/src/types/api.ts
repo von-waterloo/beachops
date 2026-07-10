@@ -91,6 +91,12 @@ export interface QueueSnapshot {
   total?: number
 }
 
+export interface SelfImproveInfo {
+  enabled: boolean
+  repoUrl?: string | null
+  branches: string[]
+}
+
 export interface DashboardSnapshot {
   jobs: Job[]
   events: Event[]
@@ -103,6 +109,7 @@ export interface DashboardSnapshot {
   defaultBranch?: string
   workers: WorkerNode[]
   queue: QueueSnapshot
+  selfImprove?: SelfImproveInfo
 }
 
 export function isActiveJobStatus(status: JobStatus): boolean {

@@ -19,10 +19,18 @@ import {
   RotateCcw,
   ShieldCheck,
   X,
+  Zap,
 } from 'lucide-react'
 import type { AgentSlot, DashboardSnapshot, Event, Job, WorkerNode } from '../types/api'
 import { isActiveJobStatus } from '../types/api'
 import { feedback } from '../lib/feedback'
+import {
+  MODE_CAPABILITIES,
+  OPS_CAPABILITIES,
+  OWNER_CAPABILITIES,
+  selfImproveCopy,
+  type CapabilityItem,
+} from '../lib/capabilities'
 import {
   matchesRuntimeFilter,
   RUNTIME_FILTER_LABELS,
@@ -325,6 +333,105 @@ function ApprovalActions({
   )
 }
 
+function CapabilityCard({ item }: { item: CapabilityItem }) {
+  return (
+    <article className="capability-card">
+      <div className="card-topline">
+        <strong>{item.title}</strong>
+        <code>{item.command}</code>
+      </div>
+      <p>{item.copy}</p>
+    </article>
+  )
+}
+
+function CapabilitiesMap({ data }: { data: DashboardSnapshot }) {
+  const isOwner = data.role.toLowerCase() === 'owner'
+  const selfImprove = selfImproveCopy(
+    Boolean(data.selfImprove?.enabled),
+    data.selfImprove?.branches ?? ['dev'],
+  )
+  return (
+    <div className="capability-stack">
+      <Section eyebrow="Режимы" title="Как отдавать задачи">
+        <div className="capability-grid">
+          {MODE_CAPABILITIES.map((item) => (
+            <CapabilityCard key={item.id} item={item} />
+          ))}
+        </div>
+      </Section>
+      <Section eyebrow="Операции" title="Агенты, репо, память">
+        <div className="capability-grid">
+          {OPS_CAPABILITIES.map((item) => (
+            <CapabilityCard key={item.id} item={item} />
+          ))}
+        </div>
+      </Section>
+      {isOwner ? (
+        <Section eyebrow="Владелец" title="Контроль и откат">
+          <div className="capability-grid">
+            {OWNER_CAPABILITIES.map((item) => (
+              <CapabilityCard key={item.id} item={item} />
+            ))}
+            <CapabilityCard item={selfImprove} />
+          </div>
+        </Section>
+      ) : (
+        <Section eyebrow="BeachOps" title="Self-improve">
+          <div className="capability-grid">
+            <CapabilityCard item={selfImprove} />
+          </div>
+        </Section>
+      )}
+    </div>
+  )
+}
+
+function ApprovalsList({
+  approvals,
+  role,
+  pendingIds,
+  act,
+  compact = false,
+}: {
+  approvals: DashboardSnapshot['approvals']
+  role: string
+  pendingIds: Set<string>
+  act: (approvalId: string, decision: Decision, revision?: string) => void
+  compact?: boolean
+}) {
+  const items = compact ? approvals.slice(0, 4) : approvals
+  return (
+    <div className="card-list">
+      {items.map((approval) => (
+        <article className="approval-card" key={approval.id}>
+          <div className="card-topline">
+            <span className={`risk risk-${approval.risk}`}>
+              {approval.risk === 'high' ? <AlertTriangle size={13} /> : <ShieldCheck size={13} />}
+              {riskLabel(approval.risk)}
+            </span>
+            <time>{relativeTimeRu(approval.requestedAt)}</time>
+          </div>
+          <h2>{approval.title}</h2>
+          <p>{approval.repository ?? 'Защищённая операция'}</p>
+          {role.toLowerCase() === 'owner' && (
+            <ApprovalActions
+              pending={pendingIds.has(approval.id)}
+              onApprove={() => act(approval.id, 'approve')}
+              onRevise={() => act(
+                approval.id,
+                'revision',
+                'Проверь результат и исправь в рамках одобренного scope.',
+              )}
+              onReject={() => act(approval.id, 'reject')}
+            />
+          )}
+        </article>
+      ))}
+    </div>
+  )
+}
+
 function TimelineList({ events }: { events: Event[] }) {
   if (!events.length) {
     return (
@@ -416,7 +523,7 @@ function Overview({
         </button>
         <button type="button" onClick={() => onRuntimeFilterChange?.('all', 'approvals')}>
           <strong>{data.approvals.length}</strong>
-          <span>Решения</span>
+          <span>Approve</span>
         </button>
       </div>
 
@@ -510,42 +617,19 @@ function Overview({
         )}
       </Section>
 
-      <Section eyebrow="Решения" title="Нужен разбор">
-        {data.approvals.length ? (
-          <div className="card-list">
-            {data.approvals.slice(0, 4).map((approval) => (
-              <article className="approval-card" key={approval.id}>
-                <div className="card-topline">
-                  <span className={`risk risk-${approval.risk}`}>
-                    {approval.risk === 'high' ? <AlertTriangle size={13} /> : <ShieldCheck size={13} />}
-                    {riskLabel(approval.risk)}
-                  </span>
-                  <time>{relativeTimeRu(approval.requestedAt)}</time>
-                </div>
-                <h2>{approval.title}</h2>
-                {data.role.toLowerCase() === 'owner' && (
-                  <ApprovalActions
-                    pending={pendingIds.has(approval.id)}
-                    onApprove={() => act(approval.id, 'approve')}
-                    onRevise={() => act(
-                      approval.id,
-                      'revision',
-                      'Проверь результат и исправь в рамках одобренного scope.',
-                    )}
-                    onReject={() => act(approval.id, 'reject')}
-                  />
-                )}
-              </article>
-            ))}
-          </div>
-        ) : (
-          <Empty
-            icon={<ShieldCheck />}
-            title="Всё чисто"
-            copy="Нет действий, ждущих вашего решения."
+      {data.approvals.length > 0 && (
+        <Section eyebrow="Approve" title="Ждёт владельца">
+          <ApprovalsList
+            approvals={data.approvals}
+            role={data.role}
+            pendingIds={pendingIds}
+            act={act}
+            compact
           />
-        )}
-      </Section>
+        </Section>
+      )}
+
+      <CapabilitiesMap data={data} />
 
       <Section eyebrow="Лента" title="События прогонов">
         <TimelineList events={timeline} />
@@ -581,7 +665,7 @@ function Overview({
 const PANEL_TITLES: Record<Exclude<TabId, 'voice'>, string> = {
   active: 'Активные задачи',
   history: 'Лента',
-  approvals: 'Решения',
+  approvals: 'Пульт',
   repositories: 'Репозитории',
 }
 
@@ -736,48 +820,35 @@ export function DashboardPanels({
 
       {tab === 'approvals' && (
         <>
-          <div className="locked-notice">
-            <LockKeyhole size={18} />
-            <div>
-              <strong>Решения владельца</strong>
-              <p>Высокий риск подтверждайте осознанно — голос сам не одобрит.</p>
-            </div>
-          </div>
-          {data.approvals.length ? (
-            <div className="card-list">
-              {data.approvals.map((approval) => (
-                <article className="approval-card" key={approval.id}>
-                  <div className="card-topline">
-                    <span className={`risk risk-${approval.risk}`}>
-                      {approval.risk === 'high' ? <AlertTriangle size={13} /> : <ShieldCheck size={13} />}
-                      {riskLabel(approval.risk)}
-                    </span>
-                    <time>{relativeTimeRu(approval.requestedAt)}</time>
-                  </div>
-                  <h2>{approval.title}</h2>
-                  <p>{approval.repository ?? 'Защищённая операция'}</p>
-                  {data.role.toLowerCase() === 'owner' && (
-                    <ApprovalActions
-                      pending={pendingIds.has(approval.id)}
-                      onApprove={() => act(approval.id, 'approve')}
-                      onRevise={() => act(
-                        approval.id,
-                        'revision',
-                        'Проверь результат и исправь в рамках одобренного scope.',
-                      )}
-                      onReject={() => act(approval.id, 'reject')}
-                    />
-                  )}
-                </article>
-              ))}
-            </div>
+          {data.approvals.length > 0 ? (
+            <>
+              <div className="locked-notice">
+                <LockKeyhole size={18} />
+                <div>
+                  <strong>Ждёт вашего approve</strong>
+                  <p>Появляется только после /plan или /task. Голос сам не одобрит.</p>
+                </div>
+              </div>
+              <ApprovalsList
+                approvals={data.approvals}
+                role={data.role}
+                pendingIds={pendingIds}
+                act={act}
+              />
+            </>
           ) : (
-            <Empty
-              icon={<ShieldCheck />}
-              title="Всё чисто"
-              copy="Нет действий, ждущих вашего решения."
-            />
+            <div className="locked-notice soft">
+              <Zap size={18} />
+              <div>
+                <strong>Approve пуст — это нормально</strong>
+                <p>
+                  В /do решения не нужны. Сюда попадают только планы и высокий риск.
+                  Ниже — вся поверхность бота.
+                </p>
+              </div>
+            </div>
           )}
+          <CapabilitiesMap data={data} />
         </>
       )}
 

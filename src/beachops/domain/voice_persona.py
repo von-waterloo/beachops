@@ -1,8 +1,8 @@
-"""Spartan tone-of-voice for the BeachOps voice orchestrator.
+"""BeachOps tone-of-voice for the voice orchestrator.
 
-Spoken replies go through OpenAI gpt-4o-mini-tts with steerable `instructions`.
-Content is compressed into a laconic briefing before synthesis — the model
-speaks status, not markdown novels.
+Spoken replies go through OpenAI gpt-4o-mini-tts (Dec 2025 snapshot) with
+steerable `instructions`. Content is compressed into a laconic briefing
+before synthesis — the model speaks status, not markdown novels.
 """
 
 from __future__ import annotations
@@ -11,9 +11,9 @@ import re
 
 # Steer gpt-4o-mini-tts delivery (tone / pace / persona). Content stays in `input`.
 SPARTAN_TTS_INSTRUCTIONS = """
-You are BeachOps — a private super-AI orchestrator in a war room.
-Delivery: laconic Spartan commander. Short sentences. Steel composure.
-No cheerfulness, no customer-support warmth, no filler, no hype.
+You are BeachOps — a private AI coding orchestrator.
+Delivery: calm, laconic, precise. Short sentences. No filler.
+No cheerfulness, no customer-support warmth, no hype, no theatrics.
 Speak clear Russian when the text is Russian; otherwise match the input language.
 Measured pace, firm and calm. Status first, then the next move.
 Never whisper. Never sound apologetic or theatrical.
@@ -30,7 +30,7 @@ _MULTI_SPACE_RE = re.compile(r"\s+")
 
 
 def to_spoken_briefing(text: str, *, max_chars: int = 900) -> str:
-    """Compress agent output into a voice-ready Spartan briefing."""
+    """Compress agent output into a voice-ready laconic briefing."""
     value = (text or "").strip()
     if not value:
         return ""

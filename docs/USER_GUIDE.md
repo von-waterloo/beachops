@@ -79,7 +79,8 @@ Windows-агенты: слот с `runtime=windows` + worker на ПК
 /repo add alias https://github.com/org/repo [branch]
 ```
 
-При смене репо контекст Cursor **не сбрасывается** — у пустого активного слота обновится привязка к репо.
+При смене репо активный слот **переключается** на новый URL; Cursor-агент
+сбрасывается (новый диалог) — агент привязан к репозиторию.
 
 ## Агенты (несколько сессий Cursor)
 
@@ -119,7 +120,8 @@ Windows-агенты: слот с `runtime=windows` + worker на ПК
 В чате: голос транскрибируется и проходит обычную безопасную plan-first схему.
 В Mini App: realtime transcript, текстовый composer, animated waveform/orb,
 Cloud/Windows agent cards со ссылкой «Открыть в Cursor», вкладка **Репо** (добавить URL +
-базовая ветка), live queue, approvals, timeline и worker health.
+базовая ветка), live queue, вкладка **Пульт** (карта возможностей + approve после
+`/plan`/`/task`), timeline и worker health.
 Голос не может approve/panic/unpanic.
 
 ### Вход в Mini App
@@ -197,7 +199,9 @@ Cloud/Windows agent cards со ссылкой «Открыть в Cursor», вк
 2. Перезапустите стек. Репозиторий попадёт в allowlist автоматически.
 3. `/repo add beachops https://github.com/<you>/beachops` (или alias) → `/plan` / `/task` /
    `/do` как обычно (feature-branch + PR; `main`/`master` protected).
-4. Деплой — как раньше (owner approve / Actions). Плохой релиз: `/rollback` или
+4. В Cursor (аккаунт API-ключа бота) → Settings → GitHub: доступ к форку
+   `von-waterloo/beachops` (или вашему). Без этого Cloud Agent не увидит ветку `dev`.
+5. Деплой — как раньше (owner approve / Actions). Плохой релиз: `/rollback` или
    `/rollback <sha>` → кнопка подтверждения.
 
 Промпт self-improve явно запрещает ломать OWNER allowlist, auth/Passkey и коммитить секреты.

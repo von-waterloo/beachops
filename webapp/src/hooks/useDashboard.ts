@@ -14,6 +14,7 @@ const emptySnapshot: DashboardSnapshot = {
   defaultBranch: 'dev',
   workers: [],
   queue: { pending: 0, running: 0, active: 0, queued: 0, blocked: 0, total: 0 },
+  selfImprove: { enabled: false, branches: ['dev'] },
 }
 
 function normalize(snapshot: Partial<DashboardSnapshot>): DashboardSnapshot {
@@ -32,6 +33,13 @@ function normalize(snapshot: Partial<DashboardSnapshot>): DashboardSnapshot {
     panic: Boolean(snapshot.panic),
     role: snapshot.role ?? 'Operator',
     defaultBranch: snapshot.defaultBranch ?? 'dev',
+    selfImprove: {
+      enabled: Boolean(snapshot.selfImprove?.enabled),
+      repoUrl: snapshot.selfImprove?.repoUrl ?? null,
+      branches: snapshot.selfImprove?.branches?.length
+        ? snapshot.selfImprove.branches
+        : ['dev'],
+    },
     queue: {
       pending: queue?.pending ?? queue?.queued ?? 0,
       running: queue?.running ?? queue?.active ?? 0,

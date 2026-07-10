@@ -204,14 +204,19 @@ def create_app() -> FastAPI:
             if role == Role.OWNER
             else []
         )
+        approval_payload = []
+        for item in approvals:
+            job = await context.jobs.get_internal(item.job_id)
+            approval_payload.append(_approval_json(item, job=job))
         events = await _recent_events(context, principal.user_id, role)
         total_tokens = sum(job.total_tokens or 0 for job in jobs)
         user_repos = await context.repos.list_repos(principal.user_id)
         slots = await context.agent_slots.list_slots(principal.user_id)
+        self_improve_url = context.settings.self_improve_repo_normalized()
         snapshot = {
             "jobs": [_job_json(job) for job in jobs],
             "events": events,
-            "approvals": [_approval_json(item) for item in approvals],
+            "approvals": approval_payload,
             "repositories": [_repo_json(repo) for repo in user_repos],
             "agents": [_agent_slot_json(slot) for slot in slots],
             "usage": {
@@ -229,6 +234,11 @@ def create_app() -> FastAPI:
                 for node in await context.worker_nodes.list_online()
             ],
             "queue": _queue_stats(jobs),
+            "selfImprove": {
+                "enabled": bool(context.settings.self_improve_enabled and self_improve_url),
+                "repoUrl": self_improve_url,
+                "branches": list(context.settings.self_improve_branches),
+            },
         }
         await context.hot_cache.set_dashboard(cache_scope, snapshot)
         return snapshot
@@ -554,6 +564,7 @@ def create_app() -> FastAPI:
         gateway = RealtimeVoiceGateway(
             api_key=context.settings.openai_api_key,
             model=context.settings.voice_realtime_model,
+            input_transcribe_model=context.settings.voice_input_transcribe_model,
             limits=VoiceGatewayLimits(
                 max_session_bytes=24_000
                 * 2
@@ -1137,14 +1148,26 @@ def _queue_stats(jobs) -> dict[str, int]:
     }
 
 
-def _approval_json(approval) -> dict:
+def _approval_json(approval, *, job=None) -> dict:
+    summary = (getattr(job, "summary", None) or "").strip()
+    kind_label = {
+        ApprovalKind.PLAN_EXECUTION: "План → выполнить",
+        ApprovalKind.HIGH_RISK: "Высокий риск",
+        ApprovalKind.RESULT_REVIEW: "Ревью результата",
+        ApprovalKind.DEPLOY: "Деплой",
+        ApprovalKind.MERGE: "Merge",
+    }.get(approval.kind, approval.kind.value)
+    title = summary[:120] if summary else kind_label
+    repo_url = getattr(job, "repository_url", None) or ""
     return {
         "id": str(approval.id),
-        "title": f"{approval.kind.value} · {approval.job_id}",
+        "title": title,
         "risk": "high" if approval.kind != ApprovalKind.PLAN_EXECUTION else "medium",
         "requestedAt": (
             approval.requested_at or datetime.now(timezone.utc)
         ).isoformat(),
+        "repository": repo_url.rsplit("/", 1)[-1] if repo_url else None,
+        "kind": kind_label,
     }
 
 

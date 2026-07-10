@@ -717,5 +717,6 @@ def self_improve_hint(repo_url: str, branches: list[str]) -> str:
         f"Репозиторий: `{repo_url}`\n"
         f"Ветки: {branch_list}\n"
         "Добавьте его через `/repo add`, работайте в plan/do. "
+        "В Cursor (аккаунт API-ключа) нужен GitHub-доступ к этому форку. "
         "После деплоя откат: `/rollback`."
     )

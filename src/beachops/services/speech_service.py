@@ -44,7 +44,7 @@ class SpeechService:
             "input": safe_text,
             "response_format": "pcm",
         }
-        # gpt-4o-mini-tts (and snapshots) accept steerable style instructions.
+        # gpt-4o-mini-tts (+ dated snapshots) accept steerable style instructions.
         if self._instructions and "tts" in self._model:
             create_kwargs["instructions"] = self._instructions
         logger.info(

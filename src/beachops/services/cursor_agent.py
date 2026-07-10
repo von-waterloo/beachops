@@ -155,7 +155,7 @@ class CursorAgentService:
         except CursorAgentError as exc:
             logger.exception("Cursor startup/run error: %s", exc.message)
             return (
-                RunOutcome(state, "error", f"Cursor error: {exc.message}"),
+                RunOutcome(state, "error", _friendly_cursor_error(exc.message)),
                 cursor_agent_id,
             )
 
@@ -461,3 +461,17 @@ class CursorAgentService:
                 state.reasoning_tokens = usage.reasoning_tokens
 
         await on_update(state)
+
+
+def _friendly_cursor_error(message: str) -> str:
+    lower = (message or "").lower()
+    if "failed to verify existence of branch" in lower or (
+        "branch" in lower and "repository" in lower and "verify" in lower
+    ):
+        return (
+            "Cursor не видит ветку репозитория. Проверьте: ветка существует на GitHub; "
+            "у аккаунта CURSOR_API_KEY есть GitHub-доступ к этому репо "
+            "(Cursor → Settings → GitHub). "
+            f"Детали: {message}"
+        )
+    return f"Cursor error: {message}"
