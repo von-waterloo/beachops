@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isFatalVoiceErrorCode,
   shouldReconnectVoice,
   voiceReconnectDelayMs,
   VOICE_RECONNECT_LIMIT,
@@ -55,6 +56,18 @@ describe('shouldReconnectVoice', () => {
     ).toBe(false)
   })
 
+  it('stops when a fatal server error was already observed', () => {
+    expect(
+      shouldReconnectVoice({
+        intentionallyClosed: false,
+        online: true,
+        closeCode: 1006,
+        attempts: 0,
+        fatalFailure: true,
+      }),
+    ).toBe(false)
+  })
+
   it('skips reconnect when closed on purpose or offline', () => {
     expect(
       shouldReconnectVoice({
@@ -75,11 +88,19 @@ describe('shouldReconnectVoice', () => {
   })
 })
 
+describe('isFatalVoiceErrorCode', () => {
+  it('recognizes auth and rate-limit payloads', () => {
+    expect(isFatalVoiceErrorCode('unauthorized')).toBe(true)
+    expect(isFatalVoiceErrorCode('rate_limited')).toBe(true)
+    expect(isFatalVoiceErrorCode('provider_unavailable')).toBe(false)
+  })
+})
+
 describe('voiceReconnectDelayMs', () => {
-  it('uses exponential backoff capped at 8s', () => {
-    expect(voiceReconnectDelayMs(0, 0)).toBe(500)
-    expect(voiceReconnectDelayMs(1, 0)).toBe(1000)
-    expect(voiceReconnectDelayMs(4, 0)).toBe(8000)
-    expect(voiceReconnectDelayMs(10, 0)).toBe(8000)
+  it('uses exponential backoff capped at 12s', () => {
+    expect(voiceReconnectDelayMs(0, 0)).toBe(600)
+    expect(voiceReconnectDelayMs(1, 0)).toBe(1200)
+    expect(voiceReconnectDelayMs(5, 0)).toBe(12_000)
+    expect(voiceReconnectDelayMs(10, 0)).toBe(12_000)
   })
 })

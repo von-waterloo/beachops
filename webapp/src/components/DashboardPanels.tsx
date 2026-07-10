@@ -18,6 +18,7 @@ import {
   RefreshCw,
   RotateCcw,
   ShieldCheck,
+  Sparkles,
   X,
 } from 'lucide-react'
 import type { AgentSlot, DashboardSnapshot, Event, Job, WorkerNode } from '../types/api'
@@ -53,6 +54,7 @@ interface Props {
   onDecision: (approvalId: string, decision: Decision, revision?: string) => Promise<void>
   onAddRepository?: (input: { url: string; branch?: string }) => Promise<void>
   onUpdateRepository?: (repoId: string, input: { branch?: string; makeActive?: boolean }) => Promise<void>
+  onActivateSelfImprove?: () => Promise<void>
 }
 
 function Empty({ icon, title, copy }: { icon: React.ReactNode; title: string; copy: string }) {
@@ -437,13 +439,23 @@ function Overview({
               />
             ))}
           </div>
+        ) : runtimeFilter === 'windows' && data.workers.length > 0 ? (
+          <div className="worker-grid">
+            {data.workers.map((worker) => (
+              <WorkerCard key={worker.id} worker={worker} />
+            ))}
+            <p className="muted-hint">
+              Воркер онлайн, но активных Windows-задач нет. Отправьте задачу боту
+              в Telegram или через голос — она появится здесь.
+            </p>
+          </div>
         ) : (
           <Empty
             icon={<Activity />}
             title="Тихий горизонт"
             copy={
               runtimeFilter === 'windows'
-                ? 'Нет активных Windows-задач. Переключитесь на Cloud или Все.'
+                ? 'Нет активных Windows-задач и онлайн-воркеров.'
                 : runtimeFilter === 'cloud'
                   ? 'Нет активных Cloud-задач. Переключитесь на Windows или Все.'
                   : 'Сейчас нет активных агентов Cloud или Windows.'
@@ -452,15 +464,17 @@ function Overview({
         )}
       </Section>
 
-      {(data.agents?.some((slot) => slot.cursorUrl) ?? false) && (
-        <Section eyebrow="Cursor" title="Открыть чат на компьютере">
+      {(data.agents?.length ?? 0) > 0 && (
+        <Section eyebrow="Чаты Cursor" title="Агенты">
           <div className="agent-grid">
-            {data.agents
-              .filter((slot) => slot.cursorUrl)
-              .map((slot) => (
-                <SlotCard key={slot.id} slot={slot} />
-              ))}
+            {data.agents.map((slot) => (
+              <SlotCard key={slot.id} slot={slot} />
+            ))}
           </div>
+          <p className="muted-hint">
+            Полный диалог Cursor открывается снаружи Mini App — встроенный iframe
+            Cursor не отдаёт. Здесь — слоты и прямые ссылки.
+          </p>
         </Section>
       )}
 
@@ -599,13 +613,36 @@ export function DashboardPanels({
   onDecision,
   onAddRepository,
   onUpdateRepository,
+  onActivateSelfImprove,
 }: Props) {
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
   const [repoUrl, setRepoUrl] = useState('')
   const [repoBranch, setRepoBranch] = useState(data.defaultBranch || 'dev')
   const [repoBusy, setRepoBusy] = useState(false)
   const [repoError, setRepoError] = useState<string | null>(null)
+  const [selfImproveBusy, setSelfImproveBusy] = useState(false)
   const [editingBranch, setEditingBranch] = useState<Record<string, string>>({})
+  const selfImprove = data.selfImprove
+  const canActivateSelfImprove = Boolean(
+    onActivateSelfImprove
+    && selfImprove?.available
+    && !selfImprove.active
+    && data.role === 'owner',
+  )
+
+  const activateSelfImprove = () => {
+    if (!onActivateSelfImprove || selfImproveBusy) return
+    setSelfImproveBusy(true)
+    setRepoError(null)
+    feedback('tap')
+    void onActivateSelfImprove()
+      .then(() => feedback('success'))
+      .catch((err: unknown) => {
+        setRepoError(err instanceof Error ? err.message : 'Не удалось включить самосовершенствование')
+        feedback('error')
+      })
+      .finally(() => setSelfImproveBusy(false))
+  }
 
   const act = (approvalId: string, decision: Decision, revision?: string) => {
     if (pendingIds.has(approvalId)) return
@@ -661,6 +698,31 @@ export function DashboardPanels({
     return (
       <section className="panel-page overview-page">
         {error && <div className="inline-error" role="alert">{error}</div>}
+        {selfImprove?.active ? (
+          <div className="self-improve-banner is-active" role="status">
+            <Sparkles size={16} />
+            <div>
+              <strong>Самосовершенствование активно</strong>
+              <span>Голос и plan/do идут в репозиторий BeachOps.</span>
+            </div>
+          </div>
+        ) : canActivateSelfImprove ? (
+          <button
+            type="button"
+            className="self-improve-banner"
+            onClick={() => {
+              feedback('select')
+              activateSelfImprove()
+            }}
+            disabled={selfImproveBusy}
+          >
+            <Sparkles size={16} />
+            <div>
+              <strong>Включить самосовершенствование</strong>
+              <span>Бот будет читать и править свой репозиторий BeachOps.</span>
+            </div>
+          </button>
+        ) : null}
         <Overview
           data={data}
           liveEvents={liveEvents}
@@ -714,18 +776,41 @@ export function DashboardPanels({
                 />
               ))}
             </div>
+          ) : runtimeFilter === 'windows' && data.workers.length > 0 ? (
+            <>
+              <div className="worker-grid">
+                {data.workers.map((worker) => (
+                  <WorkerCard key={worker.id} worker={worker} />
+                ))}
+              </div>
+              <p className="muted-hint">
+                Метрика Windows раньше показывала онлайн-воркеры, а не задачи.
+                Сейчас здесь узлы онлайн. Задачу создайте в Telegram-боте
+                (текст / пересылка / голос) или через Mini App.
+              </p>
+            </>
           ) : (
             <Empty
               icon={<Clock3 />}
               title="Тихий горизонт"
               copy={
                 runtimeFilter === 'windows'
-                  ? 'Нет активных Windows-задач.'
+                  ? 'Нет активных Windows-задач и онлайн-воркеров.'
                   : runtimeFilter === 'cloud'
                     ? 'Нет активных Cloud-задач.'
                     : 'Сейчас нет активных задач.'
               }
             />
+          )}
+
+          {(data.agents?.length ?? 0) > 0 && (
+            <Section eyebrow="Чаты" title="Слоты агентов">
+              <div className="agent-grid">
+                {data.agents.map((slot) => (
+                  <SlotCard key={slot.id} slot={slot} />
+                ))}
+              </div>
+            </Section>
           )}
         </>
       )}
@@ -783,6 +868,66 @@ export function DashboardPanels({
 
       {tab === 'repositories' && (
         <>
+          <article className={`self-improve-card${selfImprove?.active ? ' is-active' : ''}`}>
+            <div className="self-improve-mark">
+              <Sparkles size={18} />
+            </div>
+            <div className="self-improve-body">
+              <p className="eyebrow">Режим BeachOps</p>
+              <h2>Самосовершенствование</h2>
+              <p>
+                {selfImprove?.active
+                  ? 'Активно: бот читает и правит свой репозиторий BeachOps (plan/do с усиленным safety-промптом).'
+                  : selfImprove?.available
+                    ? 'Подключите форк BeachOps одним нажатием — дальше голос и /do работают уже по самому боту.'
+                    : 'На этом инстансе режим выключен (SELF_IMPROVE_ENABLED). Owner включает его в .env сервера.'}
+              </p>
+              {selfImprove?.repoUrl && (
+                <small className="self-improve-meta">
+                  {selfImprove.repoUrl}
+                  {selfImprove.branches?.length
+                    ? ` · ${selfImprove.branches.join(', ')}`
+                    : ''}
+                </small>
+              )}
+              <div className="self-improve-actions">
+                {selfImprove?.active ? (
+                  <span className="repo-state ready">Активен</span>
+                ) : canActivateSelfImprove ? (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={selfImproveBusy}
+                    onClick={activateSelfImprove}
+                  >
+                    {selfImproveBusy
+                      ? <Loader2 size={16} className="spin-icon" />
+                      : <Sparkles size={16} />}
+                    Включить
+                  </button>
+                ) : selfImprove?.linked ? (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={!onUpdateRepository || selfImproveBusy}
+                    onClick={() => {
+                      const repo = data.repositories.find((item) => item.selfImprove)
+                      if (!repo || !onUpdateRepository) return
+                      setSelfImproveBusy(true)
+                      feedback('tap')
+                      void onUpdateRepository(repo.id, { makeActive: true })
+                        .then(() => feedback('success'))
+                        .catch(() => feedback('error'))
+                        .finally(() => setSelfImproveBusy(false))
+                    }}
+                  >
+                    Сделать активным
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </article>
+
           <form
             className="repo-add-form"
             onSubmit={(event) => {
@@ -832,14 +977,19 @@ export function DashboardPanels({
                 const draft = editingBranch[repo.id] ?? repo.branch
                 return (
                   <motion.article
-                    className={`repo-card${repo.active ? ' is-active' : ''}`}
+                    className={`repo-card${repo.active ? ' is-active' : ''}${repo.selfImprove ? ' is-self-improve' : ''}`}
                     key={repo.id}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                   >
-                    <div className="repo-mark"><GitBranch size={18} /></div>
+                    <div className="repo-mark">
+                      {repo.selfImprove ? <Sparkles size={18} /> : <GitBranch size={18} />}
+                    </div>
                     <div className="repo-body">
-                      <h2>{repo.name}</h2>
+                      <h2>
+                        {repo.name}
+                        {repo.selfImprove ? <i className="self-improve-pill">self</i> : null}
+                      </h2>
                       <p>{repo.url ?? repo.name}</p>
                       <div className="repo-branch-row">
                         <input

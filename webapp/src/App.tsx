@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   Activity,
+  CircleHelp,
   Clock3,
   Cloud,
   Fingerprint,
@@ -18,10 +19,12 @@ import { AuthScreen } from './components/AuthScreen'
 import { VoiceConsole } from './components/VoiceConsole'
 import { DashboardPanels, type TabId } from './components/DashboardPanels'
 import { ControlRoomHero } from './components/ControlRoomHero'
+import { GuideOverlay, TipRail, type GuideMode } from './components/GuideOverlay'
 import { useAuth } from './hooks/useAuth'
 import { useDashboard } from './hooks/useDashboard'
 import { useJobStream } from './hooks/useJobStream'
 import type { AuthenticatedUser } from './lib/passkeys'
+import { isOnboardingDone } from './lib/onboarding'
 import { roleLabel } from './lib/uiCopy'
 import {
   getTelegramInitData,
@@ -95,6 +98,9 @@ function ControlRoom({
   const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>('all')
   const [focusedJobId, setFocusedJobId] = useState<string | null>(null)
   const [cursorModelKey, setCursorModelKey] = useState(user.cursorModelKey ?? '')
+  const [guideMode, setGuideMode] = useState<GuideMode>(() =>
+    isOnboardingDone() ? null : 'onboarding',
+  )
   const dashboard = useDashboard()
   const [now, setNow] = useState(() => Date.now())
   const [soundMuted, setSoundMutedState] = useState(() => isSoundMuted())
@@ -184,6 +190,18 @@ function ControlRoom({
           <button
             className="auth-icon-button"
             type="button"
+            onClick={() => {
+              feedback('tap')
+              setGuideMode('help')
+            }}
+            title="Справка и типсы"
+            aria-label="Открыть справку"
+          >
+            <CircleHelp size={17} />
+          </button>
+          <button
+            className="auth-icon-button"
+            type="button"
             onClick={toggleSound}
             title={soundMuted ? 'Включить звук и вибрацию' : 'Выключить звук и вибрацию'}
             aria-label={soundMuted ? 'Включить звук и вибрацию' : 'Выключить звук и вибрацию'}
@@ -246,9 +264,12 @@ function ControlRoom({
         pending={pending}
         workersOnline={workersOnline}
         cloudJobs={activeJobs.filter((job) => job.runtime !== 'windows').length}
+        windowsJobs={activeJobs.filter((job) => job.runtime === 'windows').length}
         runtimeFilter={runtimeFilter}
         onSelectFilter={selectFilter}
       />
+
+      <TipRail onOpenHelp={() => setGuideMode('help')} />
 
       <main id="main">
         <AnimatePresence mode="wait" initial={false}>
@@ -286,6 +307,7 @@ function ControlRoom({
                   onUpdateRepository={(repoId, input) =>
                     dashboard.updateRepository(repoId, input)
                   }
+                  onActivateSelfImprove={() => dashboard.activateSelfImprove()}
                 />
               </>
             ) : (
@@ -307,6 +329,7 @@ function ControlRoom({
                 onUpdateRepository={(repoId, input) =>
                   dashboard.updateRepository(repoId, input)
                 }
+                onActivateSelfImprove={() => dashboard.activateSelfImprove()}
               />
             )}
           </motion.div>
@@ -371,6 +394,8 @@ function ControlRoom({
           )
         })}
       </nav>
+
+      <GuideOverlay mode={guideMode} onClose={() => setGuideMode(null)} />
     </div>
   )
 }

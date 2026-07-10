@@ -58,12 +58,40 @@ Docker compose переопределяет `DATABASE_URL` на `@postgres:5432`
 | `GITHUB_DEPLOY_WORKFLOW` | `deploy-prod.yml` | имя workflow файла для dispatch |
 | `GITHUB_DEPLOY_REF` | `main` | git ref для `workflow_dispatch` (ветка/тег; SHA — в input) |
 | `SELF_IMPROVE_ENABLED` | `false` | opt-in: разрешить боту работать над своим BeachOps-форком |
-| `SELF_IMPROVE_REPO_URL` | — | HTTPS URL вашего форка BeachOps; обязателен при `SELF_IMPROVE_ENABLED=1` |
+| `SELF_IMPROVE_REPO_URL` | — | HTTPS URL форка; если пусто — берётся из `GITHUB_REPO` |
 | `SELF_IMPROVE_BRANCHES` | `dev` | ветки allowlist для self-improve (`main`/`master` остаются protected) |
 
-`SELF_IMPROVE_*` по умолчанию выключены: чужой деплой и ваш текущий доступ не меняются,
+`SELF_IMPROVE_*` по умолчанию выключены: чужой деплой и ваш текущий доступ не меняются.
+В Mini App (вкладка **Репо**) owner видит карточку и может активировать режим одной кнопкой.
 пока вы сами не включите. После деплоя плохой SHA owner откатывает командой `/rollback`
 (нужны `GITHUB_DEPLOY_DISPATCH=1`, `GITHUB_TOKEN`, `GITHUB_REPO`).
+
+## SSH-диагностика сервера (опционально, риск!)
+
+| Переменная | По умолчанию | Описание |
+|------------|--------------|----------|
+| `AGENT_SSH_HOST` | — (пусто) | хост для read-only docker-диагностики |
+| `AGENT_SSH_PORT` | `22` | SSH-порт |
+| `AGENT_SSH_USER` | — (пусто) | SSH-пользователь (рекомендуется отдельный, без sudo) |
+| `AGENT_SSH_PRIVATE_KEY_B64` | — (пусто) | приватный ключ, base64 (без passphrase) |
+| `AGENT_SSH_LABEL` | `сервер` | название хоста в инструкции агенту (`prod`, `dev` и т.п.) |
+| `AGENT_SSH_REMOTE_DIR` | — (пусто) | cwd на сервере для `docker compose` команд |
+
+Активна только когда **все три** `AGENT_SSH_HOST` / `AGENT_SSH_USER` /
+`AGENT_SSH_PRIVATE_KEY_B64` заполнены (`Settings.agent_ssh_configured()`), и только
+для operator/owner (`Settings.can_use_server_ssh()`). При выполнении cloud-агент
+получает ключ через `CloudAgentOptions.env_vars`, а `domain/prompts.server_ssh_block`
+подмешивает в промпт (ask/do) инструкцию: подключиться по SSH и выполнять **только**
+read-only `docker ps/logs/inspect/stats`, ничего не менять на сервере, удалить ключ
+после работы.
+
+**Это осознанное отклонение от общего принципа проекта** «бот не хранит и не передаёт
+SSH-ключи / production credentials» (см. `docs/THREAT_MODEL.md`,
+`services/deploy_trigger.py`). Приватный ключ уходит в cloud-песочницу LLM-агента —
+заведите **отдельный ограниченный** ключ/пользователя (без sudo, по возможности —
+forced command только на `docker ps/logs/inspect` в `authorized_keys`), не переиспользуйте
+существующий root/admin-ключ. Не включайте на деплойменте, к которому подключены
+третьи лица, если не готовы к этому риску.
 
 ## OpenAI
 
@@ -71,7 +99,8 @@ Docker compose переопределяет `DATABASE_URL` на `@postgres:5432`
 |------------|--------------|----------|
 | `TRANSCRIBE_MODEL` | `gpt-4o-mini-transcribe` | STT для голосовых |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | векторы памяти (1536 dim) |
-| `VOICE_REALTIME_MODEL` | `gpt-realtime-whisper` | partial/final transcript Mini App |
+| `VOICE_REALTIME_MODEL` | `gpt-realtime` | модель WebSocket Realtime API (connect) |
+| `VOICE_TRANSCRIBE_MODEL` | `gpt-4o-transcribe` | nested transcription model в realtime-сессии Mini App |
 | `VOICE_TTS_MODEL` | `gpt-4o-mini-tts` | голосовой ответ (steerable TTS) |
 | `VOICE_TTS_VOICE` | `cedar` | голос; `cedar`/`marin` — лучшее качество OpenAI |
 | `VOICE_TTS_INSTRUCTIONS` | Spartan (в коде) | стиль подачи; пусто = встроенный спартанский TOV |

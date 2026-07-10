@@ -14,11 +14,11 @@ def build_repository_policy(settings: Settings) -> RepositoryPolicyService:
     policy = RepositoryPolicyService.from_json(settings.repository_policy_json)
     if not settings.self_improve_enabled:
         return policy
-    url = settings.self_improve_repo_url.strip()
+    url = settings.self_improve_repo_url_resolved()
     if not url:
         raise RepositoryPolicyError(
             "SELF_IMPROVE_ENABLED requires SELF_IMPROVE_REPO_URL "
-            "(HTTPS GitHub URL of your BeachOps fork)"
+            "or GITHUB_REPO (HTTPS GitHub URL of your BeachOps fork)"
         )
     return policy.with_extra_repository(
         repository_url=url,

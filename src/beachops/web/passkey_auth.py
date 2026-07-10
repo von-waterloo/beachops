@@ -67,9 +67,9 @@ async def registration_options(
         user_display_name=principal.username or "BeachOps owner",
         challenge=challenge,
         authenticator_selection=AuthenticatorSelectionCriteria(
-            resident_key=ResidentKeyRequirement.REQUIRED,
-            require_resident_key=True,
-            user_verification=UserVerificationRequirement.REQUIRED,
+            resident_key=ResidentKeyRequirement.PREFERRED,
+            require_resident_key=False,
+            user_verification=UserVerificationRequirement.PREFERRED,
         ),
         exclude_credentials=[
             PublicKeyCredentialDescriptor(id=bytes(item["credential_id"]))

@@ -212,8 +212,15 @@ def create_app() -> FastAPI:
             "jobs": [_job_json(job) for job in jobs],
             "events": events,
             "approvals": [_approval_json(item) for item in approvals],
-            "repositories": [_repo_json(repo) for repo in user_repos],
+            "repositories": [
+                {
+                    **_repo_json(repo),
+                    "selfImprove": context.settings.is_self_improve_repo(repo.github_url),
+                }
+                for repo in user_repos
+            ],
             "agents": [_agent_slot_json(slot) for slot in slots],
+            "selfImprove": _self_improve_json(context.settings, user_repos),
             "usage": {
                 "period": "current",
                 "voiceMinutes": 0,
@@ -277,7 +284,11 @@ def create_app() -> FastAPI:
         )
         if make_active:
             await context.agent_slots.sync_active_slot_repo(principal.user_id, repo)
-        return _repo_json(repo)
+        await context.hot_cache.bump_dashboard_generation()
+        return {
+            **_repo_json(repo),
+            "selfImprove": context.settings.is_self_improve_repo(repo.github_url),
+        }
 
     @app.patch("/api/repos/{repo_id}")
     async def update_repo(
@@ -316,7 +327,93 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="repository not found")
         if repo.is_active:
             await context.agent_slots.sync_active_slot_repo(principal.user_id, repo)
-        return _repo_json(repo)
+        await context.hot_cache.bump_dashboard_generation()
+        return {
+            **_repo_json(repo),
+            "selfImprove": context.settings.is_self_improve_repo(repo.github_url),
+        }
+
+    @app.post("/api/self-improve/activate")
+    async def activate_self_improve(
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        """Owner: link BeachOps fork and make it the active repo for self-improve."""
+        context = _context(request)
+        if context.settings.role_for(principal.user_id) != Role.OWNER:
+            raise HTTPException(status_code=403, detail="owner role required")
+        if not context.settings.self_improve_enabled:
+            raise HTTPException(
+                status_code=400,
+                detail="Самосовершенствование выключено на сервере (SELF_IMPROVE_ENABLED)",
+            )
+        target_url = context.settings.self_improve_repo_normalized()
+        if not target_url:
+            raise HTTPException(
+                status_code=400,
+                detail="SELF_IMPROVE_REPO_URL или GITHUB_REPO не заданы",
+            )
+        from beachops.services.repo_parse import (
+            MAX_ALIAS_LEN,
+            alias_from_github_url,
+        )
+        from beachops.services.repository_policy import (
+            RepositoryNotAllowedError,
+            RepositoryPolicyError,
+        )
+
+        branches = list(context.settings.self_improve_branches) or ["dev"]
+        branch = branches[0]
+        try:
+            context.repository_policy.require_allowed(target_url, branch, write=False)
+        except (RepositoryNotAllowedError, RepositoryPolicyError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        existing = await context.repos.list_repos(principal.user_id)
+        matched = next(
+            (
+                repo
+                for repo in existing
+                if context.settings.is_self_improve_repo(repo.github_url)
+            ),
+            None,
+        )
+        if matched is None:
+            alias = alias_from_github_url(target_url).strip()[:MAX_ALIAS_LEN] or "beachops"
+            repo = await context.repos.add_repo(
+                principal.user_id,
+                alias=alias,
+                github_url=target_url,
+                default_branch=branch,
+                make_active=True,
+            )
+        else:
+            repo = await context.repos.update_repo(
+                principal.user_id,
+                matched.id,
+                default_branch=branch if matched.default_branch != branch else None,
+                make_active=True,
+            )
+            if repo is None:
+                raise HTTPException(status_code=404, detail="repository not found")
+
+        await context.agent_slots.sync_active_slot_repo(principal.user_id, repo)
+        await context.hot_cache.bump_dashboard_generation()
+        logger.info(
+            "Self-improve activated",
+            extra={
+                "user_id": principal.user_id,
+                "action": "self_improve_activate",
+            },
+        )
+        user_repos = await context.repos.list_repos(principal.user_id)
+        return {
+            "repository": {
+                **_repo_json(repo),
+                "selfImprove": True,
+            },
+            "selfImprove": _self_improve_json(context.settings, user_repos),
+        }
 
     @app.get("/api/jobs/{job_id}/events")
     async def job_events(
@@ -519,7 +616,16 @@ def create_app() -> FastAPI:
                 "Voice WS auth failed",
                 extra={"action": "voice_auth", "error_code": "4401"},
             )
-            await websocket.close(code=4401)
+            with suppress(Exception):
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "unauthorized",
+                        "message": "Session expired or invalid",
+                    }
+                )
+            with suppress(Exception):
+                await websocket.close(code=4401)
             clear_log_context()
             bind_log_context(service="api")
             return
@@ -528,7 +634,7 @@ def create_app() -> FastAPI:
         limit = await context.rate_limiter.check(
             subject=str(principal.user_id),
             action="voice_session",
-            limit=5,
+            limit=30,
             window_sec=60,
         )
         if not limit.allowed:
@@ -540,7 +646,16 @@ def create_app() -> FastAPI:
                     "error_code": "4429",
                 },
             )
-            await websocket.close(code=4429)
+            with suppress(Exception):
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "rate_limited",
+                        "message": "Voice session rate limited — try again shortly",
+                    }
+                )
+            with suppress(Exception):
+                await websocket.close(code=4429)
             clear_log_context()
             bind_log_context(service="api")
             return
@@ -554,6 +669,7 @@ def create_app() -> FastAPI:
         gateway = RealtimeVoiceGateway(
             api_key=context.settings.openai_api_key,
             model=context.settings.voice_realtime_model,
+            transcription_model=context.settings.voice_transcribe_model,
             limits=VoiceGatewayLimits(
                 max_session_bytes=24_000
                 * 2
@@ -1075,6 +1191,28 @@ def _repo_json(repo) -> dict:
         "branch": repo.default_branch,
         "status": "ready",
         "active": bool(repo.is_active),
+    }
+
+
+def _self_improve_json(settings: Settings, repos) -> dict:
+    url = settings.self_improve_repo_normalized()
+    branches = list(settings.self_improve_branches) or ["dev"]
+    linked = False
+    active = False
+    if url:
+        for repo in repos:
+            if settings.is_self_improve_repo(repo.github_url):
+                linked = True
+                if repo.is_active:
+                    active = True
+                break
+    return {
+        "enabled": bool(settings.self_improve_enabled),
+        "available": bool(settings.self_improve_enabled and url),
+        "repoUrl": url,
+        "branches": branches,
+        "linked": linked,
+        "active": active,
     }
 
 

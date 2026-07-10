@@ -8,6 +8,7 @@ interface Props {
   pending: number
   workersOnline: number
   cloudJobs: number
+  windowsJobs: number
   runtimeFilter: RuntimeFilter
   onSelectFilter: (filter: RuntimeFilter, tabHint?: 'active' | 'voice' | 'approvals') => void
 }
@@ -17,6 +18,7 @@ export function ControlRoomHero({
   pending,
   workersOnline,
   cloudJobs,
+  windowsJobs,
   runtimeFilter,
   onSelectFilter,
 }: Props) {
@@ -62,9 +64,10 @@ export function ControlRoomHero({
           className={runtimeFilter === 'windows' ? 'live' : ''}
           onClick={() => pick('windows')}
           aria-pressed={runtimeFilter === 'windows'}
+          title={workersOnline ? `${workersOnline} Windows-воркер онлайн` : 'Нет Windows-воркеров'}
         >
           <MonitorSmartphone size={16} />
-          <strong>{workersOnline}</strong>
+          <strong>{windowsJobs}</strong>
           <span>Windows</span>
         </button>
         <button

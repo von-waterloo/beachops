@@ -8,6 +8,7 @@ const emptySnapshot: DashboardSnapshot = {
   approvals: [],
   repositories: [],
   agents: [],
+  selfImprove: null,
   usage: null,
   panic: false,
   role: 'Operator',
@@ -27,6 +28,7 @@ function normalize(snapshot: Partial<DashboardSnapshot>): DashboardSnapshot {
     approvals: snapshot.approvals ?? [],
     repositories: snapshot.repositories ?? [],
     agents: snapshot.agents ?? [],
+    selfImprove: snapshot.selfImprove ?? null,
     workers: snapshot.workers ?? [],
     usage: snapshot.usage ?? null,
     panic: Boolean(snapshot.panic),
@@ -102,6 +104,11 @@ export function useDashboard(pollMs = 15_000) {
     await refresh()
   }, [refresh])
 
+  const activateSelfImprove = useCallback(async () => {
+    await apiFetch('/api/self-improve/activate', { method: 'POST' })
+    await refresh()
+  }, [refresh])
+
   const hasActive = data.jobs.some((job) => isActiveJobStatus(job.status))
     || (data.queue.running ?? 0) > 0
 
@@ -137,5 +144,6 @@ export function useDashboard(pollMs = 15_000) {
     decideApproval,
     addRepository,
     updateRepository,
+    activateSelfImprove,
   }
 }

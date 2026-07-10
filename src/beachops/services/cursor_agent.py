@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -74,6 +74,8 @@ class CursorAgentService:
         runtime: str | AgentRuntime | None = None,
         local_path: str | None = None,
         self_improve: bool = False,
+        cloud_env_vars: Mapping[str, str] | None = None,
+        server_ssh_note: str | None = None,
     ) -> tuple[RunOutcome, str | None]:
         cursor_mode = "agent" if mode in (UserMode.ASK, UserMode.DO) else "plan"
         # DO on a non-protected base (usually `dev`) works on that branch.
@@ -88,6 +90,7 @@ class CursorAgentService:
             default_branch=repo.default_branch,
             memory_block=memory_block,
             self_improve=self_improve,
+            server_ssh_note=server_ssh_note,
         )
 
         state = StreamState()
@@ -111,6 +114,7 @@ class CursorAgentService:
                     api_key=api_key or self._api_key,
                     runtime=resolved_runtime,
                     local_path=local_path,
+                    cloud_env_vars=cloud_env_vars,
                 ) as agent:
                     send_options = SendOptions(mode=cursor_mode, model=model)
                     payload: str | UserMessage = (
@@ -343,6 +347,7 @@ class CursorAgentService:
         api_key: str,
         runtime: AgentRuntime = AgentRuntime.CLOUD,
         local_path: str | None = None,
+        cloud_env_vars: Mapping[str, str] | None = None,
     ):
         if runtime == AgentRuntime.WINDOWS:
             if not local_path:
@@ -367,6 +372,7 @@ class CursorAgentService:
                 auto_create_pr=auto_create_pr,
                 work_on_current_branch=work_on_current_branch,
                 skip_reviewer_request=True,
+                env_vars=dict(cloud_env_vars) if cloud_env_vars else None,
             )
             options = AgentOptions(
                 api_key=api_key,

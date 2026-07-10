@@ -21,7 +21,7 @@ export const initialVoiceState: VoiceState = {
   phase: 'idle',
   partialTranscript: '',
   transcript: '',
-  caption: 'Коснись орба — говори',
+  caption: 'Коснись кнопки — говори',
   error: null,
   connected: false,
   recordingStartedAt: null,

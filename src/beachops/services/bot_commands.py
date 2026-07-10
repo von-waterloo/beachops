@@ -7,8 +7,6 @@ from telegram import (
     BotCommandScopeAllPrivateChats,
     BotCommandScopeChat,
     MenuButtonCommands,
-    MenuButtonWebApp,
-    WebAppInfo,
 )
 
 
@@ -57,11 +55,6 @@ def bot_commands(*, is_admin: bool, is_owner: bool = False) -> list[BotCommand]:
     return commands
 
 
-def _webapp_https_url(app) -> str:
-    url = str(getattr(app.settings, "webapp_base_url", "")).strip()
-    return url if url.lower().startswith("https://") else ""
-
-
 async def register_bot_commands(application) -> None:
     app = application.bot_data["app"]
     await application.bot.set_my_commands(
@@ -86,13 +79,6 @@ async def register_bot_commands(application) -> None:
             scope=BotCommandScopeChat(chat_id=admin_id),
         )
 
-    webapp_url = _webapp_https_url(app)
-    if webapp_url:
-        await application.bot.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(
-                text="Агенты",
-                web_app=WebAppInfo(url=webapp_url),
-            )
-        )
-    else:
-        await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    # Classic "/" menu — Mini App opens via /dashboard (WebApp menu button
+    # hid slash-commands on some Telegram clients).
+    await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())

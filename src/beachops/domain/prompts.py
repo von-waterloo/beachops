@@ -85,6 +85,30 @@ DO_GUIDANCE = """Как работать:
 
 MEMORY_PREFIX = "Контекст из памяти:\n{block}\n\n---\n\n"
 
+# Единственное явное исключение из "shell — только локально в репо" выше:
+# read-only docker-диагностика ОДНОГО сконфигурированного оператором хоста.
+SERVER_SSH_TEMPLATE = """SSH-доступ для диагностики ({label}) — включён владельцем деплоя, только для этого запроса:
+- Ключ и адрес — в переменных окружения: AGENT_SSH_HOST, AGENT_SSH_PORT, AGENT_SSH_USER, AGENT_SSH_PRIVATE_KEY_B64.
+- Подготовка (один раз за сессию):
+  mkdir -p ~/.ssh && echo "$AGENT_SSH_PRIVATE_KEY_B64" | base64 -d > ~/.ssh/beachops_agent_key && chmod 600 ~/.ssh/beachops_agent_key
+  ssh-keyscan -p "$AGENT_SSH_PORT" "$AGENT_SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+- Подключение: ssh -i ~/.ssh/beachops_agent_key -p "$AGENT_SSH_PORT" "$AGENT_SSH_USER@$AGENT_SSH_HOST" "<команда>"{remote_dir_note}
+- Разрешено ТОЛЬКО чтение: `docker ps`, `docker logs`, `docker inspect`, `docker stats --no-stream`, `docker compose ps`, `docker compose logs`.
+- Запрещено: docker exec/run/restart/rm/stop, compose up/down/pull/build, sudo, правка любых файлов на хосте, любые другие хосты.
+- В конце запроса удали ключ: rm -f ~/.ssh/beachops_agent_key
+
+"""
+
+
+def server_ssh_block(*, label: str, remote_dir: str = "") -> str:
+    remote_dir = remote_dir.strip()
+    note = (
+        f'\n- Перед `docker compose` командами: cd "{remote_dir}" (AGENT_SSH_REMOTE_DIR) && ...'
+        if remote_dir
+        else ""
+    )
+    return SERVER_SSH_TEMPLATE.format(label=label.strip() or "сервер", remote_dir_note=note)
+
 PROTECTED_DEFAULT_BRANCHES = frozenset({"main", "master"})
 
 
@@ -104,12 +128,18 @@ def build_prompt(
     default_branch: str = "dev",
     memory_block: str | None = None,
     self_improve: bool = False,
+    server_ssh_note: str | None = None,
 ) -> str:
     body = text.strip()
     if memory_block:
         body = f"{MEMORY_PREFIX.format(block=memory_block)}{body}"
+    # SSH-диагностика — opt-in per deployment, доступна в ask/do (plan код не меняет
+    # и shell не запускает, поэтому туда не подмешивается).
     if mode == UserMode.ASK:
-        return f"{ASK_SYSTEM_PREFIX}{body}"
+        prefix = ASK_SYSTEM_PREFIX
+        if server_ssh_note:
+            prefix = f"{prefix}{server_ssh_note}"
+        return f"{prefix}{body}"
     if mode == UserMode.PLAN:
         prefix = PLAN_SYSTEM_PREFIX
         if self_improve:
@@ -117,6 +147,8 @@ def build_prompt(
         return f"{prefix}{body}"
     if mode == UserMode.DO:
         prefix = f"{git_safety_prefix(default_branch=default_branch)}{DO_GUIDANCE}"
+        if server_ssh_note:
+            prefix = f"{prefix}{server_ssh_note}"
         if self_improve:
             prefix = f"{SELF_IMPROVE_SAFETY}{prefix}"
         return f"{prefix}{body}"

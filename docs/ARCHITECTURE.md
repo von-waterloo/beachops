@@ -95,7 +95,10 @@ Cloud agent id: префикс `bc-` (`domain/runtime.is_cloud_agent_id`).
 
 **Write + git:** на обычной базе (`dev` и т.п.) — `work_on_current_branch=true`,
 `auto_create_pr=false`. На `main`/`master` — изолированная ветка + PR.
-Merge/deploy/force/delete/prod access блокируются policy и prompt.
+Merge/deploy/force/delete/prod access блокируются policy и prompt. Исключение —
+opt-in `AGENT_SSH_*` (см. `docs/CONFIGURATION.md`, `docs/THREAT_MODEL.md`): читает
+docker-логи сконфигурированного хоста через `CloudAgentOptions.env_vars` +
+`domain/prompts.server_ssh_block`.
 
 **Репозитории:** пустой `REPOSITORY_POLICY_JSON` = открытый режим (любой HTTPS
 GitHub URL). Непустой allowlist по-прежнему ограничивает URL/ветки. Запись в

@@ -383,6 +383,17 @@ async def _run_job(
 
     from beachops.services.inline_keyboards import post_run_keyboard, status_reply_markup
 
+    cloud_env_vars = None
+    server_ssh_note = None
+    if app.settings.agent_ssh_configured() and app.settings.can_use_server_ssh(user_id):
+        from beachops.domain.prompts import server_ssh_block
+
+        cloud_env_vars = app.settings.agent_ssh_cloud_env_vars()
+        server_ssh_note = server_ssh_block(
+            label=app.settings.agent_ssh_label,
+            remote_dir=app.settings.agent_ssh_remote_dir,
+        )
+
     try:
         if await _cancelled():
             raise RunCancelled()
@@ -399,6 +410,8 @@ async def _run_job(
                 images=images,
                 api_key=api_key,
                 self_improve=app.settings.is_self_improve_repo(repo.github_url),
+                cloud_env_vars=cloud_env_vars,
+                server_ssh_note=server_ssh_note,
             )
         except RunCancelled:
             final_mode = await app.users.get_mode(user_id)

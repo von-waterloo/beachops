@@ -88,8 +88,13 @@ class Settings(BaseSettings):
     web_auth_challenge_ttl_sec: int = Field(
         default=300, alias="WEB_AUTH_CHALLENGE_TTL_SEC", ge=60, le=900
     )
+    # WebSocket connect model for Realtime API (not the nested transcription model).
     voice_realtime_model: str = Field(
-        default="gpt-realtime-whisper", alias="VOICE_REALTIME_MODEL"
+        default="gpt-realtime", alias="VOICE_REALTIME_MODEL"
+    )
+    # Nested audio.input.transcription.model inside the realtime session.
+    voice_transcribe_model: str = Field(
+        default="gpt-4o-transcribe", alias="VOICE_TRANSCRIBE_MODEL"
     )
     voice_tts_model: str = Field(default="gpt-4o-mini-tts", alias="VOICE_TTS_MODEL")
     # marin / cedar = best quality per OpenAI; cedar reads more "commander".
@@ -160,6 +165,16 @@ class Settings(BaseSettings):
     forward_context_max_items: int = Field(default=25, alias="FORWARD_CONTEXT_MAX_ITEMS")
     agent_slots_max: int = Field(default=8, alias="AGENT_SLOTS_MAX", ge=5, le=10)
 
+    # Опциональный SSH-доступ Cursor-агента к серверу для read-only docker-диагностики.
+    # ВНИМАНИЕ: приватный ключ отдаётся в песочницу cloud-агента (см. docs/THREAT_MODEL.md).
+    # Выключено по умолчанию — заполните все agent_ssh_* сразу, иначе фича не активна.
+    agent_ssh_host: str = Field(default="", alias="AGENT_SSH_HOST")
+    agent_ssh_port: int = Field(default=22, alias="AGENT_SSH_PORT", ge=1, le=65_535)
+    agent_ssh_user: str = Field(default="", alias="AGENT_SSH_USER")
+    agent_ssh_private_key_b64: str = Field(default="", alias="AGENT_SSH_PRIVATE_KEY_B64")
+    agent_ssh_label: str = Field(default="сервер", alias="AGENT_SSH_LABEL")
+    agent_ssh_remote_dir: str = Field(default="", alias="AGENT_SSH_REMOTE_DIR")
+
     @field_validator(
         "whitelist_user_ids",
         "admin_user_ids",
@@ -194,11 +209,21 @@ class Settings(BaseSettings):
     def parse_path(cls, value: object) -> Path:
         return Path(str(value))
 
+    def self_improve_repo_url_resolved(self) -> str:
+        """HTTPS URL for self-improve: explicit env, else derived from GITHUB_REPO."""
+        raw = self.self_improve_repo_url.strip()
+        if raw:
+            return raw
+        github_repo = self.github_repo.strip().removesuffix(".git").strip("/")
+        if github_repo.count("/") == 1:
+            return f"https://github.com/{github_repo}"
+        return ""
+
     def self_improve_repo_normalized(self) -> str | None:
         """Canonical HTTPS URL of the self-improve repo, or None if disabled/unset."""
         if not self.self_improve_enabled:
             return None
-        raw = self.self_improve_repo_url.strip()
+        raw = self.self_improve_repo_url_resolved()
         if not raw:
             return None
         from beachops.services.repository_policy import (
@@ -269,6 +294,36 @@ class Settings(BaseSettings):
         if token_key == CursorTokenKey.MT2.value and self.cursor_api_key_mt2.strip():
             return self.cursor_api_key_mt2
         return self.cursor_api_key
+
+    def agent_ssh_configured(self) -> bool:
+        """True only if host/user/key are all set — partial config stays inert."""
+        return bool(
+            self.agent_ssh_host.strip()
+            and self.agent_ssh_user.strip()
+            and self.agent_ssh_private_key_b64.strip()
+        )
+
+    def agent_ssh_cloud_env_vars(self) -> dict[str, str]:
+        """Env vars injected into the Cursor cloud sandbox for SSH diagnostics.
+
+        Empty dict when not configured — callers should still gate via
+        `agent_ssh_configured()` / `can_use_server_ssh()` before calling.
+        """
+        if not self.agent_ssh_configured():
+            return {}
+        env = {
+            "AGENT_SSH_HOST": self.agent_ssh_host.strip(),
+            "AGENT_SSH_PORT": str(self.agent_ssh_port),
+            "AGENT_SSH_USER": self.agent_ssh_user.strip(),
+            "AGENT_SSH_PRIVATE_KEY_B64": self.agent_ssh_private_key_b64.strip(),
+        }
+        if self.agent_ssh_remote_dir.strip():
+            env["AGENT_SSH_REMOTE_DIR"] = self.agent_ssh_remote_dir.strip()
+        return env
+
+    def can_use_server_ssh(self, user_id: int) -> bool:
+        """Same trust tier as write-mode: operator/owner only."""
+        return self.role_for(user_id) in {Role.OPERATOR, Role.OWNER}
 
 
 @lru_cache

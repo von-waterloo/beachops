@@ -184,17 +184,22 @@ export function VoiceConsole({
           aria-label={state.phase === 'listening' ? 'Стоп' : 'Говорить'}
           aria-pressed={state.phase === 'listening'}
           onClick={handleOrb}
+          whileTap={reducedMotion ? undefined : { scale: 0.96 }}
           animate={{
-            scale: 1 + displayEnergy * (state.phase === 'listening' ? 0.12 : 0.06),
+            scale: 1 + displayEnergy * (state.phase === 'listening' ? 0.04 : 0.015),
           }}
-          transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+          transition={{ type: 'spring', stiffness: 420, damping: 28 }}
         >
           <span
             className="orb-halo"
-            style={{ transform: `scale(${1 + displayEnergy * 0.45})`, opacity: 0.55 + displayEnergy * 0.4 }}
+            style={{
+              opacity: 0.35 + displayEnergy * 0.45,
+              transform: `scale(${1 + displayEnergy * 0.18})`,
+            }}
           />
+          <span className="orb-glass" aria-hidden="true" />
           <span className="orb-core">
-            {state.phase === 'listening' ? <Square size={28} fill="currentColor" /> : <Mic size={32} />}
+            {state.phase === 'listening' ? <Square size={26} fill="currentColor" /> : <Mic size={30} />}
           </span>
         </motion.button>
 
@@ -326,9 +331,13 @@ export function VoiceConsole({
 
       <div className="voice-footnote">
         {state.phase === 'speaking'
-          ? <><Mic size={14} /> Орб — прервать брифинг</>
-          : <><MicOff size={14} /> Микрофон молчит, пока не коснёшься орба</>}
+          ? <><Mic size={14} /> Кнопка — прервать брифинг</>
+          : <><MicOff size={14} /> Микрофон молчит, пока не коснёшься кнопки</>}
       </div>
+      <p className="telegram-workflow-hint">
+        Telegram-бот как раньше: напишите задачу, перешлите сообщение или голос
+        в чат с ботом — /ask /plan /do /task. Mini App — панель и голос.
+      </p>
     </section>
   )
 }

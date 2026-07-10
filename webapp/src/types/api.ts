@@ -53,7 +53,17 @@ export interface Repository {
   branch: string
   status: 'ready' | 'busy' | 'offline'
   active?: boolean
+  selfImprove?: boolean
   lastActivityAt?: string
+}
+
+export interface SelfImproveStatus {
+  enabled: boolean
+  available: boolean
+  repoUrl: string | null
+  branches: string[]
+  linked: boolean
+  active: boolean
 }
 
 export interface AgentSlot {
@@ -97,6 +107,7 @@ export interface DashboardSnapshot {
   approvals: Approval[]
   repositories: Repository[]
   agents: AgentSlot[]
+  selfImprove?: SelfImproveStatus | null
   usage: Usage | null
   panic: boolean
   role: string

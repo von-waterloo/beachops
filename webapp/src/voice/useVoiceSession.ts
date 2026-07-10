@@ -3,6 +3,7 @@ import { getTelegramInitData } from '../lib/telegram'
 import { feedback } from '../lib/feedback'
 import { voiceWebSocketUrl } from '../lib/api'
 import {
+  isFatalVoiceErrorCode,
   shouldReconnectVoice,
   voiceReconnectDelayMs,
   VOICE_FATAL_CLOSE_CODES,
@@ -11,8 +12,13 @@ import {
 import { initialVoiceState, voiceReducer } from './state'
 
 const MAX_RECORDING_MS = 60_000
+const PING_INTERVAL_MS = 25_000
+/** PCM16 mono @ 24 kHz — OpenAI needs ≥100ms before commit. */
+const MIN_AUDIO_BYTES = 24_000 * 2 / 10
 const AUTH_FAILED = 'Session expired or invalid'
 const RATE_LIMITED = 'Voice session rate limited — try again shortly'
+const TOO_SHORT =
+  'Слишком коротко — подержите кнопку и говорите не меньше секунды.'
 
 interface VoiceEvent {
   type: string
@@ -30,11 +36,14 @@ const VOICE_ERROR_MESSAGES: Record<string, string> = {
   session_limit: 'Voice session limit reached',
   invalid_event: 'Invalid voice event',
   invalid_transcript: 'Transcript is empty or too long',
+  empty_audio: TOO_SHORT,
   job_missing: 'Task disappeared',
   missing_run_id: 'Task finished without a run id',
   memory_missing: 'Task result is not ready yet',
   no_repository: 'Select a repository first',
   dispatch_blocked: 'Request blocked',
+  unauthorized: AUTH_FAILED,
+  rate_limited: RATE_LIMITED,
 }
 
 function voiceErrorMessage(event: VoiceEvent): string {
@@ -58,13 +67,21 @@ export function useVoiceSession() {
   const maxDurationRef = useRef<number | undefined>(undefined)
   const seqRef = useRef(0)
   const chunkSeqRef = useRef(0)
+  const bytesSentRef = useRef(0)
   const seenEventsRef = useRef(new Set<string>())
   const reconnectRef = useRef(0)
   const reconnectTimerRef = useRef<number | undefined>(undefined)
+  const pingTimerRef = useRef<number | undefined>(undefined)
   const intentionallyClosedRef = useRef(false)
+  const fatalFailureRef = useRef(false)
   const playbackQueueRef = useRef<ArrayBuffer[]>([])
   const playingRef = useRef<AudioBufferSourceNode | null>(null)
   const playbackContextRef = useRef<AudioContext | null>(null)
+
+  const clearPing = useCallback(() => {
+    window.clearInterval(pingTimerRef.current)
+    pingTimerRef.current = undefined
+  }, [])
 
   const sendJson = useCallback((payload: Record<string, unknown>) => {
     const socket = wsRef.current
@@ -125,7 +142,10 @@ export function useVoiceSession() {
     switch (event.type) {
       case 'session.ready':
         reconnectRef.current = 0
+        fatalFailureRef.current = false
         dispatch({ type: 'CONNECTED', connected: true })
+        break
+      case 'pong':
         break
       case 'transcript.partial':
         dispatch({ type: 'PARTIAL', text: event.text ?? '' })
@@ -147,6 +167,9 @@ export function useVoiceSession() {
         playNext()
         break
       case 'error':
+        if (isFatalVoiceErrorCode(event.code)) {
+          fatalFailureRef.current = true
+        }
         dispatch({ type: 'FAIL', message: voiceErrorMessage(event) })
         feedback('error')
         break
@@ -154,11 +177,20 @@ export function useVoiceSession() {
   }, [playNext])
 
   const connect = useCallback(() => {
-    if (!navigator.onLine || wsRef.current?.readyState === WebSocket.OPEN) return
+    if (!navigator.onLine || fatalFailureRef.current) return
+    const existing = wsRef.current
+    if (
+      existing
+      && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)
+    ) {
+      return
+    }
+
     const initData = getTelegramInitData()
 
     intentionallyClosedRef.current = false
     window.clearTimeout(reconnectTimerRef.current)
+    clearPing()
     const socket = new WebSocket(voiceWebSocketUrl())
     socket.binaryType = 'blob'
     wsRef.current = socket
@@ -170,6 +202,12 @@ export function useVoiceSession() {
         authorization: initData ? `tma ${initData}` : 'session',
         seq: ++seqRef.current,
       }))
+      clearPing()
+      pingTimerRef.current = window.setInterval(() => {
+        if (wsRef.current === socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'ping', seq: ++seqRef.current }))
+        }
+      }, PING_INTERVAL_MS)
     }
     socket.onmessage = (message) => {
       if (message.data instanceof Blob) {
@@ -189,15 +227,19 @@ export function useVoiceSession() {
     socket.onerror = () => socket.close()
     socket.onclose = (event) => {
       if (wsRef.current && wsRef.current !== socket) return
+      clearPing()
       dispatch({ type: 'CONNECTED', connected: false })
       wsRef.current = null
 
-      if (VOICE_FATAL_CLOSE_CODES.has(event.code)) {
-        dispatch({
-          type: 'FAIL',
-          message: event.code === 4429 ? RATE_LIMITED : AUTH_FAILED,
-        })
-        feedback('error')
+      if (VOICE_FATAL_CLOSE_CODES.has(event.code) || fatalFailureRef.current) {
+        fatalFailureRef.current = true
+        if (VOICE_FATAL_CLOSE_CODES.has(event.code)) {
+          dispatch({
+            type: 'FAIL',
+            message: event.code === 4429 ? RATE_LIMITED : AUTH_FAILED,
+          })
+          feedback('error')
+        }
         return
       }
 
@@ -207,6 +249,7 @@ export function useVoiceSession() {
           online: navigator.onLine,
           closeCode: event.code,
           attempts: reconnectRef.current,
+          fatalFailure: fatalFailureRef.current,
           limit: VOICE_RECONNECT_LIMIT,
         })
       ) {
@@ -220,12 +263,16 @@ export function useVoiceSession() {
       const delay = voiceReconnectDelayMs(attempt)
       reconnectTimerRef.current = window.setTimeout(connect, delay)
     }
-  }, [handleServerEvent, playNext])
+  }, [clearPing, handleServerEvent, playNext])
 
   useEffect(() => {
     connect()
-    const online = () => connect()
+    const online = () => {
+      fatalFailureRef.current = false
+      connect()
+    }
     const offline = () => {
+      clearPing()
       dispatch({ type: 'CONNECTED', connected: false })
       dispatch({ type: 'FAIL', message: 'You are offline' })
     }
@@ -234,13 +281,14 @@ export function useVoiceSession() {
     return () => {
       intentionallyClosedRef.current = true
       window.clearTimeout(reconnectTimerRef.current)
+      clearPing()
       wsRef.current?.close()
       void playbackContextRef.current?.close()
       playbackContextRef.current = null
       window.removeEventListener('online', online)
       window.removeEventListener('offline', offline)
     }
-  }, [connect])
+  }, [clearPing, connect])
 
   const stopCapture = useCallback((notifyServer = true) => {
     window.clearTimeout(maxDurationRef.current)
@@ -257,12 +305,20 @@ export function useVoiceSession() {
     setEnergy(0)
   }, [sendJson])
 
+  const discardShortCapture = useCallback(() => {
+    stopCapture(false)
+    sendJson({ type: 'session.cancel' })
+    dispatch({ type: 'FAIL', message: TOO_SHORT })
+    feedback('warning')
+  }, [sendJson, stopCapture])
+
   const startListening = useCallback(async () => {
     if (!navigator.onLine) {
       dispatch({ type: 'FAIL', message: 'Connect to the internet to use voice' })
       return
     }
     if (wsRef.current?.readyState !== WebSocket.OPEN || !state.connected) {
+      fatalFailureRef.current = false
       connect()
       dispatch({ type: 'FAIL', message: 'Voice service is reconnecting' })
       return
@@ -277,6 +333,10 @@ export function useVoiceSession() {
       mediaStreamRef.current = stream
       const context = new AudioContext({ latencyHint: 'interactive' })
       audioContextRef.current = context
+      // Suspended context = zero PCM → OpenAI "buffer too small … 0.00ms".
+      if (context.state === 'suspended') {
+        await context.resume()
+      }
       const source = context.createMediaStreamSource(stream)
       const analyser = context.createAnalyser()
       analyser.fftSize = 128
@@ -311,15 +371,21 @@ export function useVoiceSession() {
       worklet.port.onmessage = ({ data }: MessageEvent<ArrayBuffer>) => {
         if (data.byteLength && wsRef.current?.readyState === WebSocket.OPEN) {
           chunkSeqRef.current += 1
+          bytesSentRef.current += data.byteLength
           wsRef.current.send(data)
         }
       }
       chunkSeqRef.current = 0
+      bytesSentRef.current = 0
       sendJson({ type: 'audio.start', codec: 'audio/pcm', sampleRate: 24_000 })
       dispatch({ type: 'START_LISTENING', at: Date.now() })
       feedback('tap')
       maxDurationRef.current = window.setTimeout(() => {
-        stopCapture()
+        if (bytesSentRef.current < MIN_AUDIO_BYTES) {
+          discardShortCapture()
+          return
+        }
+        stopCapture(true)
         dispatch({ type: 'STOP_LISTENING' })
         feedback('warning')
       }, MAX_RECORDING_MS)
@@ -331,12 +397,17 @@ export function useVoiceSession() {
       })
       feedback('error')
     }
-  }, [connect, sendJson, state.connected, stopCapture, stopPlayback])
+  }, [connect, discardShortCapture, sendJson, state.connected, stopCapture, stopPlayback])
+
   const finishListening = useCallback(() => {
-    stopCapture()
+    if (bytesSentRef.current < MIN_AUDIO_BYTES) {
+      discardShortCapture()
+      return
+    }
+    stopCapture(true)
     dispatch({ type: 'STOP_LISTENING' })
     feedback('tap')
-  }, [stopCapture])
+  }, [discardShortCapture, stopCapture])
 
   const cancel = useCallback(() => {
     stopCapture(false)
@@ -361,6 +432,7 @@ export function useVoiceSession() {
       return false
     }
     if (wsRef.current?.readyState !== WebSocket.OPEN || !state.connected) {
+      fatalFailureRef.current = false
       connect()
       dispatch({ type: 'FAIL', message: 'Voice service is reconnecting' })
       return false
@@ -381,6 +453,10 @@ export function useVoiceSession() {
     confirmPlan,
     submitComposer,
     editTranscript: (text: string) => dispatch({ type: 'EDIT', text }),
-    reset: () => dispatch({ type: 'RESET' }),
+    reset: () => {
+      fatalFailureRef.current = false
+      dispatch({ type: 'RESET' })
+      connect()
+    },
   }
 }

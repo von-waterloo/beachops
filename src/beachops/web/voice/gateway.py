@@ -18,6 +18,14 @@ from beachops.services.logging_config import bind_log_context
 
 logger = logging.getLogger(__name__)
 
+# OpenAI rejects input_audio_buffer.commit below ~100ms of PCM16 mono @ 24 kHz.
+MIN_COMMIT_AUDIO_BYTES = 24_000 * 2 // 10  # 4800 bytes
+
+
+def can_commit_audio_buffer(buffered_bytes: int) -> bool:
+    """True when the provider buffer has enough PCM to accept a commit."""
+    return buffered_bytes >= MIN_COMMIT_AUDIO_BYTES
+
 
 @dataclass(frozen=True)
 class VoiceGatewayLimits:
@@ -32,12 +40,14 @@ class RealtimeVoiceGateway:
         self,
         *,
         api_key: str,
-        model: str = "gpt-realtime-whisper",
+        model: str = "gpt-realtime",
+        transcription_model: str = "gpt-4o-transcribe",
         language: str = "ru",
         limits: VoiceGatewayLimits | None = None,
     ) -> None:
         self._client = AsyncOpenAI(api_key=api_key)
         self._model = model
+        self._transcription_model = transcription_model
         self._language = language
         self._limits = limits or VoiceGatewayLimits()
 
@@ -47,7 +57,8 @@ class RealtimeVoiceGateway:
         *,
         on_plan_request: Callable[[str], Awaitable[str]] | None = None,
     ) -> None:
-        total_bytes = 0
+        session_bytes = 0
+        buffered_bytes = 0
         last_sequence = -1
         started = time.monotonic()
         logger.info(
@@ -64,7 +75,9 @@ class RealtimeVoiceGateway:
             raise
         async with connection_cm as connection:
             logger.info(
-                "Voice provider connected",
+                "Voice provider connected model=%s transcription=%s",
+                self._model,
+                self._transcription_model,
                 extra={"action": "voice_provider_ready"},
             )
             await connection.session.update(
@@ -75,8 +88,7 @@ class RealtimeVoiceGateway:
                             "format": {"type": "audio/pcm", "rate": 24000},
                             "noise_reduction": {"type": "near_field"},
                             "transcription": {
-                                "model": self._model,
-                                "delay": "minimal",
+                                "model": self._transcription_model,
                                 "language": self._language,
                             },
                             "turn_detection": None,
@@ -111,8 +123,8 @@ class RealtimeVoiceGateway:
                                 }
                             )
                             continue
-                        total_bytes += len(audio)
-                        if total_bytes > self._limits.max_session_bytes:
+                        session_bytes += len(audio)
+                        if session_bytes > self._limits.max_session_bytes:
                             logger.warning(
                                 "Voice session byte limit reached",
                                 extra={
@@ -129,6 +141,7 @@ class RealtimeVoiceGateway:
                             )
                             await websocket.close(code=1009)
                             break
+                        buffered_bytes += len(audio)
                         await connection.input_audio_buffer.append(
                             audio=base64.b64encode(audio).decode("ascii")
                         )
@@ -155,10 +168,30 @@ class RealtimeVoiceGateway:
                     last_sequence = sequence
                     event_type = event.get("type")
                     if event_type in {"commit", "audio.end"}:
+                        # Never call provider commit on empty/short buffer —
+                        # OpenAI returns "buffer too small … 0.00ms".
+                        if not can_commit_audio_buffer(buffered_bytes):
+                            if buffered_bytes > 0:
+                                await connection.input_audio_buffer.clear()
+                            buffered_bytes = 0
+                            await websocket.send_json(
+                                {
+                                    "type": "error",
+                                    "code": "empty_audio",
+                                    "message": (
+                                        "Слишком коротко — подержите кнопку "
+                                        "и говорите не меньше секунды."
+                                    ),
+                                }
+                            )
+                            continue
                         await connection.input_audio_buffer.commit()
+                        buffered_bytes = 0
                     elif event_type in {"clear", "barge_in", "session.cancel"}:
                         await connection.input_audio_buffer.clear()
+                        buffered_bytes = 0
                     elif event_type == "audio.start":
+                        buffered_bytes = 0
                         await websocket.send_json({"type": "audio.ready"})
                     elif event_type == "plan.request" and on_plan_request is not None:
                         transcript = str(event.get("transcript", "")).strip()
@@ -196,7 +229,7 @@ class RealtimeVoiceGateway:
                 duration_ms = int((time.monotonic() - started) * 1000)
                 logger.info(
                     "Voice gateway session ended bytes=%s",
-                    total_bytes,
+                    session_bytes,
                     extra={
                         "action": "voice_session_end",
                         "duration_ms": duration_ms,
