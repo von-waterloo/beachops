@@ -1,12 +1,20 @@
-# Owner-approved prod deploy on self-hosted runner host-185.
-# Trigger: Actions → Deploy prod → Run workflow (sha), or bot via workflow_dispatch API.
-# Secrets: ENV_PROD_BEACHOPS (preferred) or ENV_PROD — full .env contents.
+# Prod deploy on self-hosted runner host-185 (185.244.49.94).
 #
-# Deploys into /home/const/tg-cursor-bot (legacy path / volumes), not the runner workdir.
+# Triggers:
+#   1) Auto: CI succeeds on push to main  -> deploy that SHA
+#   2) Manual / bot: workflow_dispatch with input sha
+#      (Telegram /rollback, API /api/deploy/dispatch, Actions UI)
+#
+# Secrets: ENV_PROD_BEACHOPS (preferred) or ENV_PROD = full prod .env
+# Target dir: /home/const/tg-cursor-bot (legacy path / volumes)
 
 name: Deploy prod
 
 on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       sha:
@@ -19,24 +27,61 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    name: Resolve target
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      reason: ${{ steps.resolve.outputs.reason }}
+    steps:
+      - id: resolve
+        name: Pick deploy SHA
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SHA="${{ inputs.sha }}"
+            REASON="dispatch"
+          else
+            SHA="${{ github.event.workflow_run.head_sha }}"
+            REASON="auto-main"
+          fi
+          SHA="$(printf '%s' "$SHA" | tr -d '[:space:]')"
+          if [ "${#SHA}" -lt 7 ]; then
+            echo "Invalid deploy SHA: '$SHA'" >&2
+            exit 1
+          fi
+          {
+            echo "sha=$SHA"
+            echo "reason=$REASON"
+          } >> "$GITHUB_OUTPUT"
+          echo "Deploy target sha=$SHA reason=$REASON"
+
   deploy:
     name: prod @ host-185
+    needs: prepare
     runs-on: [self-hosted, host-185]
+    timeout-minutes: 45
     env:
       PROD_DIR: /home/const/tg-cursor-bot
       COMPOSE_PROJECT: tg-cursor-bot
+      DEPLOY_SHA: ${{ needs.prepare.outputs.sha }}
+      DEPLOY_REASON: ${{ needs.prepare.outputs.reason }}
 
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.sha }}
+          ref: ${{ env.DEPLOY_SHA }}
           clean: true
 
       - name: Sync code into prod directory
         run: |
           set -euo pipefail
           mkdir -p "$PROD_DIR"
-          # Preserve live secrets and local runtime data; replace application tree.
           rsync -a --delete \
             --exclude '.env' \
             --exclude '.git/' \
@@ -50,7 +95,9 @@ jobs:
             --exclude '*.sql' \
             --exclude 'actions-runner/' \
             ./ "$PROD_DIR"/
-          echo "Synced ${{ inputs.sha }} -> $PROD_DIR"
+          printf '%s\n' "$DEPLOY_SHA" > "$PROD_DIR/.deployed_sha"
+          printf '%s\n' "$DEPLOY_REASON" > "$PROD_DIR/.deployed_reason"
+          echo "Synced $DEPLOY_SHA ($DEPLOY_REASON) -> $PROD_DIR"
 
       - name: Write .env from secrets
         working-directory: /home/const/tg-cursor-bot
@@ -69,47 +116,52 @@ jobs:
             echo "Missing ENV_PROD_BEACHOPS or ENV_PROD repository secret" >&2
             exit 1
           fi
-          # Ensure LF endings (secret may be uploaded from Windows)
           sed -i 's/\r$//' .env
           if [ -f scripts/bootstrap-prod-env.sh ]; then
             sed -i 's/\r$//' scripts/bootstrap-prod-env.sh || true
             sh scripts/bootstrap-prod-env.sh .env
           fi
-          # Fail fast if JSON env was corrupted (e.g. quotes stripped when setting the secret).
-          python3 - <<'PY'
-import json, pathlib, sys
-raw = pathlib.Path(".env").read_text(encoding="utf-8", errors="replace")
-val = ""
-for line in raw.splitlines():
-    if line.startswith("REPOSITORY_POLICY_JSON="):
-        val = line.split("=", 1)[1]
-        break
-if not val:
-    print("REPOSITORY_POLICY_JSON missing", file=sys.stderr)
-    sys.exit(1)
-try:
-    json.loads(val)
-except Exception as exc:
-    print(f"REPOSITORY_POLICY_JSON invalid JSON: {exc}", file=sys.stderr)
-    print("Re-upload ENV_PROD_BEACHOPS with: cmd /c \"gh secret set ENV_PROD_BEACHOPS --repo von-waterloo/beachops < .env\"", file=sys.stderr)
-    sys.exit(1)
-print("REPOSITORY_POLICY_JSON ok")
-PY
+          python3 -c "import json,pathlib,sys; raw=pathlib.Path('.env').read_text(encoding='utf-8',errors='replace'); val=next((line.split('=',1)[1] for line in raw.splitlines() if line.startswith('REPOSITORY_POLICY_JSON=')), ''); sys.exit('REPOSITORY_POLICY_JSON missing') if not val else None; json.loads(val); print('REPOSITORY_POLICY_JSON ok')"
+
+      - name: Pre-deploy database backup
+        working-directory: /home/const/tg-cursor-bot
+        run: |
+          set -euo pipefail
+          if ! docker compose -p "$COMPOSE_PROJECT" ps --status running --services 2>/dev/null | grep -qx postgres; then
+            echo "Postgres not running yet - skip pre-deploy backup"
+            exit 0
+          fi
+          stamp="$(date +%Y%m%d-%H%M%S)"
+          backup="/tmp/beachops-predeploy-${stamp}-${DEPLOY_SHA:0:7}.sql"
+          docker compose -p "$COMPOSE_PROJECT" exec -T postgres \
+            pg_dump -U bot tg_cursor_bot > "$backup"
+          ls -lh "$backup"
+          ls -1t /tmp/beachops-predeploy-*.sql 2>/dev/null | tail -n +6 | xargs -r rm -f
 
       - name: Free disk if low
         run: |
+          set -euo pipefail
           df -h /
           AVAIL_GB=$(df -BG / | awk 'NR==2 {gsub(/G/,"",$4); print $4}')
           if [ "${AVAIL_GB:-0}" -lt 15 ]; then
-            echo "Low disk (${AVAIL_GB}G free) — pruning unused images/cache"
+            echo "Low disk (${AVAIL_GB}G free) - pruning unused images/cache"
             docker image prune -af --filter "until=72h" || true
             docker builder prune -af --filter "until=168h" || true
           else
             echo "Disk OK (${AVAIL_GB}G free)"
           fi
 
+      - name: Stop Telegram poller before recreate
+        working-directory: /home/const/tg-cursor-bot
+        run: |
+          set -euo pipefail
+          docker compose -p "$COMPOSE_PROJECT" stop -t 30 bot || true
+
       - name: Build and start stack
         working-directory: /home/const/tg-cursor-bot
+        env:
+          DOCKER_BUILDKIT: "1"
+          COMPOSE_DOCKER_CLI_BUILD: "1"
         run: |
           set -euo pipefail
           docker compose -p "$COMPOSE_PROJECT" up --build -d --remove-orphans
@@ -120,12 +172,12 @@ PY
           echo "Waiting for http://127.0.0.1:8080/health ..."
           for i in $(seq 1 60); do
             if curl -sf http://127.0.0.1:8080/health >/dev/null; then
-              echo "Healthy after ~${i}0s"
+              echo "Healthy after ~${i}x5s (sha=$DEPLOY_SHA reason=$DEPLOY_REASON)"
               exit 0
             fi
-            sleep 10
+            sleep 5
           done
-          echo "Health check failed within ~10 minutes" >&2
+          echo "Health check failed within ~5 minutes" >&2
           cd "$PROD_DIR"
           docker compose -p "$COMPOSE_PROJECT" ps || true
           docker compose -p "$COMPOSE_PROJECT" logs --tail=120 bot worker api webapp migrate || true
@@ -135,6 +187,8 @@ PY
         if: success()
         working-directory: /home/const/tg-cursor-bot
         run: |
+          echo "Deployed SHA: $(cat .deployed_sha 2>/dev/null || echo unknown)"
+          echo "Reason: $(cat .deployed_reason 2>/dev/null || echo unknown)"
           docker compose -p "$COMPOSE_PROJECT" ps
           docker compose -p "$COMPOSE_PROJECT" logs --tail=40 bot worker api
 

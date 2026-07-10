@@ -4,26 +4,36 @@
 Для своей копии достаточно Docker Compose из [OPERATIONS.md](./OPERATIONS.md) /
 корневого README; этот файл не обязателен.
 
-Кратко: приватный репозиторий → CI на GitHub-hosted → деплой только через
-`workflow_dispatch` на self-hosted runner **host-185**. Бот не хранит SSH-ключ
-и не ходит на сервер напрямую.
+Кратко: приватный репозиторий → CI на GitHub-hosted → **auto-deploy на `main`**
+после зелёного CI на self-hosted runner **host-185**. Бот не хранит SSH-ключ
+и не ходит на сервер напрямую; rollback/ручной деплой — через тот же Actions
+`workflow_dispatch`.
 
 ## Репозиторий
 
 - Целевой private repo: `von-waterloo/beachops` (`GITHUB_REPO`).
-- Ветки: рабочая `dev`, прод-линия `main` (см. skill `github-branches`).
+- Ветки: рабочая и прод-линия **`main`** (push → CI → deploy). `dev` — опциональная
+  интеграционная ветка без auto-deploy.
 - Секреты Actions (на стороне GitHub, не в контейнере бота):
   - `ENV_PROD_BEACHOPS` (предпочтительно) или `ENV_PROD` — полное содержимое прод-`.env`.
 
 ## Runner
 
 - Labels: `[self-hosted, host-185]` (тот же хост, что прод `185.244.49.94`).
+- Service: `actions.runner.von-waterloo-beachops.host-185.service` (user `const`).
 - Workflow: [`.github/workflows/deploy-prod.yml`](../.github/workflows/deploy-prod.yml).
 - На runner: checkout SHA → rsync в `/home/const/tg-cursor-bot` → `.env` из secret →
-  `docker compose -p tg-cursor-bot up --build -d --remove-orphans` →
+  pre-deploy `pg_dump` → stop `bot` → `docker compose up --build -d` →
   health `http://127.0.0.1:8080/health`.
 
-Ручной запуск: **Actions → Deploy prod → Run workflow** с input `sha`.
+## Поток деплоя
+
+| Событие | Что происходит |
+|---------|----------------|
+| Push / merge в **`main`** | CI → при success **Deploy prod** на host-185 |
+| Push в `dev` | только CI (без деплоя) |
+| Telegram `/rollback` или API | бот → `workflow_dispatch` с SHA → тот же Deploy prod |
+| Actions UI → Run workflow | ручной `workflow_dispatch` с SHA |
 
 ## CI gate
 
@@ -32,44 +42,20 @@
 
 1. Python 3.12: `pip install -e ".[dev]"`, `pytest`
 2. webapp: `npm ci`, lint, test, build
-3. `docker compose config` (с dummy env для required vars)
+3. `docker compose config`
 
-Деплой **не** стартует от push — только явный dispatch после owner-approve.
+Deploy слушает `workflow_run` workflow **CI** на ветке `main` и стартует только
+при `conclusion=success` и `event=push`.
 
-## Owner approval → workflow_dispatch
+## Бот → workflow_dispatch (rollback / owner approve)
 
-Планируемый поток:
-
-1. Оператор/агент готовит изменения; CI зелёный на PR/`dev`.
-2. Owner в Telegram одобряет deploy (approval kind `deploy`).
-3. Бот вызывает `beachops.services.deploy_trigger.trigger_prod_deploy` с
-   `GITHUB_TOKEN` (fine-grained / PAT с `actions:write` на этот repo) и SHA.
-4. GitHub ставит job на runner host-185; бот только ждёт/показывает статус Actions.
-
-Включение: `GITHUB_DEPLOY_DISPATCH=1` + `GITHUB_TOKEN` в прод-`.env`
-(уже на `von-waterloo/beachops`).
+Включение: `GITHUB_DEPLOY_DISPATCH=1` + `GITHUB_TOKEN` + `GITHUB_REPO` в прод-`.env`.
+Бот вызывает `trigger_prod_deploy` → Actions на host-185. SSH из контейнера бота нет.
 
 ## Secret ENV_PROD_BEACHOPS (Windows)
-
-Не передавайте тело секрета через PowerShell-строку — кавычки в
-`REPOSITORY_POLICY_JSON` могут пропасть. Заливайте файл через `cmd`:
 
 ```bat
 cmd /c "gh secret set ENV_PROD_BEACHOPS --repo von-waterloo/beachops < .env"
 ```
 
-(файл `.env` — актуальная копия с прод-сервера).
-
-## Чего нет в контейнере бота
-
-- Нет PuTTY/SSH ключей и `plink`/`pscp`.
-- Нет записи в `/home/const/...` с бота.
-- Нет автоматического push в `main` и нет auto-deploy на каждый commit.
-
-Legacy ручной деплой с Windows (`scripts/deploy-to-prod.ps1`) остаётся запасным
-каналом — см. [OPERATIONS.md](./OPERATIONS.md).
-
-## Опционально
-
-- [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) —
-  stub на теги `v*`; прод сейчас собирает образы на runner через compose.
+Legacy: `scripts/deploy-to-prod.ps1` — см. [OPERATIONS.md](./OPERATIONS.md).

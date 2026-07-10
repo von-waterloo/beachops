@@ -80,13 +80,14 @@ python -m beachops
 
 ## Maintainer's own production reference (not required for your deployment)
 
-Ниже — как **конкретный** прод автора (`185.244.49.94`, self-hosted runner `host-185`). Это не шаг для вашей копии.
+Прод автора (185.244.49.94, runner host-185): **push в main → CI → Deploy prod**.
+Rollback — Telegram /rollback или Actions workflow_dispatch. Legacy с Windows:
 
-```powershell
+`powershell
 .\scripts\deploy-to-prod.ps1
-```
+`
 
-См. [docs/OPERATIONS.md](./docs/OPERATIONS.md), [docs/SELF_DEPLOY.md](./docs/SELF_DEPLOY.md) и `.cursor/rules/servers-access.mdc`.
+См. [docs/SELF_DEPLOY.md](./docs/SELF_DEPLOY.md), [docs/OPERATIONS.md](./docs/OPERATIONS.md) и .cursor/rules/servers-access.mdc.
 
 ## Migrate from legacy SQLite
 
