@@ -35,8 +35,10 @@ def test_self_improve_merges_fork_into_allowlist() -> None:
         self_improve_branches=["dev", "feat/x"],
     )
     policy = build_repository_policy(settings)
+    assert policy.open_mode is True
     assert policy.is_allowed("https://github.com/acme/beachops", "dev")
     assert policy.is_allowed("https://github.com/acme/beachops", "feat/x")
+    assert policy.is_allowed("https://github.com/other/app", "dev")
     with pytest.raises(RepositoryNotAllowedError):
         policy.require_allowed(
             "https://github.com/acme/beachops",

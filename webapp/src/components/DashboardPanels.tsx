@@ -7,20 +7,33 @@ import {
   Check,
   Clock3,
   Cloud,
+  ExternalLink,
   GitBranch,
   HeartPulse,
   Loader2,
   LockKeyhole,
   Monitor,
+  Plus,
   Radio,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
   X,
 } from 'lucide-react'
-import type { DashboardSnapshot, Event, Job, WorkerNode } from '../types/api'
+import type { AgentSlot, DashboardSnapshot, Event, Job, WorkerNode } from '../types/api'
 import { isActiveJobStatus } from '../types/api'
 import { feedback } from '../lib/feedback'
+import {
+  matchesRuntimeFilter,
+  RUNTIME_FILTER_LABELS,
+  type RuntimeFilter,
+} from '../lib/runtimeFilter'
+import {
+  relativeTimeRu,
+  riskLabel,
+  runtimeLabel,
+  statusLabel,
+} from '../lib/uiCopy'
 
 export type TabId = 'voice' | 'active' | 'history' | 'approvals' | 'repositories'
 
@@ -32,27 +45,28 @@ interface Props {
   loading: boolean
   error: string | null
   liveEvents?: Event[]
+  runtimeFilter?: RuntimeFilter
+  focusedJobId?: string | null
+  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: TabId) => void
+  onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
   onRefresh: () => void
   onDecision: (approvalId: string, decision: Decision, revision?: string) => Promise<void>
-}
-
-const relativeTime = (value?: string | null) => {
-  if (!value) return 'Recently'
-  const delta = Math.max(0, Date.now() - new Date(value).getTime())
-  const minutes = Math.floor(delta / 60_000)
-  if (minutes < 1) return 'Just now'
-  if (minutes < 60) return `${minutes}m ago`
-  if (minutes < 1440) return `${Math.floor(minutes / 60)}h ago`
-  return `${Math.floor(minutes / 1440)}d ago`
+  onAddRepository?: (input: { url: string; branch?: string }) => Promise<void>
+  onUpdateRepository?: (repoId: string, input: { branch?: string; makeActive?: boolean }) => Promise<void>
 }
 
 function Empty({ icon, title, copy }: { icon: React.ReactNode; title: string; copy: string }) {
   return (
-    <div className="empty-state">
+    <motion.div
+      className="empty-state"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+    >
       <span>{icon}</span>
       <h2>{title}</h2>
       <p>{copy}</p>
-    </div>
+    </motion.div>
   )
 }
 
@@ -81,14 +95,68 @@ function Section({
   )
 }
 
-function AgentCard({ job }: { job: Job }) {
+function RuntimeFilterBar({
+  value,
+  onChange,
+}: {
+  value: RuntimeFilter
+  onChange?: (filter: RuntimeFilter) => void
+}) {
+  if (!onChange) return null
+  return (
+    <div className="runtime-filter-bar" role="toolbar" aria-label="Фильтр Cloud / Windows">
+      {(['all', 'cloud', 'windows'] as const).map((filter) => (
+        <button
+          key={filter}
+          type="button"
+          className={value === filter ? 'selected' : ''}
+          aria-pressed={value === filter}
+          onClick={() => {
+            feedback('select')
+            onChange(filter)
+          }}
+        >
+          {RUNTIME_FILTER_LABELS[filter]}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function AgentCard({
+  job,
+  selected,
+  onSelect,
+}: {
+  job: Job
+  selected?: boolean
+  onSelect?: () => void
+}) {
   const windows = job.runtime === 'windows'
+  const interactive = Boolean(onSelect)
+  const openCursor = (event: React.MouseEvent) => {
+    event.stopPropagation()
+    if (!job.cursorUrl) return
+    feedback('tap')
+    window.open(job.cursorUrl, '_blank', 'noopener,noreferrer')
+  }
   return (
     <motion.article
-      className={`agent-card runtime-${windows ? 'windows' : 'cloud'}`}
+      className={`agent-card runtime-${windows ? 'windows' : 'cloud'}${selected ? ' is-selected' : ''}${interactive ? ' is-clickable' : ''}`}
       layout
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+      whileHover={interactive ? { y: -2 } : undefined}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onClick={onSelect}
+      onKeyDown={interactive ? (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onSelect?.()
+        }
+      } : undefined}
     >
       <div className="agent-mark">
         {windows ? <Monitor size={18} /> : <Cloud size={18} />}
@@ -97,18 +165,71 @@ function AgentCard({ job }: { job: Job }) {
         <div className="card-topline">
           <span className={`status-pill status-${job.status}`}>
             <Radio size={12} />
-            {job.status}
+            {statusLabel(job.status)}
           </span>
-          <time>{relativeTime(job.createdAt)}</time>
+          <time>{relativeTimeRu(job.createdAt)}</time>
         </div>
         <h2>{job.title}</h2>
         <p>
-          {windows ? 'Windows worker' : 'Cloud agent'}
+          {runtimeLabel(job.runtime)}
           {job.repository ? ` · ${job.repository}` : ''}
+          {job.branch ? ` · ${job.branch}` : ''}
         </p>
-        <div className="progress-track" aria-label={`${job.progress ?? 0}% complete`}>
+        {job.cursorUrl && (
+          <button
+            type="button"
+            className="ghost-link"
+            onClick={openCursor}
+          >
+            <ExternalLink size={14} />
+            Открыть в Cursor
+          </button>
+        )}
+        <div className="progress-track" aria-label={`${job.progress ?? 0}%`}>
           <i style={{ width: `${job.progress ?? statusProgress(job.status)}%` }} />
         </div>
+      </div>
+    </motion.article>
+  )
+}
+
+function SlotCard({ slot }: { slot: AgentSlot }) {
+  const windows = slot.runtime === 'windows'
+  return (
+    <motion.article
+      className={`agent-card runtime-${windows ? 'windows' : 'cloud'}${slot.active ? ' is-selected' : ''}`}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+    >
+      <div className="agent-mark">
+        {windows ? <Monitor size={18} /> : <Cloud size={18} />}
+      </div>
+      <div className="agent-body">
+        <div className="card-topline">
+          <span className={`status-pill status-${slot.active ? 'running' : 'ready'}`}>
+            <Radio size={12} />
+            {slot.active ? 'Активен' : 'Слот'}
+          </span>
+        </div>
+        <h2>{slot.label}</h2>
+        <p>
+          {runtimeLabel(slot.runtime)}
+          {slot.repository ? ` · ${slot.repository}` : ''}
+        </p>
+        {slot.cursorUrl ? (
+          <a
+            className="ghost-link"
+            href={slot.cursorUrl}
+            target="_blank"
+            rel="noreferrer"
+            onClick={() => feedback('tap')}
+          >
+            <ExternalLink size={14} />
+            Открыть чат в Cursor
+          </a>
+        ) : (
+          <p className="muted-hint">Чат появится после первого cloud-run</p>
+        )}
       </div>
     </motion.article>
   )
@@ -135,10 +256,30 @@ function statusProgress(status: Job['status']): number {
   }
 }
 
-function WorkerCard({ worker }: { worker: WorkerNode }) {
+function WorkerCard({
+  worker,
+  onSelect,
+}: {
+  worker: WorkerNode
+  onSelect?: () => void
+}) {
   const healthy = worker.status === 'online'
+  const interactive = Boolean(onSelect)
   return (
-    <article className={`worker-card ${healthy ? 'is-online' : 'is-offline'}`}>
+    <motion.article
+      className={`worker-card ${healthy ? 'is-online' : 'is-offline'}${interactive ? ' is-clickable' : ''}`}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onClick={onSelect}
+      onKeyDown={interactive ? (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onSelect?.()
+        }
+      } : undefined}
+    >
       <div className="worker-mark">
         <HeartPulse size={16} />
       </div>
@@ -147,11 +288,13 @@ function WorkerCard({ worker }: { worker: WorkerNode }) {
         <p>
           {worker.platform}
           {' · '}
-          {relativeTime(worker.lastHeartbeatAt)}
+          {relativeTimeRu(worker.lastHeartbeatAt)}
         </p>
       </div>
-      <span className={`repo-state ${healthy ? 'ready' : 'offline'}`}>{worker.status}</span>
-    </article>
+      <span className={`repo-state ${healthy ? 'ready' : 'offline'}`}>
+        {statusLabel(worker.status)}
+      </span>
+    </motion.article>
   )
 }
 
@@ -169,13 +312,14 @@ function ApprovalActions({
   return (
     <div className="approval-actions">
       <button type="button" disabled={pending} onClick={onApprove}>
-        {pending ? <Loader2 size={15} className="spin-icon" /> : <Check size={15} />} Approve
+        {pending ? <Loader2 size={15} className="spin-icon" /> : <Check size={15} />}
+        Одобрить
       </button>
       <button type="button" disabled={pending} onClick={onRevise}>
-        <RotateCcw size={15} /> Revise
+        <RotateCcw size={15} /> Доработать
       </button>
       <button className="danger" type="button" disabled={pending} onClick={onReject}>
-        <X size={15} /> Reject
+        <X size={15} /> Отклонить
       </button>
     </div>
   )
@@ -183,7 +327,13 @@ function ApprovalActions({
 
 function TimelineList({ events }: { events: Event[] }) {
   if (!events.length) {
-    return <Empty icon={<Archive />} title="No history yet" copy="Completed runs will appear here." />
+    return (
+      <Empty
+        icon={<Archive />}
+        title="История пуста"
+        copy="Завершённые прогоны появятся здесь."
+      />
+    )
   }
   return (
     <div className="timeline modern-timeline">
@@ -193,7 +343,7 @@ function TimelineList({ events }: { events: Event[] }) {
             key={event.id}
             initial={{ opacity: 0, x: -8 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: Math.min(index, 8) * 0.03 }}
+            transition={{ delay: Math.min(index, 8) * 0.03, ease: [0.22, 1, 0.36, 1] }}
           >
             <span className="timeline-dot" />
             <div>
@@ -202,7 +352,7 @@ function TimelineList({ events }: { events: Event[] }) {
                 {event.kind}
                 {event.jobId ? ` · ${event.jobId.slice(0, 8)}` : ''}
                 {' · '}
-                {relativeTime(event.createdAt)}
+                {relativeTimeRu(event.createdAt)}
               </small>
             </div>
           </motion.article>
@@ -217,82 +367,150 @@ function Overview({
   liveEvents,
   pendingIds,
   act,
+  runtimeFilter,
+  focusedJobId,
+  onRuntimeFilterChange,
+  onSelectJob,
 }: {
   data: DashboardSnapshot
   liveEvents: Event[]
   pendingIds: Set<string>
   act: (approvalId: string, decision: Decision, revision?: string) => void
+  runtimeFilter: RuntimeFilter
+  focusedJobId?: string | null
+  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: TabId) => void
+  onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
 }) {
-  const activeJobs = data.jobs.filter((job) => isActiveJobStatus(job.status))
-  const cloudJobs = activeJobs.filter((job) => job.runtime !== 'windows')
-  const windowsJobs = activeJobs.filter((job) => job.runtime === 'windows')
-  const queuedJobs = data.jobs.filter((job) => job.status === 'queued')
+  const activeJobs = data.jobs
+    .filter((job) => isActiveJobStatus(job.status))
+    .filter((job) => matchesRuntimeFilter(job.runtime, runtimeFilter))
+  const queuedJobs = data.jobs
+    .filter((job) => job.status === 'queued')
+    .filter((job) => matchesRuntimeFilter(job.runtime, runtimeFilter))
   const timeline = (liveEvents.length ? liveEvents : data.events).slice(0, 12)
 
   const active = data.queue?.active ?? data.queue?.running ?? 0
   const queuedCount = data.queue?.queued ?? data.queue?.pending ?? 0
   const blocked = data.queue?.blocked ?? 0
+  const planeTitle =
+    runtimeFilter === 'windows'
+      ? 'Windows'
+      : runtimeFilter === 'cloud'
+        ? 'Cloud'
+        : 'Cloud и Windows'
 
   return (
     <div className="control-feed">
-      <div className="stats-strip" aria-label="Live queue summary">
-        <div>
+      <div className="stats-strip" aria-label="Сводка очереди">
+        <button type="button" onClick={() => onRuntimeFilterChange?.('all', 'active')}>
           <strong>{active}</strong>
-          <span>Active</span>
-        </div>
-        <div>
+          <span>Активно</span>
+        </button>
+        <button type="button" onClick={() => onRuntimeFilterChange?.('all', 'active')}>
           <strong>{queuedCount}</strong>
-          <span>Queued</span>
-        </div>
-        <div>
+          <span>Очередь</span>
+        </button>
+        <button type="button" onClick={() => onRuntimeFilterChange?.('all', 'approvals')}>
           <strong>{blocked}</strong>
-          <span>Blocked</span>
-        </div>
-        <div>
+          <span>Блок</span>
+        </button>
+        <button type="button" onClick={() => onRuntimeFilterChange?.('all', 'approvals')}>
           <strong>{data.approvals.length}</strong>
-          <span>Approvals</span>
-        </div>
+          <span>Решения</span>
+        </button>
       </div>
 
-      <Section eyebrow="AGENTS" title="Cloud & Windows">
+      <RuntimeFilterBar
+        value={runtimeFilter}
+        onChange={(filter) => onRuntimeFilterChange?.(filter, 'voice')}
+      />
+
+      <Section eyebrow="Агенты" title={planeTitle}>
         {activeJobs.length ? (
           <div className="agent-grid">
-            {[...cloudJobs, ...windowsJobs].map((job) => (
-              <AgentCard key={job.id} job={job} />
+            {activeJobs.map((job) => (
+              <AgentCard
+                key={job.id}
+                job={job}
+                selected={focusedJobId === job.id}
+                onSelect={onSelectJob ? () => onSelectJob(job.id, job.runtime) : undefined}
+              />
             ))}
           </div>
         ) : (
-          <Empty icon={<Activity />} title="Quiet horizon" copy="No Cloud or Windows agents are active." />
+          <Empty
+            icon={<Activity />}
+            title="Тихий горизонт"
+            copy={
+              runtimeFilter === 'windows'
+                ? 'Нет активных Windows-задач. Переключитесь на Cloud или Все.'
+                : runtimeFilter === 'cloud'
+                  ? 'Нет активных Cloud-задач. Переключитесь на Windows или Все.'
+                  : 'Сейчас нет активных агентов Cloud или Windows.'
+            }
+          />
         )}
       </Section>
 
-      <Section eyebrow="QUEUE" title="Live queue">
+      {(data.agents?.some((slot) => slot.cursorUrl) ?? false) && (
+        <Section eyebrow="Cursor" title="Открыть чат на компьютере">
+          <div className="agent-grid">
+            {data.agents
+              .filter((slot) => slot.cursorUrl)
+              .map((slot) => (
+                <SlotCard key={slot.id} slot={slot} />
+              ))}
+          </div>
+        </Section>
+      )}
+
+      <Section eyebrow="Очередь" title="Живая очередь">
         {queuedJobs.length || activeJobs.length ? (
           <div className="card-list">
-            {(queuedJobs.length ? queuedJobs : activeJobs).slice(0, 6).map((job) => (
-              <article className="work-card queue-card" key={job.id}>
-                <div className="card-topline">
-                  <span className={`status-pill status-${job.status}`}>
-                    <Radio size={12} />
-                    {job.status}
-                  </span>
-                  <time>{relativeTime(job.createdAt)}</time>
-                </div>
-                <h2>{job.title}</h2>
-                <p>
-                  {job.runtime === 'windows' ? 'Windows' : 'Cloud'}
-                  {job.repository ? ` · ${job.repository}` : ''}
-                  {` · ${job.id.slice(0, 8)}`}
-                </p>
-              </article>
-            ))}
+            {(queuedJobs.length ? queuedJobs : activeJobs).slice(0, 6).map((job) => {
+              const selected = focusedJobId === job.id
+              const className = `work-card queue-card${onSelectJob ? ' is-clickable' : ''}${selected ? ' is-selected' : ''}`
+              const body = (
+                <>
+                  <div className="card-topline">
+                    <span className={`status-pill status-${job.status}`}>
+                      <Radio size={12} />
+                      {statusLabel(job.status)}
+                    </span>
+                    <time>{relativeTimeRu(job.createdAt)}</time>
+                  </div>
+                  <h2>{job.title}</h2>
+                  <p>
+                    {runtimeLabel(job.runtime)}
+                    {job.repository ? ` · ${job.repository}` : ''}
+                    {` · ${job.id.slice(0, 8)}`}
+                  </p>
+                </>
+              )
+              return onSelectJob ? (
+                <button
+                  className={className}
+                  type="button"
+                  key={job.id}
+                  onClick={() => onSelectJob(job.id, job.runtime)}
+                >
+                  {body}
+                </button>
+              ) : (
+                <article className={className} key={job.id}>{body}</article>
+              )
+            })}
           </div>
         ) : (
-          <Empty icon={<Clock3 />} title="Queue clear" copy="Nothing waiting in the durable job queue." />
+          <Empty
+            icon={<Clock3 />}
+            title="Очередь чиста"
+            copy="В durable-очереди ничего не ждёт."
+          />
         )}
       </Section>
 
-      <Section eyebrow="APPROVALS" title="Needs review">
+      <Section eyebrow="Решения" title="Нужен разбор">
         {data.approvals.length ? (
           <div className="card-list">
             {data.approvals.slice(0, 4).map((approval) => (
@@ -300,9 +518,9 @@ function Overview({
                 <div className="card-topline">
                   <span className={`risk risk-${approval.risk}`}>
                     {approval.risk === 'high' ? <AlertTriangle size={13} /> : <ShieldCheck size={13} />}
-                    {approval.risk} risk
+                    {riskLabel(approval.risk)}
                   </span>
-                  <time>{relativeTime(approval.requestedAt)}</time>
+                  <time>{relativeTimeRu(approval.requestedAt)}</time>
                 </div>
                 <h2>{approval.title}</h2>
                 {data.role.toLowerCase() === 'owner' && (
@@ -312,7 +530,7 @@ function Overview({
                     onRevise={() => act(
                       approval.id,
                       'revision',
-                      'Review the result and correct issues within the approved scope.',
+                      'Проверь результат и исправь в рамках одобренного scope.',
                     )}
                     onReject={() => act(approval.id, 'reject')}
                   />
@@ -321,31 +539,50 @@ function Overview({
             ))}
           </div>
         ) : (
-          <Empty icon={<ShieldCheck />} title="All clear" copy="No actions are waiting for review." />
+          <Empty
+            icon={<ShieldCheck />}
+            title="Всё чисто"
+            copy="Нет действий, ждущих вашего решения."
+          />
         )}
       </Section>
 
-      <Section eyebrow="TIMELINE" title="Run events">
+      <Section eyebrow="Лента" title="События прогонов">
         <TimelineList events={timeline} />
       </Section>
 
-      <Section eyebrow="WORKERS" title="Worker health">
+      <Section eyebrow="Воркеры" title="Здоровье узлов">
         {data.workers.length ? (
           <div className="worker-grid">
             {data.workers.map((worker) => (
-              <WorkerCard key={worker.id} worker={worker} />
+              <WorkerCard
+                key={worker.id}
+                worker={worker}
+                onSelect={
+                  onRuntimeFilterChange
+                    ? () => onRuntimeFilterChange('windows', 'active')
+                    : undefined
+                }
+              />
             ))}
           </div>
         ) : (
           <Empty
             icon={<HeartPulse />}
-            title="Cloud-only mode"
-            copy="No Windows worker heartbeats yet. Cloud agents still run normally."
+            title="Только Cloud"
+            copy="Windows-воркеры ещё не стучатся. Cloud-агенты работают как обычно."
           />
         )}
       </Section>
     </div>
   )
+}
+
+const PANEL_TITLES: Record<Exclude<TabId, 'voice'>, string> = {
+  active: 'Активные задачи',
+  history: 'Лента',
+  approvals: 'Решения',
+  repositories: 'Репозитории',
 }
 
 export function DashboardPanels({
@@ -354,10 +591,21 @@ export function DashboardPanels({
   loading,
   error,
   liveEvents = [],
+  runtimeFilter = 'all',
+  focusedJobId = null,
+  onRuntimeFilterChange,
+  onSelectJob,
   onRefresh,
   onDecision,
+  onAddRepository,
+  onUpdateRepository,
 }: Props) {
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
+  const [repoUrl, setRepoUrl] = useState('')
+  const [repoBranch, setRepoBranch] = useState(data.defaultBranch || 'dev')
+  const [repoBusy, setRepoBusy] = useState(false)
+  const [repoError, setRepoError] = useState<string | null>(null)
+  const [editingBranch, setEditingBranch] = useState<Record<string, string>>({})
 
   const act = (approvalId: string, decision: Decision, revision?: string) => {
     if (pendingIds.has(approvalId)) return
@@ -375,6 +623,30 @@ export function DashboardPanels({
       })
   }
 
+  const submitRepo = () => {
+    if (!onAddRepository || !repoUrl.trim() || repoBusy) return
+    setRepoBusy(true)
+    setRepoError(null)
+    feedback('tap')
+    void onAddRepository({
+      url: repoUrl.trim(),
+      branch: repoBranch.trim() || data.defaultBranch || 'dev',
+    })
+      .then(() => {
+        setRepoUrl('')
+        feedback('success')
+      })
+      .catch((err: unknown) => {
+        feedback('error')
+        setRepoError(err instanceof Error ? err.message : 'Не удалось добавить репозиторий')
+      })
+      .finally(() => setRepoBusy(false))
+  }
+
+  const filteredActive = data.jobs
+    .filter((job) => isActiveJobStatus(job.status))
+    .filter((job) => matchesRuntimeFilter(job.runtime, runtimeFilter))
+
   if (loading && tab !== 'overview') {
     return (
       <section className="panel-page" aria-busy="true">
@@ -389,7 +661,16 @@ export function DashboardPanels({
     return (
       <section className="panel-page overview-page">
         {error && <div className="inline-error" role="alert">{error}</div>}
-        <Overview data={data} liveEvents={liveEvents} pendingIds={pendingIds} act={act} />
+        <Overview
+          data={data}
+          liveEvents={liveEvents}
+          pendingIds={pendingIds}
+          act={act}
+          runtimeFilter={runtimeFilter}
+          focusedJobId={focusedJobId}
+          onRuntimeFilterChange={onRuntimeFilterChange}
+          onSelectJob={onSelectJob}
+        />
       </section>
     )
   }
@@ -398,13 +679,13 @@ export function DashboardPanels({
     <section className="panel-page">
       <header className="panel-header">
         <div>
-          <p className="eyebrow">BEACHOPS CONTROL</p>
-          <h1>{tab === 'active' ? 'Active work' : tab[0].toUpperCase() + tab.slice(1)}</h1>
+          <p className="eyebrow">Пульт BeachOps</p>
+          <h1>{PANEL_TITLES[tab]}</h1>
         </div>
         <button
           className="icon-button"
           type="button"
-          aria-label="Refresh"
+          aria-label="Обновить"
           onClick={() => {
             feedback('tap')
             onRefresh()
@@ -417,24 +698,49 @@ export function DashboardPanels({
       {error && <div className="inline-error" role="alert">{error}</div>}
 
       {tab === 'active' && (
-        data.jobs.filter((job) => isActiveJobStatus(job.status)).length ? (
-          <div className="agent-grid">
-            {data.jobs.filter((job) => isActiveJobStatus(job.status)).map((job) => (
-              <AgentCard key={job.id} job={job} />
-            ))}
-          </div>
-        ) : <Empty icon={<Clock3 />} title="Quiet horizon" copy="No jobs are active right now." />
+        <>
+          <RuntimeFilterBar
+            value={runtimeFilter}
+            onChange={(filter) => onRuntimeFilterChange?.(filter, 'active')}
+          />
+          {filteredActive.length ? (
+            <div className="agent-grid">
+              {filteredActive.map((job) => (
+                <AgentCard
+                  key={job.id}
+                  job={job}
+                  selected={focusedJobId === job.id}
+                  onSelect={onSelectJob ? () => onSelectJob(job.id, job.runtime) : undefined}
+                />
+              ))}
+            </div>
+          ) : (
+            <Empty
+              icon={<Clock3 />}
+              title="Тихий горизонт"
+              copy={
+                runtimeFilter === 'windows'
+                  ? 'Нет активных Windows-задач.'
+                  : runtimeFilter === 'cloud'
+                    ? 'Нет активных Cloud-задач.'
+                    : 'Сейчас нет активных задач.'
+              }
+            />
+          )}
+        </>
       )}
 
-      {tab === 'history' && <TimelineList events={liveEvents.length ? liveEvents : data.events} />}
+      {tab === 'history' && (
+        <TimelineList events={liveEvents.length ? liveEvents : data.events} />
+      )}
 
       {tab === 'approvals' && (
         <>
           <div className="locked-notice">
             <LockKeyhole size={18} />
             <div>
-              <strong>Review-only in Mini App</strong>
-              <p>Approve high-risk actions in the secure operator flow.</p>
+              <strong>Решения владельца</strong>
+              <p>Высокий риск подтверждайте осознанно — голос сам не одобрит.</p>
             </div>
           </div>
           {data.approvals.length ? (
@@ -444,12 +750,12 @@ export function DashboardPanels({
                   <div className="card-topline">
                     <span className={`risk risk-${approval.risk}`}>
                       {approval.risk === 'high' ? <AlertTriangle size={13} /> : <ShieldCheck size={13} />}
-                      {approval.risk} risk
+                      {riskLabel(approval.risk)}
                     </span>
-                    <time>{relativeTime(approval.requestedAt)}</time>
+                    <time>{relativeTimeRu(approval.requestedAt)}</time>
                   </div>
                   <h2>{approval.title}</h2>
-                  <p>{approval.repository ?? 'Protected operation'}</p>
+                  <p>{approval.repository ?? 'Защищённая операция'}</p>
                   {data.role.toLowerCase() === 'owner' && (
                     <ApprovalActions
                       pending={pendingIds.has(approval.id)}
@@ -457,7 +763,7 @@ export function DashboardPanels({
                       onRevise={() => act(
                         approval.id,
                         'revision',
-                        'Review the result and correct issues within the approved scope.',
+                        'Проверь результат и исправь в рамках одобренного scope.',
                       )}
                       onReject={() => act(approval.id, 'reject')}
                     />
@@ -465,25 +771,132 @@ export function DashboardPanels({
                 </article>
               ))}
             </div>
-          ) : <Empty icon={<ShieldCheck />} title="All clear" copy="No actions are waiting for review." />}
+          ) : (
+            <Empty
+              icon={<ShieldCheck />}
+              title="Всё чисто"
+              copy="Нет действий, ждущих вашего решения."
+            />
+          )}
         </>
       )}
 
       {tab === 'repositories' && (
-        data.repositories.length ? (
-          <div className="repo-grid">
-            {data.repositories.map((repo) => (
-              <article className="repo-card" key={repo.id}>
-                <div className="repo-mark"><GitBranch size={18} /></div>
-                <div>
-                  <h2>{repo.name}</h2>
-                  <p>{repo.branch} · {relativeTime(repo.lastActivityAt)}</p>
-                </div>
-                <span className={`repo-state ${repo.status}`}>{repo.status}</span>
-              </article>
-            ))}
-          </div>
-        ) : <Empty icon={<GitBranch />} title="No repositories" copy="Connected workspaces will appear here without exposing private URLs." />
+        <>
+          <form
+            className="repo-add-form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              submitRepo()
+            }}
+          >
+            <label>
+              <span>GitHub URL</span>
+              <input
+                value={repoUrl}
+                onChange={(event) => setRepoUrl(event.target.value)}
+                placeholder="https://github.com/org/repo"
+                autoComplete="off"
+                inputMode="url"
+              />
+            </label>
+            <label>
+              <span>Базовая ветка</span>
+              <input
+                value={repoBranch}
+                onChange={(event) => setRepoBranch(event.target.value)}
+                placeholder={data.defaultBranch || 'dev'}
+                autoComplete="off"
+              />
+            </label>
+            <button type="submit" disabled={repoBusy || !repoUrl.trim()}>
+              {repoBusy ? <Loader2 size={16} className="spin-icon" /> : <Plus size={16} />}
+              Добавить
+            </button>
+          </form>
+          {repoError && <div className="inline-error" role="alert">{repoError}</div>}
+
+          {(data.agents?.length ?? 0) > 0 && (
+            <Section eyebrow="Чаты" title="Cloud-агенты">
+              <div className="agent-grid">
+                {data.agents.map((slot) => (
+                  <SlotCard key={slot.id} slot={slot} />
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {data.repositories.length ? (
+            <div className="repo-grid">
+              {data.repositories.map((repo) => {
+                const draft = editingBranch[repo.id] ?? repo.branch
+                return (
+                  <motion.article
+                    className={`repo-card${repo.active ? ' is-active' : ''}`}
+                    key={repo.id}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                  >
+                    <div className="repo-mark"><GitBranch size={18} /></div>
+                    <div className="repo-body">
+                      <h2>{repo.name}</h2>
+                      <p>{repo.url ?? repo.name}</p>
+                      <div className="repo-branch-row">
+                        <input
+                          value={draft}
+                          aria-label={`Базовая ветка ${repo.name}`}
+                          onChange={(event) => setEditingBranch((prev) => ({
+                            ...prev,
+                            [repo.id]: event.target.value,
+                          }))}
+                        />
+                        <button
+                          type="button"
+                          disabled={!onUpdateRepository || draft === repo.branch}
+                          onClick={() => {
+                            if (!onUpdateRepository || !draft.trim()) return
+                            feedback('tap')
+                            void onUpdateRepository(repo.id, { branch: draft.trim() })
+                              .then(() => feedback('success'))
+                              .catch(() => feedback('error'))
+                          }}
+                        >
+                          Сохранить
+                        </button>
+                      </div>
+                      <div className="repo-actions">
+                        {repo.active ? (
+                          <span className="repo-state ready">Активен</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="ghost-link"
+                            disabled={!onUpdateRepository}
+                            onClick={() => {
+                              if (!onUpdateRepository) return
+                              feedback('tap')
+                              void onUpdateRepository(repo.id, { makeActive: true })
+                                .then(() => feedback('success'))
+                                .catch(() => feedback('error'))
+                            }}
+                          >
+                            Сделать активным
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </motion.article>
+                )
+              })}
+            </div>
+          ) : (
+            <Empty
+              icon={<GitBranch />}
+              title="Нет репозиториев"
+              copy="Добавьте GitHub URL и базовую ветку — дальше /do работает прямо на ней."
+            />
+          )}
+        </>
       )}
     </section>
   )

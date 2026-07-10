@@ -44,6 +44,25 @@ def test_allows_only_exact_repo_and_branch() -> None:
     assert not policy.is_allowed("https://github.com/acme/beachops", "Dev")
 
 
+def test_empty_policy_is_open_mode() -> None:
+    policy = RepositoryPolicyService.from_json('{"repositories":[]}')
+    assert policy.open_mode is True
+    assert policy.is_allowed("https://github.com/acme/app", "dev")
+    policy.require_allowed("https://github.com/acme/app", "dev", write=True)
+    with pytest.raises(RepositoryNotAllowedError):
+        policy.require_allowed("https://github.com/acme/app", "main", write=True)
+
+
+def test_open_mode_survives_extra_repository_merge() -> None:
+    policy = RepositoryPolicyService.from_json('{"repositories":[]}')
+    merged = policy.with_extra_repository(
+        repository_url="https://github.com/acme/beachops",
+        allowed_branches=("dev",),
+    )
+    assert merged.open_mode is True
+    assert merged.is_allowed("https://github.com/other/app", "feat/x")
+
+
 def test_protected_branches_are_readable_but_not_writable() -> None:
     policy = _policy()
 

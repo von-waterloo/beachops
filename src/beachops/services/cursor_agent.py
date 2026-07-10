@@ -23,7 +23,7 @@ from cursor_sdk import (
 )
 
 from beachops.domain.models import RepoConfig, UserMode
-from beachops.domain.prompts import build_prompt
+from beachops.domain.prompts import build_prompt, is_protected_default_branch
 from beachops.domain.runtime import AgentRuntime, parse_runtime
 from beachops.services.plan_format import (
     PLAN_ARTIFACT_SUFFIX,
@@ -76,10 +76,11 @@ class CursorAgentService:
         self_improve: bool = False,
     ) -> tuple[RunOutcome, str | None]:
         cursor_mode = "agent" if mode in (UserMode.ASK, UserMode.DO) else "plan"
-        # Write-runs may create an isolated branch/PR only. Direct work on the
-        # configured base branch is never enabled by the control plane.
-        auto_create_pr = mode == UserMode.DO
-        work_on_current_branch = False
+        # DO on a non-protected base (usually `dev`) works on that branch.
+        # Protected bases (main/master) still get an isolated branch + PR.
+        protected_base = is_protected_default_branch(repo.default_branch)
+        work_on_current_branch = mode == UserMode.DO and not protected_base
+        auto_create_pr = mode == UserMode.DO and protected_base
         resolved_runtime = parse_runtime(runtime)
         full_prompt = build_prompt(
             prompt,

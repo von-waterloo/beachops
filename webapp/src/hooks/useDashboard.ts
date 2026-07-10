@@ -7,9 +7,11 @@ const emptySnapshot: DashboardSnapshot = {
   events: [],
   approvals: [],
   repositories: [],
+  agents: [],
   usage: null,
   panic: false,
   role: 'Operator',
+  defaultBranch: 'dev',
   workers: [],
   queue: { pending: 0, running: 0, active: 0, queued: 0, blocked: 0, total: 0 },
 }
@@ -24,10 +26,12 @@ function normalize(snapshot: Partial<DashboardSnapshot>): DashboardSnapshot {
     events: snapshot.events ?? [],
     approvals: snapshot.approvals ?? [],
     repositories: snapshot.repositories ?? [],
+    agents: snapshot.agents ?? [],
     workers: snapshot.workers ?? [],
     usage: snapshot.usage ?? null,
     panic: Boolean(snapshot.panic),
     role: snapshot.role ?? 'Operator',
+    defaultBranch: snapshot.defaultBranch ?? 'dev',
     queue: {
       pending: queue?.pending ?? queue?.queued ?? 0,
       running: queue?.running ?? queue?.active ?? 0,
@@ -50,7 +54,7 @@ export function useDashboard(pollMs = 15_000) {
       setData(normalize(snapshot))
       setError(null)
     } catch {
-      setError(navigator.onLine ? 'Dashboard is temporarily unavailable' : 'You are offline')
+      setError(navigator.onLine ? 'Пульт временно недоступен' : 'Нет сети')
     }
     setLoading(false)
   }, [])
@@ -68,6 +72,36 @@ export function useDashboard(pollMs = 15_000) {
     await refresh()
   }, [refresh])
 
+  const addRepository = useCallback(async (input: {
+    url: string
+    branch?: string
+    makeActive?: boolean
+  }) => {
+    await apiFetch('/api/repos', {
+      method: 'POST',
+      body: JSON.stringify({
+        url: input.url,
+        branch: input.branch || undefined,
+        makeActive: input.makeActive ?? true,
+      }),
+    })
+    await refresh()
+  }, [refresh])
+
+  const updateRepository = useCallback(async (
+    repoId: string,
+    input: { branch?: string; makeActive?: boolean },
+  ) => {
+    await apiFetch(`/api/repos/${repoId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        branch: input.branch,
+        makeActive: input.makeActive,
+      }),
+    })
+    await refresh()
+  }, [refresh])
+
   const hasActive = data.jobs.some((job) => isActiveJobStatus(job.status))
     || (data.queue.running ?? 0) > 0
 
@@ -75,9 +109,33 @@ export function useDashboard(pollMs = 15_000) {
     void refresh()
     const interval = window.setInterval(() => {
       if (document.visibilityState === 'visible') void refresh()
-    }, hasActive ? Math.min(pollMs, 5_000) : pollMs)
+    }, hasActive ? Math.min(pollMs, 4_000) : pollMs)
     return () => window.clearInterval(interval)
   }, [refresh, pollMs, hasActive])
 
-  return { data, loading, error, refresh, decideApproval }
+  // Catch up immediately on tab focus / return-from-background instead of
+  // waiting out the poll interval, so the plane never looks stale.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    window.addEventListener('online', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+      window.removeEventListener('online', onVisible)
+    }
+  }, [refresh])
+
+  return {
+    data,
+    loading,
+    error,
+    refresh,
+    decideApproval,
+    addRepository,
+    updateRepository,
+  }
 }

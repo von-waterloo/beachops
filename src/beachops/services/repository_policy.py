@@ -1,4 +1,10 @@
-"""Strict GitHub repository and branch allowlist enforcement."""
+"""GitHub repository URL validation and optional allowlist.
+
+Empty ``REPOSITORY_POLICY_JSON`` (or no repositories) enables open mode:
+any valid GitHub HTTPS / git@ URL and branch is allowed. Writes to
+``main`` / ``master`` remain blocked. A non-empty allowlist still enforces
+exact URL + branch matches for stricter deployments.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +20,7 @@ _SCP_RE = re.compile(
     r"^git@github\.com:([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$",
     re.IGNORECASE,
 )
+_PROTECTED_WRITE_BRANCHES = frozenset({"main", "master"})
 
 
 class RepositoryPolicyError(ValueError):
@@ -25,7 +32,12 @@ class RepositoryNotAllowedError(PermissionError):
 
 
 class RepositoryPolicyService:
-    def __init__(self, policies: tuple[RepositoryPolicy, ...]) -> None:
+    def __init__(
+        self,
+        policies: tuple[RepositoryPolicy, ...],
+        *,
+        open_mode: bool | None = None,
+    ) -> None:
         by_url: dict[str, RepositoryPolicy] = {}
         for policy in policies:
             normalized_url = normalize_github_url(policy.repository_url)
@@ -50,6 +62,9 @@ class RepositoryPolicyService:
                 protected_branches=protected,
             )
         self._by_url = by_url
+        # Empty allowlist = open. Explicit open_mode preserves openness when
+        # self-improve merges an extra repo into an otherwise empty policy.
+        self._open = bool(len(by_url) == 0 if open_mode is None else open_mode)
 
     @classmethod
     def from_json(cls, raw: str) -> RepositoryPolicyService:
@@ -60,7 +75,8 @@ class RepositoryPolicyService:
         if not isinstance(data, Mapping):
             raise RepositoryPolicyError("repository policy must be a JSON object")
         repositories = data.get("repositories", data.get("allowed_repositories", []))
-        return cls(_parse_repositories(repositories))
+        policies = _parse_repositories(repositories)
+        return cls(policies, open_mode=len(policies) == 0)
 
     def with_extra_repository(
         self,
@@ -94,7 +110,12 @@ class RepositoryPolicyService:
         )
         service = object.__new__(RepositoryPolicyService)
         service._by_url = merged
+        service._open = self._open
         return service
+
+    @property
+    def open_mode(self) -> bool:
+        return self._open
 
     @property
     def policies(self) -> tuple[RepositoryPolicy, ...]:
@@ -108,10 +129,20 @@ class RepositoryPolicyService:
         return self._by_url.get(normalized)
 
     def is_allowed(self, repository_url: str, branch: str) -> bool:
+        try:
+            normalize_github_url(repository_url)
+            _validate_branch(branch)
+        except RepositoryPolicyError:
+            return False
+        if self._open:
+            return True
         policy = self.policy_for(repository_url)
         return policy is not None and branch in policy.allowed_branches
 
     def is_protected(self, repository_url: str, branch: str) -> bool:
+        normalized_branch = branch.strip().lower()
+        if normalized_branch in _PROTECTED_WRITE_BRANCHES:
+            return True
         policy = self.policy_for(repository_url)
         return policy is not None and branch in policy.protected_branches
 
@@ -121,11 +152,23 @@ class RepositoryPolicyService:
         branch: str,
         *,
         write: bool = False,
-    ) -> RepositoryPolicy:
-        policy = self.policy_for(repository_url)
-        if policy is None or branch not in policy.allowed_branches:
+    ) -> RepositoryPolicy | None:
+        try:
+            normalized = normalize_github_url(repository_url)
+            validated_branch = _validate_branch(branch)
+        except RepositoryPolicyError as exc:
+            raise RepositoryNotAllowedError(str(exc)) from exc
+
+        if write and validated_branch.lower() in _PROTECTED_WRITE_BRANCHES:
+            raise RepositoryNotAllowedError("writes to protected branches are not allowed")
+
+        if self._open:
+            return self.policy_for(normalized)
+
+        policy = self.policy_for(normalized)
+        if policy is None or validated_branch not in policy.allowed_branches:
             raise RepositoryNotAllowedError("repository or branch is not allowlisted")
-        if write and branch in policy.protected_branches:
+        if write and validated_branch in policy.protected_branches:
             raise RepositoryNotAllowedError("writes to protected branches are not allowed")
         return policy
 
@@ -211,4 +254,3 @@ def _parse_repositories(value: object) -> tuple[RepositoryPolicy, ...]:
             )
         )
     return tuple(entries)
-

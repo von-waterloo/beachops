@@ -38,17 +38,28 @@ async def repo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if len(parsed.alias) > MAX_ALIAS_LEN:
             await update.message.reply_text(repo_alias_too_long(MAX_ALIAS_LEN))
             return
-        if not app.repository_policy.is_allowed(
-            parsed.github_url,
-            parsed.default_branch,
-        ):
+        from beachops.services.repo_parse import normalize_github_repo_url
+        from beachops.services.repository_policy import (
+            RepositoryNotAllowedError,
+            RepositoryPolicyError,
+            normalize_github_url,
+        )
+
+        try:
+            github_url = normalize_github_url(normalize_github_repo_url(parsed.github_url))
+            app.repository_policy.require_allowed(
+                github_url,
+                parsed.default_branch,
+                write=False,
+            )
+        except (RepositoryNotAllowedError, RepositoryPolicyError):
             await update.message.reply_text(repo_not_allowed())
             return
         make_active = len(await app.repos.list_repos(user.id)) == 0
         repo = await app.repos.add_repo(
             user.id,
             alias=parsed.alias,
-            github_url=parsed.github_url,
+            github_url=github_url,
             default_branch=parsed.default_branch,
             make_active=make_active,
         )

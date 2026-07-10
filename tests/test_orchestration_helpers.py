@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from beachops.domain.runtime import AgentRuntime, is_cloud_agent_id, parse_runtime
+from beachops.domain.runtime import (
+    AgentRuntime,
+    cursor_agent_url,
+    is_cloud_agent_id,
+    parse_runtime,
+)
 from beachops.services.deploy_trigger import DeployTriggerError, DeployTriggerService
 from beachops.services.runtime_router import resolve_runtime
 
@@ -15,6 +20,8 @@ def test_parse_runtime_windows_aliases() -> None:
     assert parse_runtime("cloud") is AgentRuntime.CLOUD
     assert is_cloud_agent_id("bc-abc") is True
     assert is_cloud_agent_id("local-1") is False
+    assert cursor_agent_url("bc-abc") == "https://cursor.com/agents/bc-abc"
+    assert cursor_agent_url("local-1") is None
 
 
 def test_resolve_runtime_prefers_payload() -> None:

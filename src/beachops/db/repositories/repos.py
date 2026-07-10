@@ -152,6 +152,39 @@ class RepoRepository:
         assert row is not None
         return _row_to_repo(row)
 
+    async def update_repo(
+        self,
+        tg_user_id: int,
+        repo_id: int,
+        *,
+        default_branch: str | None = None,
+        make_active: bool | None = None,
+    ) -> RepoConfig | None:
+        repo = await self.get_by_id(tg_user_id, repo_id)
+        if repo is None:
+            return None
+        branch = default_branch if default_branch is not None else repo.default_branch
+        async with self._pool.acquire() as conn:
+            if make_active:
+                await conn.execute(
+                    "UPDATE user_repos SET is_active = FALSE WHERE tg_user_id = $1",
+                    tg_user_id,
+                )
+            row = await conn.fetchrow(
+                """
+                UPDATE user_repos
+                SET default_branch = $3,
+                    is_active = COALESCE($4, is_active)
+                WHERE tg_user_id = $1 AND id = $2
+                RETURNING id, tg_user_id, alias, github_url, default_branch, is_active
+                """,
+                tg_user_id,
+                repo_id,
+                branch,
+                True if make_active else None,
+            )
+        return _row_to_repo(row) if row else None
+
     async def seed_default_repo_for_new_user(
         self,
         tg_user_id: int,

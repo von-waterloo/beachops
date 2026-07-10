@@ -17,6 +17,13 @@ def is_cloud_agent_id(agent_id: str | None) -> bool:
     return agent_id.startswith("bc-")
 
 
+def cursor_agent_url(agent_id: str | None) -> str | None:
+    """Desktop/web URL to open a Cursor cloud agent chat."""
+    if not is_cloud_agent_id(agent_id):
+        return None
+    return f"https://cursor.com/agents/{agent_id}"
+
+
 def parse_runtime(value: object | None) -> AgentRuntime:
     if value is None or value == "":
         return AgentRuntime.CLOUD

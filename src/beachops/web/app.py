@@ -5,16 +5,28 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import secrets
+import time
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
+
 from beachops.app_context import AppContext
 from beachops.config.settings import Settings, get_settings
+from beachops.domain.cursor_models import (
+    CURSOR_MODEL_ORDER,
+    CursorModelKey,
+    cursor_model_label,
+    normalize_cursor_model_key,
+)
 from beachops.domain.models import UserMode
+from beachops.domain.runtime import cursor_agent_url
 from beachops.domain.security import (
     ApprovalDecision,
     ApprovalKind,
@@ -24,12 +36,24 @@ from beachops.domain.security import (
 )
 from beachops.services.approval_actions import approve_job, reject_job, request_revision
 from beachops.services.durable_dispatch import dispatch_prompt
+from beachops.services.logging_config import (
+    bind_log_context,
+    clear_log_context,
+    configure_logging,
+    new_correlation_id,
+)
 from beachops.web.passkey_auth import (
     resolve_request_principal,
     resolve_websocket_principal,
     router as passkey_auth_router,
 )
-from beachops.web.schemas import DecisionRequest, DeployDispatchRequest, PanicRequest
+from beachops.web.schemas import (
+    DecisionRequest,
+    DeployDispatchRequest,
+    PanicRequest,
+    RepoCreateRequest,
+    RepoUpdateRequest,
+)
 from beachops.web.telegram_auth import (
     TelegramInitDataError,
     TelegramPrincipal,
@@ -38,16 +62,49 @@ from beachops.web.telegram_auth import (
 )
 from beachops.web.voice import RealtimeVoiceGateway, VoiceGatewayLimits
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     settings = get_settings()
+    configure_logging(settings.log_level, service="api")
     context = await AppContext.create(settings)
     app.state.context = context
     try:
         yield
     finally:
         await context.close()
+
+
+class RequestLogMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        if request.url.path in {"/health", "/ready"}:
+            return await call_next(request)
+        correlation_id = new_correlation_id()
+        started = time.monotonic()
+        bind_log_context(
+            correlation_id=correlation_id,
+            action="http_request",
+            service="api",
+        )
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            response.headers["X-Correlation-Id"] = correlation_id
+            return response
+        finally:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            logger.info(
+                "%s %s -> %s",
+                request.method,
+                request.url.path,
+                status_code,
+                extra={"duration_ms": duration_ms, "correlation_id": correlation_id},
+            )
+            clear_log_context()
+            bind_log_context(service="api")
 
 
 def create_app() -> FastAPI:
@@ -58,6 +115,7 @@ def create_app() -> FastAPI:
         redoc_url=None,
         lifespan=_lifespan,
     )
+    app.add_middleware(RequestLogMiddleware)
     app.include_router(passkey_auth_router)
 
     @app.get("/health")
@@ -78,12 +136,46 @@ def create_app() -> FastAPI:
     ) -> dict:
         context = _context(request)
         role = context.settings.role_for(principal.user_id)
+        model_key = await context.users.get_cursor_model_key(
+            principal.user_id, default=context.settings.cursor_model
+        )
         return {
             "userId": principal.user_id,
             "role": role.value if role else "none",
             "writesEnabled": not await context.system_state.is_panic_enabled(),
             "authMethod": principal.auth_method,
             "hasPasskey": await context.passkeys.has_any(principal.user_id),
+            "cursorModelKey": model_key,
+            "models": [
+                {"key": choice.value, "label": cursor_model_label(choice.value)}
+                for choice in CURSOR_MODEL_ORDER
+            ],
+        }
+
+    @app.put("/api/me/model")
+    async def set_model(
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        context = _context(request)
+        body = await request.json()
+        raw_key = str(body.get("modelKey") or body.get("model_key") or "").strip()
+        model_key = normalize_cursor_model_key(
+            raw_key, default=context.settings.cursor_model
+        )
+        if model_key not in {item.value for item in CursorModelKey}:
+            raise HTTPException(status_code=400, detail="unknown model")
+        await context.users.set_cursor_model_key(principal.user_id, model_key)
+        logger.info(
+            "Cursor model updated",
+            extra={
+                "user_id": principal.user_id,
+                "action": "set_model",
+            },
+        )
+        return {
+            "cursorModelKey": model_key,
+            "label": cursor_model_label(model_key),
         }
 
     @app.get("/api/dashboard")
@@ -105,19 +197,14 @@ def create_app() -> FastAPI:
         )
         events = await _recent_events(context, principal.user_id, role)
         total_tokens = sum(job.total_tokens or 0 for job in jobs)
+        user_repos = await context.repos.list_repos(principal.user_id)
+        slots = await context.agent_slots.list_slots(principal.user_id)
         return {
             "jobs": [_job_json(job) for job in jobs],
             "events": events,
             "approvals": [_approval_json(item) for item in approvals],
-            "repositories": [
-                {
-                    "id": hashlib.sha256(policy.repository_url.encode()).hexdigest()[:12],
-                    "name": policy.repository_url.rsplit("/", 1)[-1],
-                    "branch": policy.allowed_branches[0],
-                    "status": "ready",
-                }
-                for policy in context.repository_policy.policies
-            ],
+            "repositories": [_repo_json(repo) for repo in user_repos],
+            "agents": [_agent_slot_json(slot) for slot in slots],
             "usage": {
                 "period": "current",
                 "voiceMinutes": 0,
@@ -127,12 +214,98 @@ def create_app() -> FastAPI:
             },
             "panic": await context.system_state.is_panic_enabled(),
             "role": role.value if role else "none",
+            "defaultBranch": context.settings.default_branch,
             "workers": [
                 _worker_json(node)
                 for node in await context.worker_nodes.list_online()
             ],
             "queue": _queue_stats(jobs),
         }
+
+    @app.post("/api/repos")
+    async def create_repo(
+        body: RepoCreateRequest,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        if role not in {Role.OPERATOR, Role.OWNER}:
+            raise HTTPException(status_code=403, detail="operator role required")
+        from beachops.services.repo_parse import (
+            MAX_ALIAS_LEN,
+            alias_from_github_url,
+            normalize_github_repo_url,
+        )
+        from beachops.services.repository_policy import (
+            RepositoryNotAllowedError,
+            RepositoryPolicyError,
+            normalize_github_url,
+        )
+
+        branch = (body.branch or context.settings.default_branch).strip() or "dev"
+        try:
+            github_url = normalize_github_url(normalize_github_repo_url(body.url))
+            context.repository_policy.require_allowed(
+                github_url, branch, write=False
+            )
+        except (RepositoryNotAllowedError, RepositoryPolicyError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        alias = (body.alias or alias_from_github_url(github_url)).strip()[:MAX_ALIAS_LEN]
+        if not alias:
+            raise HTTPException(status_code=400, detail="alias is required")
+        existing = await context.repos.list_repos(principal.user_id)
+        make_active = body.makeActive or not existing
+        repo = await context.repos.add_repo(
+            principal.user_id,
+            alias=alias,
+            github_url=github_url,
+            default_branch=branch,
+            make_active=make_active,
+        )
+        if make_active:
+            await context.agent_slots.sync_active_slot_repo(principal.user_id, repo)
+        return _repo_json(repo)
+
+    @app.patch("/api/repos/{repo_id}")
+    async def update_repo(
+        repo_id: int,
+        body: RepoUpdateRequest,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        if role not in {Role.OPERATOR, Role.OWNER}:
+            raise HTTPException(status_code=403, detail="operator role required")
+        from beachops.services.repository_policy import (
+            RepositoryNotAllowedError,
+            RepositoryPolicyError,
+        )
+
+        current = await context.repos.get_by_id(principal.user_id, repo_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="repository not found")
+        branch = body.branch.strip() if body.branch else None
+        if branch:
+            try:
+                context.repository_policy.require_allowed(
+                    current.github_url, branch, write=False
+                )
+            except (RepositoryNotAllowedError, RepositoryPolicyError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        repo = await context.repos.update_repo(
+            principal.user_id,
+            repo_id,
+            default_branch=branch,
+            make_active=body.makeActive,
+        )
+        if repo is None:
+            raise HTTPException(status_code=404, detail="repository not found")
+        if repo.is_active:
+            await context.agent_slots.sync_active_slot_repo(principal.user_id, repo)
+        return _repo_json(repo)
 
     @app.get("/api/jobs/{job_id}/events")
     async def job_events(
@@ -318,14 +491,28 @@ def create_app() -> FastAPI:
     async def voice(websocket: WebSocket) -> None:
         await websocket.accept()
         context: AppContext = websocket.app.state.context
+        correlation_id = new_correlation_id()
+        session_started = time.monotonic()
+        bind_log_context(
+            correlation_id=correlation_id,
+            action="voice_session",
+            service="api",
+        )
         try:
             auth_message = await asyncio.wait_for(websocket.receive_json(), timeout=10)
             authorization = str(auth_message.get("authorization", ""))
             principal = await resolve_websocket_principal(websocket, authorization)
         except (TelegramInitDataError, asyncio.TimeoutError, ValueError):
+            logger.warning(
+                "Voice WS auth failed",
+                extra={"action": "voice_auth", "error_code": "4401"},
+            )
             await websocket.close(code=4401)
+            clear_log_context()
+            bind_log_context(service="api")
             return
 
+        bind_log_context(user_id=principal.user_id)
         limit = await context.rate_limiter.check(
             subject=str(principal.user_id),
             action="voice_session",
@@ -333,9 +520,23 @@ def create_app() -> FastAPI:
             window_sec=60,
         )
         if not limit.allowed:
+            logger.warning(
+                "Voice WS rate limited",
+                extra={
+                    "user_id": principal.user_id,
+                    "action": "voice_session",
+                    "error_code": "4429",
+                },
+            )
             await websocket.close(code=4429)
+            clear_log_context()
+            bind_log_context(service="api")
             return
 
+        logger.info(
+            "Voice WS session ready",
+            extra={"user_id": principal.user_id, "action": "voice_session"},
+        )
         await websocket.send_json({"type": "session.ready"})
 
         gateway = RealtimeVoiceGateway(
@@ -352,6 +553,14 @@ def create_app() -> FastAPI:
         async def on_plan_request(transcript: str) -> str:
             run_context = await context.agent_slots.get_run_context(principal.user_id)
             if run_context is None:
+                logger.warning(
+                    "Voice plan blocked: no repository",
+                    extra={
+                        "user_id": principal.user_id,
+                        "action": "voice_plan_request",
+                        "error_code": "no_repository",
+                    },
+                )
                 raise ValueError("repository is not selected")
             dispatched = await dispatch_prompt(
                 context,
@@ -362,7 +571,25 @@ def create_app() -> FastAPI:
                 idempotency_key=f"voice:{principal.user_id}:{uuid4()}",
             )
             if not dispatched.enqueued:
+                logger.warning(
+                    "Voice plan blocked: %s",
+                    dispatched.reason or "request blocked",
+                    extra={
+                        "user_id": principal.user_id,
+                        "action": "voice_plan_request",
+                        "error_code": "dispatch_blocked",
+                    },
+                )
                 raise ValueError(dispatched.reason or "request blocked")
+            bind_log_context(job_id=str(dispatched.job.id))
+            logger.info(
+                "Voice plan enqueued",
+                extra={
+                    "user_id": principal.user_id,
+                    "job_id": str(dispatched.job.id),
+                    "action": "voice_plan_request",
+                },
+            )
             task = asyncio.create_task(
                 _speak_job_result(context, websocket, dispatched.job.id)
             )
@@ -373,6 +600,14 @@ def create_app() -> FastAPI:
         try:
             await gateway.run(websocket, on_plan_request=on_plan_request)
         except Exception:
+            logger.exception(
+                "Voice WS gateway failed",
+                extra={
+                    "user_id": principal.user_id,
+                    "action": "voice_session",
+                    "error_code": "provider_unavailable",
+                },
+            )
             with suppress(Exception):
                 await websocket.send_json(
                     {
@@ -386,6 +621,16 @@ def create_app() -> FastAPI:
         finally:
             for task in result_tasks:
                 task.cancel()
+            logger.info(
+                "Voice WS session closed",
+                extra={
+                    "user_id": principal.user_id,
+                    "action": "voice_session",
+                    "duration_ms": int((time.monotonic() - session_started) * 1000),
+                },
+            )
+            clear_log_context()
+            bind_log_context(service="api")
 
     @app.post("/api/workers/register")
     async def register_worker(request: Request) -> dict:
@@ -468,18 +713,45 @@ def create_app() -> FastAPI:
         slot_id = payload.get("slot_id")
         cursor_agent_id = None
         local_path = payload.get("local_path")
-        model = context.settings.cursor_model
+        model_key = await context.users.get_cursor_model_key(
+            job.actor_id, default=context.settings.cursor_model
+        )
         if slot_id is not None:
             slot = await context.agent_slots.get_slot(job.actor_id, int(slot_id))
             if slot is not None:
                 cursor_agent_id = slot.cursor_agent_id
                 local_path = local_path or slot.local_path
 
+        mode_raw = str(payload.get("mode") or "ask")
+        prompt = str(payload.get("prompt") or "")
+        repo_id = payload.get("repo_id")
+        memory_block = None
+        try:
+            mode = UserMode(mode_raw)
+        except ValueError:
+            mode = UserMode.ASK
+        if mode in (UserMode.ASK, UserMode.PLAN) and prompt:
+            entries = await context.memory.recall(
+                job.actor_id,
+                int(repo_id) if repo_id is not None else None,
+                prompt,
+            )
+            memory_block = context.memory.format_recall_block(entries) or None
+            logger.info(
+                "Windows claim memory recall hits=%s",
+                len(entries),
+                extra={
+                    "user_id": job.actor_id,
+                    "job_id": str(job.id),
+                    "action": "worker_claim",
+                },
+            )
+
         await context.run_events.append(
             job_id=job.id,
             actor_id=job.actor_id,
             event_type="worker.claimed",
-            payload={"workerNodeId": str(node["id"])},
+            payload={"workerNodeId": str(node["id"]), "modelKey": model_key},
             idempotency_key=f"{job.id}:claimed:{node['id']}",
         )
         return {
@@ -487,16 +759,18 @@ def create_app() -> FastAPI:
                 "id": str(job.id),
                 "actorId": job.actor_id,
                 "kind": job.kind.value,
-                "mode": payload.get("mode") or "ask",
-                "prompt": payload.get("prompt") or "",
+                "mode": mode_raw,
+                "prompt": prompt,
                 "repositoryUrl": job.repository_url,
                 "repositoryAlias": (job.repository_url or "").rsplit("/", 1)[-1] or "repo",
                 "branch": job.branch,
                 "localPath": local_path,
                 "cursorAgentId": cursor_agent_id,
                 "slotId": slot_id,
-                "repoId": payload.get("repo_id"),
-                "model": model,
+                "repoId": repo_id,
+                "model": model_key,
+                "modelKey": model_key,
+                "memoryBlock": memory_block,
                 "runtime": job.runtime,
             }
         }
@@ -549,6 +823,41 @@ def create_app() -> FastAPI:
                 if event_type == "run.failed" or payload.get("status") == "error"
                 else JobStatus.SUCCEEDED
             )
+            if to_status == JobStatus.SUCCEEDED:
+                try:
+                    job_payload = {}
+                    if job.payload_ciphertext:
+                        job_payload = context.payload_crypto.decrypt_json(
+                            job.payload_ciphertext
+                        )
+                    await context.memory.index_run(
+                        tg_user_id=job.actor_id,
+                        repo_id=(
+                            int(job_payload["repo_id"])
+                            if job_payload.get("repo_id") is not None
+                            else None
+                        ),
+                        prompt=str(job_payload.get("prompt") or ""),
+                        result=str(
+                            payload.get("finalText") or payload.get("final_text") or ""
+                        ),
+                        mode=str(job_payload.get("mode") or "ask"),
+                        run_id=str(
+                            payload.get("runId")
+                            or payload.get("run_id")
+                            or job.cursor_run_id
+                            or ""
+                        )
+                        or None,
+                        pr_url=payload.get("prUrl") or payload.get("pr_url"),
+                        status="finished",
+                        duration_ms=None,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Windows run memory index failed",
+                        extra={"job_id": str(job.id), "action": "memory_index"},
+                    )
             if payload.get("prUrl") or payload.get("totalTokens") is not None:
                 await context.jobs.set_result(
                     job.actor_id,
@@ -644,11 +953,16 @@ def _worker_json(node: dict) -> dict:
     capabilities = node.get("capabilities") or {}
     if isinstance(capabilities, str):
         capabilities = json.loads(capabilities)
+    # `is_live` reflects heartbeat freshness (see WorkerNodeRepository); a
+    # crashed worker's last-persisted status would otherwise read "online"
+    # forever, so the API always reports the derived, time-aware state.
+    is_live = node.get("is_live")
+    status = node["status"] if is_live is None else ("online" if is_live else "offline")
     return {
         "id": str(node["id"]),
         "hostname": node["hostname"],
         "platform": node["platform"],
-        "status": node["status"],
+        "status": status,
         "capabilities": capabilities,
         "lastHeartbeatAt": node["last_heartbeat_at"].isoformat()
         if node.get("last_heartbeat_at")
@@ -725,6 +1039,7 @@ def _job_json(job) -> dict:
         JobStatus.REVIEW_REQUIRED: "blocked",
     }
     mapped = status_map.get(job.status, job.status.value)
+    agent_id = getattr(job, "cursor_agent_id", None)
     return {
         "id": str(job.id),
         "title": job.summary or job.kind.value,
@@ -734,6 +1049,32 @@ def _job_json(job) -> dict:
         "runtime": job.runtime or "cloud",
         "workerNodeId": str(job.worker_node_id) if job.worker_node_id else None,
         "progress": _job_progress(mapped),
+        "cursorAgentId": agent_id,
+        "cursorUrl": cursor_agent_url(agent_id),
+        "branch": getattr(job, "branch", None),
+    }
+
+
+def _repo_json(repo) -> dict:
+    return {
+        "id": str(repo.id),
+        "name": repo.alias,
+        "url": repo.github_url,
+        "branch": repo.default_branch,
+        "status": "ready",
+        "active": bool(repo.is_active),
+    }
+
+
+def _agent_slot_json(slot) -> dict:
+    return {
+        "id": str(slot.id),
+        "label": slot.label,
+        "runtime": slot.runtime or "cloud",
+        "active": bool(slot.is_active),
+        "repository": slot.repo_alias,
+        "cursorAgentId": slot.cursor_agent_id,
+        "cursorUrl": cursor_agent_url(slot.cursor_agent_id),
     }
 
 
@@ -823,14 +1164,47 @@ async def _speak_job_result(
     websocket: WebSocket,
     job_id: UUID,
 ) -> None:
+    logger.info(
+        "Voice speak poll started",
+        extra={"job_id": str(job_id), "action": "voice_speak"},
+    )
     for _ in range(1800):
         await asyncio.sleep(2)
         job = await context.jobs.get_internal(job_id)
         if job is None:
+            logger.warning(
+                "Voice speak: job missing",
+                extra={
+                    "job_id": str(job_id),
+                    "action": "voice_speak",
+                    "error_code": "job_missing",
+                },
+            )
+            with suppress(Exception):
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "job_missing",
+                        "message": "Task disappeared",
+                    }
+                )
             return
         if job.status in {JobStatus.FAILED, JobStatus.BLOCKED, JobStatus.CANCELLED}:
+            logger.warning(
+                "Voice speak: job %s",
+                job.status.value,
+                extra={
+                    "job_id": str(job_id),
+                    "action": "voice_speak",
+                    "error_code": job.status.value,
+                },
+            )
             await websocket.send_json(
-                {"type": "error", "message": f"Task {job.status.value}"}
+                {
+                    "type": "error",
+                    "code": job.status.value,
+                    "message": f"Task {job.status.value}",
+                }
             )
             return
         if job.status not in {
@@ -840,9 +1214,42 @@ async def _speak_job_result(
         }:
             continue
         if not job.cursor_run_id:
+            logger.warning(
+                "Voice speak: missing cursor_run_id",
+                extra={
+                    "job_id": str(job_id),
+                    "action": "voice_speak",
+                    "error_code": "missing_run_id",
+                },
+            )
+            with suppress(Exception):
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "missing_run_id",
+                        "message": "Task finished without a run id",
+                    }
+                )
             return
         result = await context.memory.get_by_run_id(job.actor_id, job.cursor_run_id)
         if result is None:
+            logger.warning(
+                "Voice speak: memory result missing",
+                extra={
+                    "job_id": str(job_id),
+                    "run_id": job.cursor_run_id,
+                    "action": "voice_speak",
+                    "error_code": "memory_missing",
+                },
+            )
+            with suppress(Exception):
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "memory_missing",
+                        "message": "Task result is not ready yet",
+                    }
+                )
             return
         from beachops.domain.voice_persona import to_spoken_briefing
 
@@ -856,4 +1263,8 @@ async def _speak_job_result(
         async for chunk in context.speech.stream_pcm(result.body):
             await websocket.send_bytes(chunk)
         await websocket.send_json({"type": "audio.ended"})
+        logger.info(
+            "Voice speak completed",
+            extra={"job_id": str(job_id), "action": "voice_speak"},
+        )
         return

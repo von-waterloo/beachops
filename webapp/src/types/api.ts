@@ -25,6 +25,9 @@ export interface Job {
   repository?: string
   runtime?: string
   workerNodeId?: string | null
+  cursorAgentId?: string | null
+  cursorUrl?: string | null
+  branch?: string | null
 }
 
 export interface Event {
@@ -46,9 +49,21 @@ export interface Approval {
 export interface Repository {
   id: string
   name: string
+  url?: string
   branch: string
   status: 'ready' | 'busy' | 'offline'
+  active?: boolean
   lastActivityAt?: string
+}
+
+export interface AgentSlot {
+  id: string
+  label: string
+  runtime?: string
+  active?: boolean
+  repository?: string | null
+  cursorAgentId?: string | null
+  cursorUrl?: string | null
 }
 
 export interface Usage {
@@ -81,9 +96,11 @@ export interface DashboardSnapshot {
   events: Event[]
   approvals: Approval[]
   repositories: Repository[]
+  agents: AgentSlot[]
   usage: Usage | null
   panic: boolean
   role: string
+  defaultBranch?: string
   workers: WorkerNode[]
   queue: QueueSnapshot
 }

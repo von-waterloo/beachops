@@ -84,3 +84,15 @@ class WorkerRunEventRequest(ApiModel):
 class DeployDispatchRequest(ApiModel):
     sha: str = Field(min_length=7, max_length=64)
     ref: str | None = Field(default=None, max_length=200)
+
+
+class RepoCreateRequest(ApiModel):
+    url: str = Field(min_length=8, max_length=400)
+    branch: str | None = Field(default=None, max_length=200)
+    alias: str | None = Field(default=None, max_length=40)
+    makeActive: bool = True
+
+
+class RepoUpdateRequest(ApiModel):
+    branch: str | None = Field(default=None, max_length=200)
+    makeActive: bool | None = None

@@ -246,12 +246,15 @@ def repo_add_hint(default_branch: str) -> str:
         "📁 Как добавить репозиторий:\n\n"
         "/repo add https://github.com/org/repo\n\n"
         f"Ветка по умолчанию · {default_branch} (или укажите в конце: …/repo main)\n\n"
-        "Или откройте /repo — выберите из списка кнопкой."
+        "Или Mini App → Репо — URL и базовая ветка прямо в приложении."
     )
 
 
 def repo_not_allowed() -> str:
-    return "Этот репозиторий или ветка отсутствует в server-side allowlist BeachOps."
+    return (
+        "Репозиторий или ветка недоступны: нужен HTTPS GitHub URL, "
+        "а запись в main/master запрещена."
+    )
 
 
 def repo_saved(alias: str, *, is_active: bool) -> str:
@@ -585,7 +588,7 @@ def build_welcome_message(
     if is_admin:
         lines.extend(
             [
-                "· действие (/do) — сразу правки в feature-ветке + PR",
+                "· действие (/do) — сразу правки в базовой ветке репо",
                 "· план (/plan, /task) — сначала план, потом approve",
             ]
         )

@@ -1,6 +1,7 @@
 # BeachOps
 
-Private Telegram control plane for Cursor Cloud Agents: read-only inspection, mandatory plan/owner approval before writes, durable ARQ jobs, audit/redaction, panic lock, and a voice-first Telegram Mini App.
+Private Telegram control plane for Cursor Cloud Agents: ask/plan/do, durable ARQ
+jobs, audit/redaction, panic lock, and a voice-first Telegram Mini App.
 
 **Полная документация:** [docs/README.md](./docs/README.md)
 
@@ -103,8 +104,9 @@ python scripts/migrate_sqlite_to_postgres.py --sqlite .\data\bot.db
 `/start` — quick-start (repo, mode, text/voice, queue, cancel).
 
 1. `/start`
-2. Репозиторий из server-side allowlist (`/repo`). `/repo add` принимает только точные пары URL/branch из policy.
-3. `/ask` для read-only или `/task` для плана. Write-run — только после one-time owner approval.
+2. Репозиторий: `/repo add https://github.com/you/repo` или Mini App → Репо
+   (любой HTTPS GitHub URL; базовая ветка выбирается там же).
+3. `/do` — сразу в базовую ветку; `/ask` — спросить; `/plan`/`/task` — план с approve.
 4. Текст, голос или фото.
 
 ## Commands
@@ -112,7 +114,7 @@ python scripts/migrate_sqlite_to_postgres.py --sqlite .\data\bot.db
 | Command | Description |
 |---------|-------------|
 | `/start` (alias `/help`) | Full usage guide |
-| `/ask` `/plan` `/task` | Read-only answer or mandatory planning phase |
+| `/ask` `/plan` `/do` `/task` | Чат / план / действие на базовой ветке / задача через план |
 | `/status` (alias `/mode`) | Mode, model, token, active task / queue — with inline buttons |
 | `/agents` | List/switch cloud agent sessions |
 | `/new` | New cloud agent session (resets to ask) |

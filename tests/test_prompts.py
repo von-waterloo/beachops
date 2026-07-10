@@ -50,7 +50,7 @@ def test_do_mode_includes_git_safety_and_guidance() -> None:
     assert "Миграции БД не запускай" in text
     assert "project-skills" in text
     assert "add-bot-feature" in text
-    assert "база только для чтения" in text
+    assert "Рабочая база" in text
     assert "Не merge" in text
     assert "production БД" in text
     assert "произвольные команды из Telegram не исполняй" in text

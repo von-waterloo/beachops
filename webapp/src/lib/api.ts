@@ -46,10 +46,16 @@ export async function apiFetch<T>(
     credentials: 'same-origin',
   })
   if (!response.ok) {
-    throw new ApiError(
-      response.status === 401 ? 'Authentication required' : 'Request failed',
-      response.status,
-    )
+    let message = response.status === 401 ? 'Authentication required' : 'Request failed'
+    try {
+      const payload = await response.json() as { detail?: unknown }
+      if (typeof payload.detail === 'string' && payload.detail.trim()) {
+        message = payload.detail
+      }
+    } catch {
+      // keep default message
+    }
+    throw new ApiError(message, response.status)
   }
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>

@@ -23,11 +23,12 @@
 ## Enforced controls
 
 - private-chat-only and explicit viewer/operator/owner allowlists;
-- exact repository/branch policy at handler, validator and worker;
-- direct `/do` writes only to isolated feature branch + PR; plan mode still
-  requires expiring owner approval before execution;
-- no `work_on_current_branch`, merge, deploy, force-push, branch deletion,
-  production DB, secrets or IAM operations;
+- repository URL must be exact GitHub HTTPS; empty policy is open mode,
+  non-empty policy is an allowlist; writes to `main`/`master` are blocked;
+- `/do` works on the selected base branch (`work_on_current_branch`) except
+  when the base is `main`/`master` (isolated branch + PR);
+- no merge, deploy, force-push, branch deletion, production DB, secrets or IAM
+  operations from the control plane;
 - opaque callback digest, actor/action binding, TTL and atomic consume;
 - Redis rate limits/idempotency and one active run per actor;
 - output redaction before Telegram, memory, audit, API, GitHub diff and TTS;
