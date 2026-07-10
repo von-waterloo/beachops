@@ -1,9 +1,8 @@
 # Prod deploy on self-hosted runner host-185 (185.244.49.94).
 #
 # Triggers:
-#   1) Auto: CI succeeds on push to main  -> deploy that SHA
-#   2) Manual / bot: workflow_dispatch with input sha
-#      (Telegram /rollback, API /api/deploy/dispatch, Actions UI)
+#   1) Auto: push to main -> wait for green CI -> deploy that SHA
+#   2) Manual / bot: workflow_dispatch with input sha (rollback etc.)
 #
 # Secrets: ENV_PROD_BEACHOPS (preferred) or ENV_PROD = full prod .env
 # Target dir: /home/const/tg-cursor-bot (legacy path / volumes)
@@ -11,9 +10,7 @@
 name: Deploy prod
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
+  push:
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -26,40 +23,75 @@ concurrency:
   group: deploy-prod-host-185
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  actions: read
+  checks: read
+
 jobs:
   prepare:
     name: Resolve target
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
       reason: ${{ steps.resolve.outputs.reason }}
     steps:
       - id: resolve
-        name: Pick deploy SHA
+        name: Resolve full commit SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            SHA="${{ inputs.sha }}"
+            RAW="${{ inputs.sha }}"
             REASON="dispatch"
           else
-            SHA="${{ github.event.workflow_run.head_sha }}"
+            RAW="${{ github.sha }}"
             REASON="auto-main"
           fi
-          SHA="$(printf '%s' "$SHA" | tr -d '[:space:]')"
-          if [ "${#SHA}" -lt 7 ]; then
-            echo "Invalid deploy SHA: '$SHA'" >&2
+          RAW="$(printf '%s' "$RAW" | tr -d '[:space:]')"
+          if [ "${#RAW}" -lt 7 ]; then
+            echo "Invalid deploy SHA: '$RAW'" >&2
             exit 1
           fi
+          # Short SHAs break actions/checkout (treated as branch names). Always expand.
+          FULL="$(gh api "repos/${{ github.repository }}/commits/${RAW}" --jq .sha)"
           {
-            echo "sha=$SHA"
+            echo "sha=$FULL"
             echo "reason=$REASON"
           } >> "$GITHUB_OUTPUT"
-          echo "Deploy target sha=$SHA reason=$REASON"
+          echo "Deploy target sha=$FULL (from $RAW) reason=$REASON"
+
+      - name: Wait for green CI
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          echo "Waiting for CI on $SHA ..."
+          for i in $(seq 1 90); do
+            row="$(gh run list --repo "${{ github.repository }}" --workflow CI --commit "$SHA" --limit 1 --json status,conclusion --jq '.[0] // empty')"
+            if [ -z "$row" ] || [ "$row" = "null" ]; then
+              echo "[$i] CI run not listed yet"
+              sleep 10
+              continue
+            fi
+            status="$(printf '%s' "$row" | jq -r .status)"
+            conclusion="$(printf '%s' "$row" | jq -r '.conclusion // empty')"
+            echo "[$i] CI status=$status conclusion=${conclusion:-pending}"
+            if [ "$status" = "completed" ]; then
+              if [ "$conclusion" = "success" ]; then
+                echo "CI green"
+                exit 0
+              fi
+              echo "CI finished with conclusion=$conclusion" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "Timed out waiting for CI (~15 min)" >&2
+          exit 1
 
   deploy:
     name: prod @ host-185
