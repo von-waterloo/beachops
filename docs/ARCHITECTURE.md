@@ -191,7 +191,8 @@ stale planning/running jobs после рестарта.
 | `POST /api/workers/runs/{job_id}/events` | worker token | ingest progress / finished |
 | `GET /api/workers` | owner TMA | список nodes |
 
-Daemon: `python -m beachops.windows_worker` / `scripts/install-windows-worker.ps1`.
+Daemon: Docker на Windows ПК (`scripts/install-windows-worker.ps1` →
+`docker-compose.windows-worker.yml`) или `python -m beachops.windows_worker`.
 ## Схема БД
 
 | Таблица | Ключевые поля |

@@ -62,7 +62,8 @@
 `/status` показывает реальную очередь и active run. Если Cursor уже закончил в облаке,
 а Telegram «завис» — reconciler догоняет статус и обновляет сообщение.
 
-Windows-агенты: слот с `runtime=windows` + worker на ПК (`python -m beachops.windows_worker`).
+Windows-агенты: слот с `runtime=windows` + worker на ПК
+(`.\scripts\install-windows-worker.ps1` → Docker).
 
 ## Репозитории
 

@@ -29,11 +29,18 @@ Volumes:
 
 ### Windows worker (локальные Cursor-агенты)
 
-На Windows 11 ПК рядом с Cursor IDE:
+На Windows 11 ПК с **Docker Desktop** (рекомендуется):
 
-1. Зарегистрировать node: `POST /api/workers/register` (owner TMA или `WORKER_BOOTSTRAP_TOKEN`).
-2. Выставить env: `BEACHOPS_API_URL`, `BEACHOPS_WORKER_TOKEN`, `CURSOR_API_KEY`.
-3. Запуск: `python -m beachops.windows_worker` или `.\scripts\install-windows-worker.ps1`.
+1. `.env.windows-worker` из `.env.windows-worker.example` (`BEACHOPS_API_URL`,
+   `BEACHOPS_WORKER_TOKEN` = прод `WORKER_BOOTSTRAP_TOKEN`, `CURSOR_API_KEY`).
+2. `.\scripts\install-windows-worker.ps1` — контейнер
+   `docker-compose.windows-worker.yml`, `restart: unless-stopped`.
+3. Docker Desktop → Settings → General → **Start Docker Desktop when you sign in**
+   (тогда worker поднимается вместе с ПК).
+
+Логи: `docker compose -p beachops-windows-worker -f docker-compose.windows-worker.yml logs -f`.
+
+Legacy без Docker: `.\scripts\install-windows-worker.ps1 -Native` (Scheduled Task, нужны права).
 
 Jobs со `runtime=windows` не уходят в ARQ — их claim'ит Windows daemon.
 

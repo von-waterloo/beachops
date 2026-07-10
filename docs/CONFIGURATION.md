@@ -126,7 +126,9 @@ Docker compose переопределяет `DATABASE_URL` на `@postgres:5432`
 | `CURSOR_API_KEY` | ключ Cursor на локальной машине |
 | `BEACHOPS_LOCAL_CWD` | cwd для discovery локальных IDE-агентов |
 
-Установка: `scripts/install-windows-worker.ps1` (Scheduled Task) или `python -m beachops.windows_worker`.
+Установка на Windows ПК: `scripts/install-windows-worker.ps1` (Docker Desktop,
+`docker-compose.windows-worker.yml`) или `-Native` (Scheduled Task). Env:
+`.env.windows-worker` / `.env.windows-worker.example`.
 
 ## Прочее
 

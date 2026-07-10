@@ -1,0 +1,32 @@
+# BeachOps Windows execution plane — runs on the Windows PC via Docker Desktop.
+# Not part of Linux prod stack (deploy-prod). Auto-restarts with Docker Desktop
+# (Settings → General → "Start Docker Desktop when you sign in" — already typical).
+#
+# Setup:
+#   1. Copy .env.windows-worker.example → .env.windows-worker and fill tokens
+#   2. .\scripts\install-windows-worker.ps1
+#
+# Logs: docker compose -f docker-compose.windows-worker.yml logs -f windows-worker
+
+name: beachops-windows-worker
+
+services:
+  windows-worker:
+    build: .
+    image: beachops-windows-worker:local
+    env_file:
+      - .env.windows-worker
+    environment:
+      WORKSPACE_PATH: /data/workspace
+      BEACHOPS_WORKER_HOSTNAME: ${BEACHOPS_WORKER_HOSTNAME:-windows-docker}
+      BEACHOPS_LOCAL_CWD: ${BEACHOPS_LOCAL_CWD:-/host-work}
+      BEACHOPS_WORKER_TOKEN_FILE: /data/workspace/.beachops-worker-node-token
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./data/workspace:/data/workspace
+      # Host repos for LocalAgentOptions / discovery (adjust via BEACHOPS_HOST_WORK_ROOT)
+      - ${BEACHOPS_HOST_WORK_ROOT:-D:/Work}:/host-work
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "-m", "beachops.windows_worker"]
+    restart: unless-stopped
