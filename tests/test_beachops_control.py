@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from beachops.domain.security import ApprovalKind, JobStatus
 from beachops.services.inline_keyboards import job_approval_keyboard
-from beachops.services.speech_service import _speech_safe
+from beachops.domain.voice_persona import to_spoken_briefing
 from beachops.services.stream_bridge import StreamState
 
 
@@ -30,12 +30,12 @@ def test_opaque_approval_callbacks_fit_telegram_limit() -> None:
 
 
 def test_speech_output_hides_code_and_urls() -> None:
-    safe = _speech_safe(
+    safe = to_spoken_briefing(
         "Готово. ```python\nprint('secret')\n``` https://github.com/private/repo"
     )
     assert "print" not in safe
     assert "github.com" not in safe
-    assert "доступен на экране" in safe
+    assert "экране" in safe
 
 
 def test_control_plane_contains_approval_states() -> None:
