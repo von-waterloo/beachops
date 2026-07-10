@@ -6,7 +6,7 @@
 
 ## Репозиторий
 
-- Целевой private repo: `von-waterloo/beachops` (`GITHUB_REPO`; при переносе — `stekirill/beachops`).
+- Целевой private repo: `von-waterloo/beachops` (`GITHUB_REPO`).
 - Ветки: рабочая `dev`, прод-линия `main` (см. skill `github-branches`).
 - Секреты Actions (на стороне GitHub, не в контейнере бота):
   - `ENV_PROD_BEACHOPS` (предпочтительно) или `ENV_PROD` — полное содержимое прод-`.env`.
@@ -15,7 +15,7 @@
 
 - Labels: `[self-hosted, host-185]` (тот же хост, что прод `185.244.49.94`).
 - Workflow: [`.github/workflows/deploy-prod.yml`](../.github/workflows/deploy-prod.yml).
-- На runner: checkout указанного `sha` → запись `.env` из secret →
+- На runner: checkout SHA → rsync в `/home/const/tg-cursor-bot` → `.env` из secret →
   `docker compose -p tg-cursor-bot up --build -d --remove-orphans` →
   health `http://127.0.0.1:8080/health`.
 

@@ -23,7 +23,7 @@ async def test_dispatch_prod_deploy_posts_workflow_dispatch() -> None:
         assert request.method == "POST"
         assert (
             request.url.path
-            == "/repos/stekirill/beachops/actions/workflows/deploy-prod.yml/dispatches"
+            == "/repos/von-waterloo/beachops/actions/workflows/deploy-prod.yml/dispatches"
         )
         payload = json.loads(request.content.decode())
         assert payload == {"ref": "main", "inputs": {"sha": "abc1234deadbeef"}}
@@ -36,13 +36,13 @@ async def test_dispatch_prod_deploy_posts_workflow_dispatch() -> None:
     ) as client:
         result = await trigger_prod_deploy(
             token="ghp_test",
-            repository="stekirill/beachops",
+            repository="von-waterloo/beachops",
             sha="abc1234deadbeef",
             ref="main",
             client=client,
         )
 
-    assert result.repository == "stekirill/beachops"
+    assert result.repository == "von-waterloo/beachops"
     assert result.workflow == "deploy-prod.yml"
     assert result.sha == "abc1234deadbeef"
     assert result.ref == "main"
@@ -53,7 +53,7 @@ async def test_dispatch_prod_deploy_posts_workflow_dispatch() -> None:
 async def test_dispatch_rejects_short_sha() -> None:
     service = DeployTriggerService(
         token="ghp_test",
-        repository="stekirill/beachops",
+        repository="von-waterloo/beachops",
         client=httpx.AsyncClient(),
     )
     try:
@@ -65,4 +65,4 @@ async def test_dispatch_rejects_short_sha() -> None:
 
 def test_missing_token_raises() -> None:
     with pytest.raises(DeployTriggerError, match="GITHUB_TOKEN"):
-        DeployTriggerService(token="  ", repository="stekirill/beachops")
+        DeployTriggerService(token="  ", repository="von-waterloo/beachops")

@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     repository_policy_json: str = Field(default="{}", alias="REPOSITORY_POLICY_JSON")
     webapp_base_url: str = Field(default="", alias="WEBAPP_BASE_URL")
     github_token: str = Field(default="", alias="GITHUB_TOKEN")
-    github_repo: str = Field(default="stekirill/beachops", alias="GITHUB_REPO")
+    github_repo: str = Field(default="von-waterloo/beachops", alias="GITHUB_REPO")
     github_deploy_workflow: str = Field(
         default="deploy-prod.yml", alias="GITHUB_DEPLOY_WORKFLOW"
     )

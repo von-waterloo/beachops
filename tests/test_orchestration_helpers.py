@@ -27,7 +27,7 @@ def test_resolve_runtime_prefers_payload() -> None:
 
 @pytest.mark.asyncio
 async def test_deploy_trigger_rejects_short_sha() -> None:
-    service = DeployTriggerService(token="x", repository="stekirill/beachops")
+    service = DeployTriggerService(token="x", repository="von-waterloo/beachops")
     with pytest.raises(DeployTriggerError):
         await service.dispatch_prod_deploy(sha="abc")
     await service.close()

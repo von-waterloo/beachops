@@ -45,7 +45,7 @@ Docker compose переопределяет `DATABASE_URL` на `@postgres:5432`
 | `DEFAULT_REPO_URL` | — (пусто) | seed только если точная пара URL/branch разрешена policy |
 | `DEFAULT_RUNTIME` | `cloud` | runtime Cursor SDK (`cloud` \| `windows`); прод — cloud |
 | `GITHUB_TOKEN` | — | PR metadata + (опционально) Actions `workflow_dispatch` для deploy |
-| `GITHUB_REPO` | `stekirill/beachops` | owner/name для GitHub API (deploy trigger) |
+| `GITHUB_REPO` | `von-waterloo/beachops` | owner/name для GitHub API (deploy trigger) |
 | `GITHUB_DEPLOY_DISPATCH` | `false` | `1`/`true` — разрешить owner-approve → `deploy-prod.yml` |
 | `GITHUB_DEPLOY_WORKFLOW` | `deploy-prod.yml` | имя workflow файла для dispatch |
 | `GITHUB_DEPLOY_REF` | `main` | git ref для `workflow_dispatch` (ветка/тег; SHA — в input) |

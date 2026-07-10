@@ -1,6 +1,8 @@
 # Owner-approved prod deploy on self-hosted runner host-185.
 # Trigger: Actions → Deploy prod → Run workflow (sha), or bot via workflow_dispatch API.
 # Secrets: ENV_PROD_BEACHOPS (preferred) or ENV_PROD — full .env contents.
+#
+# Deploys into /home/const/tg-cursor-bot (legacy path / volumes), not the runner workdir.
 
 name: Deploy prod
 
@@ -20,14 +22,38 @@ jobs:
   deploy:
     name: prod @ host-185
     runs-on: [self-hosted, host-185]
+    env:
+      PROD_DIR: /home/const/tg-cursor-bot
+      COMPOSE_PROJECT: tg-cursor-bot
 
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.sha }}
-          clean: false
+          clean: true
 
-      - name: Copy .env from secrets
+      - name: Sync code into prod directory
+        run: |
+          set -euo pipefail
+          mkdir -p "$PROD_DIR"
+          # Preserve live secrets and local runtime data; replace application tree.
+          rsync -a --delete \
+            --exclude '.env' \
+            --exclude '.git/' \
+            --exclude 'data/' \
+            --exclude '.venv/' \
+            --exclude 'node_modules/' \
+            --exclude 'webapp/node_modules/' \
+            --exclude 'webapp/dist/' \
+            --exclude '.pytest_cache/' \
+            --exclude '__pycache__/' \
+            --exclude '*.sql' \
+            --exclude 'actions-runner/' \
+            ./ "$PROD_DIR"/
+          echo "Synced ${{ inputs.sha }} -> $PROD_DIR"
+
+      - name: Write .env from secrets
+        working-directory: /home/const/tg-cursor-bot
         env:
           ENV_PROD_BEACHOPS: ${{ secrets.ENV_PROD_BEACHOPS }}
           ENV_PROD: ${{ secrets.ENV_PROD }}
@@ -43,6 +69,12 @@ jobs:
             echo "Missing ENV_PROD_BEACHOPS or ENV_PROD repository secret" >&2
             exit 1
           fi
+          # Ensure LF endings (secret may be uploaded from Windows)
+          sed -i 's/\r$//' .env
+          if [ -f scripts/bootstrap-prod-env.sh ]; then
+            sed -i 's/\r$//' scripts/bootstrap-prod-env.sh || true
+            sh scripts/bootstrap-prod-env.sh .env
+          fi
 
       - name: Free disk if low
         run: |
@@ -57,8 +89,10 @@ jobs:
           fi
 
       - name: Build and start stack
+        working-directory: /home/const/tg-cursor-bot
         run: |
-          docker compose -p tg-cursor-bot up --build -d --remove-orphans
+          set -euo pipefail
+          docker compose -p "$COMPOSE_PROJECT" up --build -d --remove-orphans
 
       - name: Wait for health
         run: |
@@ -72,18 +106,21 @@ jobs:
             sleep 10
           done
           echo "Health check failed within ~10 minutes" >&2
-          docker compose -p tg-cursor-bot ps || true
-          docker compose -p tg-cursor-bot logs --tail=120 bot worker api webapp migrate || true
+          cd "$PROD_DIR"
+          docker compose -p "$COMPOSE_PROJECT" ps || true
+          docker compose -p "$COMPOSE_PROJECT" logs --tail=120 bot worker api webapp migrate || true
           exit 1
 
       - name: Show status
         if: success()
+        working-directory: /home/const/tg-cursor-bot
         run: |
-          docker compose -p tg-cursor-bot ps
-          docker compose -p tg-cursor-bot logs --tail=40 bot worker api
+          docker compose -p "$COMPOSE_PROJECT" ps
+          docker compose -p "$COMPOSE_PROJECT" logs --tail=40 bot worker api
 
       - name: Dump status on failure
         if: failure()
+        working-directory: /home/const/tg-cursor-bot
         run: |
-          docker compose -p tg-cursor-bot ps || true
-          docker compose -p tg-cursor-bot logs --tail=150 || true
+          docker compose -p "$COMPOSE_PROJECT" ps || true
+          docker compose -p "$COMPOSE_PROJECT" logs --tail=150 || true
