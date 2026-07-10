@@ -36,6 +36,8 @@ from beachops.services.memory_service import MemoryService
 from beachops.services.payload_crypto import PayloadCrypto
 from beachops.services.rate_limit import RedisRateLimiter
 from beachops.services.idempotency import IdempotencyStore
+from beachops.services.deploy_history import DeployHistory
+from beachops.services.policy_bootstrap import build_repository_policy
 from beachops.services.repository_policy import RepositoryPolicyService
 from beachops.services.risk_policy import RiskPolicy
 from beachops.services.speech_service import SpeechService
@@ -65,6 +67,7 @@ class AppContext:
     risk_policy: RiskPolicy
     rate_limiter: RedisRateLimiter
     idempotency: IdempotencyStore
+    deploy_history: DeployHistory
     agent_slots: AgentSlotService
     memory: MemoryService
     cursor: CursorAgentService
@@ -120,12 +123,11 @@ class AppContext:
             redis=redis,
             arq=arq,
             payload_crypto=payload_crypto,
-            repository_policy=RepositoryPolicyService.from_json(
-                settings.repository_policy_json
-            ),
+            repository_policy=build_repository_policy(settings),
             risk_policy=RiskPolicy(),
             rate_limiter=RedisRateLimiter(redis),
             idempotency=IdempotencyStore(redis),
+            deploy_history=DeployHistory(redis),
             agent_slots=agent_slots,
             memory=memory,
             cursor=CursorAgentService(
@@ -141,7 +143,9 @@ class AppContext:
                 api_key=settings.openai_api_key,
                 model=settings.voice_tts_model,
                 voice=settings.voice_tts_voice,
+                instructions=settings.voice_tts_instructions or None,
                 redact=redact_text,
+                max_chars=settings.voice_spoken_max_chars,
             ),
             job_queue=JobQueue(max_queue_depth=settings.job_queue_depth),
             cancel_store=CancelStore(redis),

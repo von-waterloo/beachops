@@ -658,3 +658,61 @@ def build_status_message(
         lines.append("· Run · активен (можно /cancel)")
 
     return "\n".join(lines)
+
+
+def rollback_owner_only() -> str:
+    return "Только владелец может откатить прод-деплой."
+
+
+def rollback_dispatch_disabled() -> str:
+    return (
+        "Откат недоступен: включите GITHUB_DEPLOY_DISPATCH=1 и задайте "
+        "GITHUB_TOKEN + GITHUB_REPO в .env."
+    )
+
+
+def rollback_need_sha() -> str:
+    return (
+        "Нет записанной истории деплоев. Укажите SHA вручную:\n"
+        "`/rollback <git-sha>`"
+    )
+
+
+def rollback_confirm(sha: str, *, recent_tip: str | None = None) -> str:
+    lines = [
+        "Откат прода на предыдущий коммит.",
+        "",
+        f"Целевой SHA: `{sha}`",
+    ]
+    if recent_tip:
+        lines.append(f"Сейчас в истории сверху: `{recent_tip}`")
+    lines.extend(
+        [
+            "",
+            "Это запустит тот же workflow_dispatch, что и обычный деплой. "
+            "Подтвердите кнопкой ниже.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def rollback_started(sha: str) -> str:
+    return (
+        f"Откат запущен на SHA `{sha}`.\n"
+        "Дождитесь зелёного Deploy prod в Actions, затем проверьте /dashboard."
+    )
+
+
+def rollback_failed(detail: str) -> str:
+    return f"Не удалось запустить откат: {detail}"
+
+
+def self_improve_hint(repo_url: str, branches: list[str]) -> str:
+    branch_list = ", ".join(f"`{b}`" for b in branches) or "`dev`"
+    return (
+        "Самосовершенствование включено.\n"
+        f"Репозиторий: `{repo_url}`\n"
+        f"Ветки: {branch_list}\n"
+        "Добавьте его через `/repo add`, работайте в plan/do. "
+        "После деплоя откат: `/rollback`."
+    )

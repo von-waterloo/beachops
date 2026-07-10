@@ -1,4 +1,8 @@
-# Self-hosted CI/CD (BeachOps)
+# Self-hosted CI/CD (BeachOps) — maintainer reference
+
+Документ описывает **прод автора** (`von-waterloo/beachops`, runner `host-185`).
+Для своей копии достаточно Docker Compose из [OPERATIONS.md](./OPERATIONS.md) /
+корневого README; этот файл не обязателен.
 
 Кратко: приватный репозиторий → CI на GitHub-hosted → деплой только через
 `workflow_dispatch` на self-hosted runner **host-185**. Бот не хранит SSH-ключ

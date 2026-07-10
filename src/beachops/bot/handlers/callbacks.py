@@ -53,6 +53,7 @@ from beachops.services.inline_keyboards import (
     CB_RETRY_PREFIX,
     CB_TOKEN_PREFIX,
     CB_UNPANIC_PREFIX,
+    CB_ROLLBACK_PREFIX,
     CB_VOICE_CANCEL_PREFIX,
     CB_VOICE_CONFIRM_PREFIX,
     agent_delete_confirm_keyboard,
@@ -126,6 +127,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if data.startswith(CB_UNPANIC_PREFIX):
         await _handle_unpanic(
             query, app, user.id, data[len(CB_UNPANIC_PREFIX) :]
+        )
+        return
+    if data.startswith(CB_ROLLBACK_PREFIX):
+        await _handle_rollback(
+            query, app, user.id, data[len(CB_ROLLBACK_PREFIX) :]
         )
         return
     if data.startswith(CB_VOICE_CONFIRM_PREFIX):
@@ -420,6 +426,84 @@ async def _handle_unpanic(
             await query.message.edit_reply_markup(reply_markup=None)
         except BadRequest:
             pass
+
+
+async def _handle_rollback(
+    query,
+    app: AppContext,
+    user_id: int,
+    token: str,
+) -> None:
+    from beachops.bot.handlers.rollback import load_rollback_target
+    from beachops.services.deploy_trigger import DeployTriggerError, trigger_prod_deploy
+    from beachops.services.ui_copy import rollback_failed, rollback_started
+
+    if app.settings.role_for(user_id) != Role.OWNER:
+        await query.answer("Только владелец может откатить прод.", show_alert=True)
+        return
+    job_id = await app.callback_tokens.consume_opaque(
+        token,
+        actor_id=user_id,
+        action="rollback",
+    )
+    if job_id is None:
+        await query.answer("Подтверждение устарело.", show_alert=True)
+        return
+    target = await load_rollback_target(app, job_id)
+    if not target:
+        await query.answer("Цель отката истекла. Повторите /rollback.", show_alert=True)
+        return
+    try:
+        result = await trigger_prod_deploy(
+            token=app.settings.github_token,
+            repository=app.settings.github_repo,
+            sha=target,
+            workflow=app.settings.github_deploy_workflow,
+            ref=app.settings.github_deploy_ref,
+        )
+    except DeployTriggerError as exc:
+        await app.audit.append(
+            actor_id=user_id,
+            job_id=job_id,
+            event_type="deploy.rollback",
+            action="workflow_dispatch",
+            outcome="failure",
+            details={"sha": target, "error": str(exc)},
+        )
+        await query.answer(rollback_failed(str(exc))[:180], show_alert=True)
+        return
+
+    await app.deploy_history.record(
+        sha=result.sha,
+        ref=result.ref,
+        reason="rollback",
+    )
+    job = await app.jobs.get(user_id, job_id)
+    if job is not None:
+        await app.jobs.transition(
+            user_id,
+            job_id,
+            from_statuses=[JobStatus.DRAFT],
+            to_status=JobStatus.SUCCEEDED,
+            event_type="deploy.rollback",
+        )
+    await app.audit.append(
+        actor_id=user_id,
+        job_id=job_id,
+        event_type="deploy.rollback",
+        action="workflow_dispatch",
+        outcome="success",
+        details={"sha": result.sha, "ref": result.ref},
+    )
+    await query.answer("Откат запущен.", show_alert=True)
+    if query.message:
+        try:
+            await query.message.edit_text(rollback_started(result.sha))
+        except BadRequest:
+            try:
+                await query.message.edit_reply_markup(reply_markup=None)
+            except BadRequest:
+                pass
 
 
 async def _handle_cancel(query, context, app: AppContext, user_id: int) -> None:

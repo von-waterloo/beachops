@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
-import re
 
 from openai import AsyncOpenAI
+
+from beachops.domain.voice_persona import SPARTAN_TTS_INSTRUCTIONS, to_spoken_briefing
 
 
 class SpeechService:
@@ -15,25 +16,32 @@ class SpeechService:
         api_key: str,
         model: str,
         voice: str,
+        instructions: str | None = None,
         redact: Callable[[str], str] | None = None,
-        max_chars: int = 4000,
+        max_chars: int = 900,
     ) -> None:
         self._client = AsyncOpenAI(api_key=api_key)
         self._model = model
         self._voice = voice
+        self._instructions = (instructions or SPARTAN_TTS_INSTRUCTIONS).strip()
         self._redact = redact or (lambda value: value)
         self._max_chars = max_chars
 
     async def stream_pcm(self, text: str) -> AsyncIterator[bytes]:
-        safe_text = _speech_safe(self._redact(text)).strip()
+        safe_text = to_spoken_briefing(self._redact(text), max_chars=self._max_chars)
         if not safe_text:
             return
-        safe_text = safe_text[: self._max_chars]
+        create_kwargs: dict = {
+            "model": self._model,
+            "voice": self._voice,
+            "input": safe_text,
+            "response_format": "pcm",
+        }
+        # gpt-4o-mini-tts (and snapshots) accept steerable style instructions.
+        if self._instructions and "tts" in self._model:
+            create_kwargs["instructions"] = self._instructions
         async with self._client.audio.speech.with_streaming_response.create(
-            model=self._model,
-            voice=self._voice,
-            input=safe_text,
-            response_format="pcm",
+            **create_kwargs,
         ) as response:
             pending = b""
             async for chunk in response.iter_bytes():
@@ -42,13 +50,3 @@ class SpeechService:
                 if even_length:
                     yield data[:even_length]
                 pending = data[even_length:]
-
-
-_CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
-_URL_RE = re.compile(r"https?://\S+")
-
-
-def _speech_safe(text: str) -> str:
-    value = _CODE_BLOCK_RE.sub(" Фрагмент кода доступен на экране. ", text)
-    value = _URL_RE.sub(" ссылка доступна на экране ", value)
-    return re.sub(r"\s+", " ", value)

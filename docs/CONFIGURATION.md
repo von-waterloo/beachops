@@ -1,18 +1,26 @@
 # Конфигурация
 
-Все переменные читаются из `.env` (см. `.env.example`). Pydantic-settings, `extra=ignore`.
+Минимальный шаблон: [`.env.example`](../.env.example) — только то, без чего
+не стартует. Всё остальное уже задано дефолтами в `Settings`
+(`src/beachops/config/settings.py`). Ниже — полный справочник на случай тонкой
+настройки.
 
-## Обязательные
+Pydantic-settings, `extra=ignore`: неизвестные ключи в `.env` просто игнорируются.
+
+## Обязательные (есть в `.env.example`)
 
 | Переменная | Описание |
 |------------|----------|
 | `TG_BOT_TOKEN` | Токен Telegram Bot от @BotFather |
-| `CURSOR_API_KEY` | API key из [Cursor Integrations](https://cursor.com/dashboard/integrations) (токен `mt`) |
+| `CURSOR_API_KEY` | API key из [Cursor Integrations](https://cursor.com/dashboard/integrations) |
 | `OPENAI_API_KEY` | Транскрипция голоса + эмбеддинги памяти |
-| `OWNER_USER_IDS` | Telegram ID владельцев; approve/panic/unpanic |
+| `OWNER_USER_IDS` | Telegram ID владельцев; approve/panic/unpanic/rollback |
+| `POSTGRES_PASSWORD` | пароль Postgres для docker compose |
 | `DATA_ENCRYPTION_KEY` | 32 байта base64url/hex для AES-256-GCM payload |
 | `REPOSITORY_POLICY_JSON` | строгий allowlist GitHub URL и веток |
-| `POSTGRES_PASSWORD` | обязательный пароль compose без insecure default |
+
+Локально удобно также задать `DATABASE_URL` / `REDIS_URL` (в example уже есть).
+В Docker compose `DATABASE_URL` и `REDIS_URL` переопределяются сам.
 
 ## Доступ и роли
 
@@ -45,10 +53,17 @@ Docker compose переопределяет `DATABASE_URL` на `@postgres:5432`
 | `DEFAULT_REPO_URL` | — (пусто) | seed только если точная пара URL/branch разрешена policy |
 | `DEFAULT_RUNTIME` | `cloud` | runtime Cursor SDK (`cloud` \| `windows`); прод — cloud |
 | `GITHUB_TOKEN` | — | PR metadata + (опционально) Actions `workflow_dispatch` для deploy |
-| `GITHUB_REPO` | `von-waterloo/beachops` | owner/name для GitHub API (deploy trigger) |
+| `GITHUB_REPO` | — (пусто) | `owner/name` вашего форка; нужен только при `GITHUB_DEPLOY_DISPATCH=1` |
 | `GITHUB_DEPLOY_DISPATCH` | `false` | `1`/`true` — разрешить owner-approve → `deploy-prod.yml` |
 | `GITHUB_DEPLOY_WORKFLOW` | `deploy-prod.yml` | имя workflow файла для dispatch |
 | `GITHUB_DEPLOY_REF` | `main` | git ref для `workflow_dispatch` (ветка/тег; SHA — в input) |
+| `SELF_IMPROVE_ENABLED` | `false` | opt-in: разрешить боту работать над своим BeachOps-форком |
+| `SELF_IMPROVE_REPO_URL` | — | HTTPS URL вашего форка BeachOps; обязателен при `SELF_IMPROVE_ENABLED=1` |
+| `SELF_IMPROVE_BRANCHES` | `dev` | ветки allowlist для self-improve (`main`/`master` остаются protected) |
+
+`SELF_IMPROVE_*` по умолчанию выключены: чужой деплой и ваш текущий доступ не меняются,
+пока вы сами не включите. После деплоя плохой SHA owner откатывает командой `/rollback`
+(нужны `GITHUB_DEPLOY_DISPATCH=1`, `GITHUB_TOKEN`, `GITHUB_REPO`).
 
 ## OpenAI
 
@@ -57,8 +72,10 @@ Docker compose переопределяет `DATABASE_URL` на `@postgres:5432`
 | `TRANSCRIBE_MODEL` | `gpt-4o-mini-transcribe` | STT для голосовых |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | векторы памяти (1536 dim) |
 | `VOICE_REALTIME_MODEL` | `gpt-realtime-whisper` | partial/final transcript Mini App |
-| `VOICE_TTS_MODEL` | `gpt-4o-mini-tts` | голосовой ответ |
-| `VOICE_TTS_VOICE` | `marin` | голос |
+| `VOICE_TTS_MODEL` | `gpt-4o-mini-tts` | голосовой ответ (steerable TTS) |
+| `VOICE_TTS_VOICE` | `cedar` | голос; `cedar`/`marin` — лучшее качество OpenAI |
+| `VOICE_TTS_INSTRUCTIONS` | Spartan (в коде) | стиль подачи; пусто = встроенный спартанский TOV |
+| `VOICE_SPOKEN_MAX_CHARS` | `900` | лимит символов после сжатия ответа в брифинг |
 | `VOICE_MAX_SESSION_SEC` | `300` | max voice session |
 
 ## Память
@@ -138,25 +155,8 @@ Docker compose переопределяет `DATABASE_URL` на `@postgres:5432`
 
 ## Пример `.env`
 
-```env
-TG_BOT_TOKEN=123456:ABC...
-CURSOR_API_KEY=key_...
-OPENAI_API_KEY=sk-...
-VIEWER_USER_IDS=987654321
-OPERATOR_USER_IDS=
-OWNER_USER_IDS=123456789
-DATA_ENCRYPTION_KEY=<64 hex chars>
-REPOSITORY_POLICY_JSON={"repositories":[{"url":"https://github.com/acme/app","branches":["dev"]}]}
-DATABASE_URL=postgresql://bot:<password>@localhost:5433/tg_cursor_bot
-POSTGRES_PASSWORD=<long random password>
-REDIS_URL=redis://localhost:6379/0
-WORKSPACE_PATH=./data/workspace
-DEFAULT_BRANCH=dev
-CURSOR_MODEL=composer-2.5
-STREAM_THINKING=preview
-JOB_QUEUE_DEPTH=2
-MEMORY_RECALL_K=3
-```
+См. корневой [`.env.example`](../.env.example) — короткий шаблон.
+Не копируйте сюда десятки тюнинг-переменных: дефолты в коде достаточны.
 
 ## Telegram Bot Commands (меню)
 

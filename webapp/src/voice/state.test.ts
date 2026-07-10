@@ -52,6 +52,6 @@ describe('voiceReducer', () => {
     const speaking = voiceReducer(initialVoiceState, { type: 'SPEAKING', caption: 'Working' })
     const listening = voiceReducer(speaking, { type: 'START_LISTENING', at: 200 })
     expect(listening.phase).toBe('listening')
-    expect(listening.caption).toContain('microphone active')
+    expect(listening.caption).toContain('Слушаю')
   })
 })

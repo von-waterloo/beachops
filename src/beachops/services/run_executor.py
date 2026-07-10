@@ -391,6 +391,7 @@ async def _run_job(
                 memory_block=memory_block,
                 images=images,
                 api_key=api_key,
+                self_improve=app.settings.is_self_improve_repo(repo.github_url),
             )
         except RunCancelled:
             final_mode = await app.users.get_mode(user_id)

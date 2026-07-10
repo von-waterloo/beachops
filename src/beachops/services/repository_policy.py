@@ -62,6 +62,40 @@ class RepositoryPolicyService:
         repositories = data.get("repositories", data.get("allowed_repositories", []))
         return cls(_parse_repositories(repositories))
 
+    def with_extra_repository(
+        self,
+        *,
+        repository_url: str,
+        allowed_branches: tuple[str, ...],
+        protected_branches: tuple[str, ...] = ("main", "master"),
+    ) -> RepositoryPolicyService:
+        """Return a copy that also allows ``repository_url`` (union of branches)."""
+        normalized = normalize_github_url(repository_url)
+        branches = tuple(_validate_branch(branch) for branch in allowed_branches)
+        if not branches:
+            raise RepositoryPolicyError(
+                f"repository {normalized} must allow at least one branch"
+            )
+        existing = self._by_url.get(normalized)
+        if existing is not None:
+            branches = tuple(dict.fromkeys((*existing.allowed_branches, *branches)))
+            protected = tuple(
+                dict.fromkeys((*existing.protected_branches, *protected_branches))
+            )
+        else:
+            protected = tuple(
+                dict.fromkeys((*protected_branches, "main", "master"))
+            )
+        merged = dict(self._by_url)
+        merged[normalized] = RepositoryPolicy(
+            repository_url=normalized,
+            allowed_branches=branches,
+            protected_branches=protected,
+        )
+        service = object.__new__(RepositoryPolicyService)
+        service._by_url = merged
+        return service
+
     @property
     def policies(self) -> tuple[RepositoryPolicy, ...]:
         return tuple(self._by_url.values())

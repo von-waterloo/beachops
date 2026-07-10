@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     repository_policy_json: str = Field(default="{}", alias="REPOSITORY_POLICY_JSON")
     webapp_base_url: str = Field(default="", alias="WEBAPP_BASE_URL")
     github_token: str = Field(default="", alias="GITHUB_TOKEN")
-    github_repo: str = Field(default="von-waterloo/beachops", alias="GITHUB_REPO")
+    github_repo: str = Field(default="", alias="GITHUB_REPO")
     github_deploy_workflow: str = Field(
         default="deploy-prod.yml", alias="GITHUB_DEPLOY_WORKFLOW"
     )
@@ -64,6 +64,12 @@ class Settings(BaseSettings):
         default=False, alias="GITHUB_DEPLOY_DISPATCH"
     )
     github_deploy_ref: str = Field(default="main", alias="GITHUB_DEPLOY_REF")
+    self_improve_enabled: bool = Field(default=False, alias="SELF_IMPROVE_ENABLED")
+    self_improve_repo_url: str = Field(default="", alias="SELF_IMPROVE_REPO_URL")
+    self_improve_branches: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["dev"],
+        alias="SELF_IMPROVE_BRANCHES",
+    )
     default_runtime: Literal["cloud", "windows"] = Field(
         default="cloud", alias="DEFAULT_RUNTIME"
     )
@@ -86,7 +92,13 @@ class Settings(BaseSettings):
         default="gpt-realtime-whisper", alias="VOICE_REALTIME_MODEL"
     )
     voice_tts_model: str = Field(default="gpt-4o-mini-tts", alias="VOICE_TTS_MODEL")
-    voice_tts_voice: str = Field(default="marin", alias="VOICE_TTS_VOICE")
+    # marin / cedar = best quality per OpenAI; cedar reads more "commander".
+    voice_tts_voice: str = Field(default="cedar", alias="VOICE_TTS_VOICE")
+    # Empty = built-in Spartan orchestrator instructions (domain/voice_persona.py).
+    voice_tts_instructions: str = Field(default="", alias="VOICE_TTS_INSTRUCTIONS")
+    voice_spoken_max_chars: int = Field(
+        default=900, alias="VOICE_SPOKEN_MAX_CHARS", ge=120, le=4000
+    )
     voice_max_session_sec: int = Field(
         default=300, alias="VOICE_MAX_SESSION_SEC", ge=30, le=900
     )
@@ -166,10 +178,52 @@ class Settings(BaseSettings):
             return [value]
         return [int(part.strip()) for part in str(value).split(",") if part.strip()]
 
+    @field_validator("self_improve_branches", mode="before")
+    @classmethod
+    def parse_branch_list(cls, value: object) -> list[str]:
+        if value is None or value == "":
+            return ["dev"]
+        if isinstance(value, list):
+            branches = [str(item).strip() for item in value if str(item).strip()]
+            return branches or ["dev"]
+        branches = [part.strip() for part in str(value).split(",") if part.strip()]
+        return branches or ["dev"]
+
     @field_validator("workspace_path", mode="before")
     @classmethod
     def parse_path(cls, value: object) -> Path:
         return Path(str(value))
+
+    def self_improve_repo_normalized(self) -> str | None:
+        """Canonical HTTPS URL of the self-improve repo, or None if disabled/unset."""
+        if not self.self_improve_enabled:
+            return None
+        raw = self.self_improve_repo_url.strip()
+        if not raw:
+            return None
+        from beachops.services.repository_policy import (
+            RepositoryPolicyError,
+            normalize_github_url,
+        )
+
+        try:
+            return normalize_github_url(raw)
+        except RepositoryPolicyError:
+            return None
+
+    def is_self_improve_repo(self, repository_url: str) -> bool:
+        target = self.self_improve_repo_normalized()
+        if target is None:
+            return False
+        from beachops.services.repository_policy import (
+            RepositoryPolicyError,
+            normalize_github_url,
+        )
+
+        try:
+            return normalize_github_url(repository_url) == target
+        except RepositoryPolicyError:
+            return False
 
     def role_for(self, user_id: int) -> Role | None:
         """Resolve explicit RBAC with owner > operator > viewer precedence.

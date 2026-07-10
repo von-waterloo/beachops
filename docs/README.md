@@ -17,10 +17,13 @@ plan/owner approval workflow, Redis/ARQ, audit/redaction and panic lock.
 
 ## Быстрый старт
 
-1. Скопировать `.env.example` → `.env`, заполнить ключи.
+1. Скопировать `.env.example` → `.env` (короткий шаблон) и заполнить ключи.
 2. Подключить GitHub в [Cursor Dashboard](https://cursor.com/dashboard).
 3. Создать API key в [Integrations](https://cursor.com/dashboard/integrations).
-4. Настроить roles, AES key и repository policy.
-5. Поднять compose stack; `migrate` применит схему, затем запустятся bot/worker/API/webapp.
+4. Поднять compose; `migrate` применит схему, затем bot/worker/API/webapp.
+   Тонкая настройка — [CONFIGURATION.md](./CONFIGURATION.md).
 
-Подробности деплоя на прод — [OPERATIONS.md](./OPERATIONS.md), [SELF_DEPLOY.md](./SELF_DEPLOY.md) и `.cursor/rules/servers-access.mdc`.
+Свой деплой: [OPERATIONS.md](./OPERATIONS.md) (Docker Compose) и корневой
+[README.md](../README.md) («Deploy your own copy»). Прод автора / runner
+host-185 — [SELF_DEPLOY.md](./SELF_DEPLOY.md) и `.cursor/rules/servers-access.mdc`
+(не требуется для чужой инсталляции).

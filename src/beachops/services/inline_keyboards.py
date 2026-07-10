@@ -33,6 +33,7 @@ CB_JOB_APPROVE_PREFIX = "j:a:"
 CB_JOB_REJECT_PREFIX = "j:r:"
 CB_JOB_REVISION_PREFIX = "j:v:"
 CB_UNPANIC_PREFIX = "j:u:"
+CB_ROLLBACK_PREFIX = "j:rb:"
 CB_VOICE_CONFIRM_PREFIX = "vc:"
 CB_VOICE_CANCEL_PREFIX = "vx:"
 
@@ -84,6 +85,19 @@ def unpanic_keyboard(token: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     "Включить write-действия",
                     callback_data=f"{CB_UNPANIC_PREFIX}{token}",
+                )
+            ]
+        ]
+    )
+
+
+def rollback_keyboard(token: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Откатить прод на этот SHA",
+                    callback_data=f"{CB_ROLLBACK_PREFIX}{token}",
                 )
             ]
         ]

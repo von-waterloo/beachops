@@ -56,6 +56,7 @@
 | `/jobs` | Durable очередь и статусы задач |
 | `/approvals` | Ожидающие owner decisions |
 | `/panic`, `/unpanic` | Аварийная остановка и одноразовое подтверждение возврата writes |
+| `/rollback` | Откат прода на предыдущий (или указанный) SHA — только owner, с кнопкой подтверждения |
 | `/dashboard` | Control Room Mini App (голос, агенты, очередь, approvals) |
 
 Сообщения во время активного run **ставятся в durable очередь** (Postgres + ARQ).
@@ -176,8 +177,24 @@ Cloud/Windows agent cards, live queue, approvals, timeline и worker health.
 
 - `viewer` — read-only.
 - `operator` — read/plan/request write, без approve.
-- `owner` — approve/reject/revision и panic/unpanic.
+- `owner` — approve/reject/revision, panic/unpanic и `/rollback`.
 - Роль проверяется server-side для Telegram, callback, API и worker.
+
+## Самосовершенствование BeachOps (opt-in)
+
+По умолчанию выключено — ваш доступ и чужие деплои не затрагиваются.
+
+1. В `.env` своего инстанса:
+   - `SELF_IMPROVE_ENABLED=1`
+   - `SELF_IMPROVE_REPO_URL=https://github.com/<you>/beachops` (ваш форк)
+   - `SELF_IMPROVE_BRANCHES=dev`
+2. Перезапустите стек. Репозиторий попадёт в allowlist автоматически.
+3. `/repo add beachops https://github.com/<you>/beachops` (или alias) → `/plan` / `/task` /
+   `/do` как обычно (feature-branch + PR; `main`/`master` protected).
+4. Деплой — как раньше (owner approve / Actions). Плохой релиз: `/rollback` или
+   `/rollback <sha>` → кнопка подтверждения.
+
+Промпт self-improve явно запрещает ломать OWNER allowlist, auth/Passkey и коммитить секреты.
 
 ## Типичные сценарии
 

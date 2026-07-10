@@ -73,6 +73,7 @@ class CursorAgentService:
         api_key: str | None = None,
         runtime: str | AgentRuntime | None = None,
         local_path: str | None = None,
+        self_improve: bool = False,
     ) -> tuple[RunOutcome, str | None]:
         cursor_mode = "agent" if mode in (UserMode.ASK, UserMode.DO) else "plan"
         # Write-runs may create an isolated branch/PR only. Direct work on the
@@ -85,6 +86,7 @@ class CursorAgentService:
             mode,
             default_branch=repo.default_branch,
             memory_block=memory_block,
+            self_improve=self_improve,
         )
 
         state = StreamState()

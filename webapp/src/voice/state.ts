@@ -21,7 +21,7 @@ export const initialVoiceState: VoiceState = {
   phase: 'idle',
   partialTranscript: '',
   transcript: '',
-  caption: 'Tap the orb to speak',
+  caption: 'Коснись орба — говори',
   error: null,
   connected: false,
   recordingStartedAt: null,
@@ -52,7 +52,7 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
         connected: state.connected,
         phase: 'listening',
         recordingStartedAt: action.at,
-        caption: 'Listening · microphone active',
+        caption: 'Слушаю. Канал открыт.',
       }
     case 'STOP_LISTENING':
       if (state.phase !== 'listening') return state
@@ -60,7 +60,7 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
         ...state,
         phase: 'transcribing',
         recordingStartedAt: null,
-        caption: 'Finishing transcript…',
+        caption: 'Разбираю речь…',
       }
     case 'PARTIAL':
       if (!['listening', 'transcribing'].includes(state.phase)) return state
@@ -72,14 +72,14 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
         transcript: action.text,
         partialTranscript: '',
         recordingStartedAt: null,
-        caption: 'Review before planning',
+        caption: 'Проверь приказ перед планом',
       }
     case 'EDIT':
       if (state.phase !== 'confirming') return state
       return { ...state, transcript: action.text }
     case 'CONFIRM':
       if (state.phase !== 'confirming' || !state.transcript.trim()) return state
-      return { ...state, phase: 'planning', caption: 'Building a safe plan…' }
+      return { ...state, phase: 'planning', caption: 'Строю план. Без записи в репо.' }
     case 'SUBMIT_TEXT':
       if (!['idle', 'error', 'confirming'].includes(state.phase) || !action.text.trim()) {
         return state
@@ -90,10 +90,10 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
         transcript: action.text.trim(),
         partialTranscript: '',
         error: null,
-        caption: 'Building a safe plan…',
+        caption: 'Строю план. Без записи в репо.',
       }
     case 'SPEAKING':
-      return { ...state, phase: 'speaking', caption: action.caption ?? 'BeachOps is responding' }
+      return { ...state, phase: 'speaking', caption: action.caption ?? 'BeachOps докладывает' }
     case 'PLAYBACK_DONE':
       if (state.phase !== 'speaking') return state
       return { ...initialVoiceState, connected: state.connected }

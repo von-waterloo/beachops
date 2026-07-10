@@ -20,13 +20,13 @@ import type { VoicePhase } from '../voice/state'
 import type { Event, Job } from '../types/api'
 
 const phaseLabels: Record<VoicePhase, string> = {
-  idle: 'Ready',
-  listening: 'Listening',
-  transcribing: 'Transcribing',
-  confirming: 'Confirm',
-  planning: 'Planning',
-  speaking: 'Speaking',
-  error: 'Needs attention',
+  idle: 'На посту',
+  listening: 'Слушаю',
+  transcribing: 'Разбираю',
+  confirming: 'Подтверди',
+  planning: 'Строю план',
+  speaking: 'Брифинг',
+  error: 'Сбой',
 }
 
 const phaseEnergy: Record<VoicePhase, number> = {
@@ -89,8 +89,8 @@ export function VoiceConsole({ activeJob = null, latestEvent = null }: Props) {
     <section className="voice-console" aria-labelledby="voice-heading">
       <header className="voice-heading">
         <div>
-          <p className="eyebrow">CONTROL ROOM</p>
-          <h1 id="voice-heading">Ask BeachOps</h1>
+          <p className="eyebrow">WAR ROOM</p>
+          <h1 id="voice-heading">BeachOps</h1>
         </div>
         <button
           className="icon-button"
@@ -113,7 +113,7 @@ export function VoiceConsole({ activeJob = null, latestEvent = null }: Props) {
         )}
         <div className="connection-chip">
           <span className={state.connected ? 'online-dot' : 'offline-dot'} />
-          {state.connected ? 'Live' : 'Reconnecting'}
+          {state.connected ? 'На связи' : 'Переподключаюсь'}
         </div>
 
         {activeJob && (
@@ -126,7 +126,7 @@ export function VoiceConsole({ activeJob = null, latestEvent = null }: Props) {
         <motion.button
           type="button"
           className="orb-button"
-          aria-label={state.phase === 'listening' ? 'Stop recording' : 'Start voice request'}
+          aria-label={state.phase === 'listening' ? 'Стоп' : 'Говорить'}
           aria-pressed={state.phase === 'listening'}
           onClick={handleOrb}
           animate={{
@@ -172,21 +172,21 @@ export function VoiceConsole({ activeJob = null, latestEvent = null }: Props) {
         {state.phase === 'listening' && (
           <div className="privacy-chip" role="status">
             <span className="privacy-pulse" />
-            Microphone on · audio streams securely
+            Микрофон открыт · канал защищён
           </div>
         )}
       </div>
 
       {showComposer && (
         <div className="composer-card">
-          <label htmlFor="voice-composer">Composer</label>
+          <label htmlFor="voice-composer">Приказ</label>
           <div className="composer-row">
             <input
               id="voice-composer"
               type="text"
               value={composer}
               maxLength={4000}
-              placeholder="Type a plan request…"
+              placeholder="Коротко. Что сделать."
               onChange={(event) => setComposer(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
@@ -200,7 +200,7 @@ export function VoiceConsole({ activeJob = null, latestEvent = null }: Props) {
               type="button"
               disabled={!composer.trim()}
               onClick={handleComposer}
-              aria-label="Send plan request"
+              aria-label="Отправить"
             >
               <Send size={17} />
             </button>
@@ -218,7 +218,7 @@ export function VoiceConsole({ activeJob = null, latestEvent = null }: Props) {
           >
             <label htmlFor="voice-transcript">
               <Captions size={16} />
-              Transcript
+              Распознано
             </label>
             <textarea
               id="voice-transcript"
@@ -229,11 +229,11 @@ export function VoiceConsole({ activeJob = null, latestEvent = null }: Props) {
               autoFocus
             />
             <p className="security-note">
-              Voice can request a plan. Approval and panic controls stay locked.
+              Голос просит план. Approve и panic — только у владельца.
             </p>
             <div className="action-row">
               <button className="secondary-button" type="button" onClick={voice.cancel}>
-                <X size={17} /> Cancel
+                <X size={17} /> Отмена
               </button>
               <button
                 className="primary-button"
@@ -241,7 +241,7 @@ export function VoiceConsole({ activeJob = null, latestEvent = null }: Props) {
                 onClick={voice.confirmPlan}
                 disabled={!state.transcript.trim()}
               >
-                <Send size={17} /> Request plan
+                <Send size={17} /> В план
               </button>
             </div>
           </motion.div>
@@ -258,21 +258,21 @@ export function VoiceConsole({ activeJob = null, latestEvent = null }: Props) {
               voice.reset()
             }}
           >
-            <RotateCcw size={17} /> Try again
+            <RotateCcw size={17} /> Ещё раз
           </button>
         </div>
       )}
 
       {state.phase === 'planning' && (
         <div className="plan-safety" role="status">
-          <Check size={17} /> Planning only — no changes are being approved.
+          <Check size={17} /> Только план. Писать в репо не буду, пока не прикажешь.
         </div>
       )}
 
       <div className="voice-footnote">
         {state.phase === 'speaking'
-          ? <><Mic size={14} /> Tap the orb to interrupt</>
-          : <><MicOff size={14} /> Mic is off until you tap</>}
+          ? <><Mic size={14} /> Орб — прервать брифинг</>
+          : <><MicOff size={14} /> Микрофон молчит, пока не коснёшься орба</>}
       </div>
     </section>
   )

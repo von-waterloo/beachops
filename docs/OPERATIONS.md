@@ -1,5 +1,10 @@
 # Эксплуатация
 
+Секция **Docker Compose** ниже универсальна для любого хоста: свой `.env`, свои
+ключи, свой сервер. Раздел **Прод-сервер (185.244.49.94)** и self-hosted runner
+`host-185` — это конкретный прод поддерживающего автора, не обязательный шаг
+для вашей копии BeachOps.
+
 ## Docker Compose (локально / сервер)
 
 Стек: **postgres** + **redis** + one-shot **migrate** + один long-polling
@@ -101,6 +106,9 @@ echo y | plink -ssh -l const -i "C:\Users\vonwa\.ssh\const.ppk" 185.244.49.94 "c
 
 - **Один инстанс бота** — Telegram long polling не поддерживает несколько процессов с одним токеном.
 - Bot остаётся на polling. Mini App требует публичный HTTPS URL в `WEBAPP_BASE_URL`.
+- Self-improve (`SELF_IMPROVE_*`) по умолчанию выключен. Включение только в вашем `.env`
+  добавляет ваш форк BeachOps в allowlist; откат прода — `/rollback` (нужен
+  `GITHUB_DEPLOY_DISPATCH`).
 - На проде: docker `webapp` слушает host port `8080`; host nginx + Let's Encrypt
   проксируют `https://beachops.marketolog.tech` → `127.0.0.1:8080`
   (конфиг `/etc/nginx/sites-available/beachops-marketolog.conf`, шаблон в

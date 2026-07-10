@@ -17,9 +17,9 @@ export function ControlRoomHero({ running, pending, workersOnline, cloudJobs }: 
         transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
       />
       <div className="control-hero-copy">
-        <p className="eyebrow">CONTROL ROOM</p>
-        <h1>Orchestrate cloud & Windows agents</h1>
-        <p>Live queue, durable jobs, and voice — one surface.</p>
+        <p className="eyebrow">WAR ROOM</p>
+        <h1>Cloud и Windows — под одним командованием</h1>
+        <p>Очередь, durable jobs, голос. Без лишнего шума.</p>
       </div>
       <div className="control-metrics">
         <article>

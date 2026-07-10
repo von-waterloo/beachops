@@ -302,6 +302,11 @@ def create_app() -> FastAPI:
             outcome="success",
             details={"sha": result.sha, "ref": result.ref},
         )
+        await context.deploy_history.record(
+            sha=result.sha,
+            ref=result.ref,
+            reason="deploy",
+        )
         return {
             "repository": result.repository,
             "workflow": result.workflow,
@@ -839,7 +844,15 @@ async def _speak_job_result(
         result = await context.memory.get_by_run_id(job.actor_id, job.cursor_run_id)
         if result is None:
             return
-        await websocket.send_json({"type": "audio.started", "caption": result.body[:500]})
+        from beachops.domain.voice_persona import to_spoken_briefing
+
+        briefing = to_spoken_briefing(
+            result.body,
+            max_chars=context.settings.voice_spoken_max_chars,
+        )
+        await websocket.send_json(
+            {"type": "audio.started", "caption": briefing[:500] or result.body[:500]}
+        )
         async for chunk in context.speech.stream_pcm(result.body):
             await websocket.send_bytes(chunk)
         await websocket.send_json({"type": "audio.ended"})

@@ -23,6 +23,7 @@ from beachops.bot.handlers.cancel import cancel_handler
 from beachops.bot.handlers.control_plane import approvals_handler, jobs_handler
 from beachops.bot.handlers.dashboard import dashboard_handler
 from beachops.bot.handlers.panic import panic_handler, unpanic_handler
+from beachops.bot.handlers.rollback import rollback_handler
 from beachops.bot.handlers.memory import memory_handler, remember_handler
 from beachops.bot.handlers.mode import ask_handler, do_handler, mode_handler, plan_handler
 from beachops.bot.handlers.repo import repo_handler
@@ -117,6 +118,7 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("approvals", approvals_handler))
     application.add_handler(CommandHandler("panic", panic_handler))
     application.add_handler(CommandHandler("unpanic", unpanic_handler))
+    application.add_handler(CommandHandler("rollback", rollback_handler))
     application.add_handler(CommandHandler("dashboard", dashboard_handler))
     application.add_handler(CallbackQueryHandler(callback_handler))
 

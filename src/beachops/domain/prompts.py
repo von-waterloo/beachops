@@ -51,6 +51,18 @@ GIT_SAFETY_TEMPLATE = """Правила write-run BeachOps:
 
 """
 
+SELF_IMPROVE_SAFETY = """Самосовершенствование BeachOps (этот репозиторий — сам control plane):
+- Не ломай доступ владельца: не убирай и не сужай OWNER_USER_IDS / ADMIN_USER_IDS /
+  allowlist так, чтобы текущий owner потерял вход; не отключай Telegram initData /
+  Passkey / session cookie без явной обратимой замены.
+- Не коммить `.env`, токены, ключи, PPK, секреты Actions.
+- Не правь прод-хост/SSH/nginx автора «заодно»; деплой только через существующий
+  owner-approve / workflow_dispatch.
+- Предпочитай обратимые изменения; после деплоя owner откатывает через `/rollback`.
+- Scope = запрошенное улучшение; не рефакторь auth/RBAC «заодно».
+
+"""
+
 DO_GUIDANCE = """Как работать:
 - Режим действия: делай сразу и смело. Без «а точно?», без опросников и без «сначала план».
 - Цель — быстро закрыть задачу; это про кодинг и кайф, не про перфекционизм и тревогу.
@@ -91,6 +103,7 @@ def build_prompt(
     *,
     default_branch: str = "dev",
     memory_block: str | None = None,
+    self_improve: bool = False,
 ) -> str:
     body = text.strip()
     if memory_block:
@@ -98,7 +111,13 @@ def build_prompt(
     if mode == UserMode.ASK:
         return f"{ASK_SYSTEM_PREFIX}{body}"
     if mode == UserMode.PLAN:
-        return f"{PLAN_SYSTEM_PREFIX}{body}"
+        prefix = PLAN_SYSTEM_PREFIX
+        if self_improve:
+            prefix = f"{SELF_IMPROVE_SAFETY}{prefix}"
+        return f"{prefix}{body}"
     if mode == UserMode.DO:
-        return f"{git_safety_prefix(default_branch=default_branch)}{DO_GUIDANCE}{body}"
+        prefix = f"{git_safety_prefix(default_branch=default_branch)}{DO_GUIDANCE}"
+        if self_improve:
+            prefix = f"{SELF_IMPROVE_SAFETY}{prefix}"
+        return f"{prefix}{body}"
     return body
