@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import { requestTelegramFullscreen } from '../lib/telegram'
+import { feedback } from '../lib/feedback'
 import { useVoiceSession } from '../voice/useVoiceSession'
 import type { VoicePhase } from '../voice/state'
 import type { Event, Job } from '../types/api'
@@ -95,7 +96,10 @@ export function VoiceConsole({ activeJob = null, latestEvent = null }: Props) {
           className="icon-button"
           type="button"
           aria-label="Open fullscreen"
-          onClick={requestTelegramFullscreen}
+          onClick={() => {
+            feedback('tap')
+            requestTelegramFullscreen()
+          }}
         >
           <Expand size={18} />
         </button>
@@ -246,7 +250,14 @@ export function VoiceConsole({ activeJob = null, latestEvent = null }: Props) {
 
       {state.phase === 'error' && (
         <div className="error-actions">
-          <button className="secondary-button" type="button" onClick={voice.reset}>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => {
+              feedback('select')
+              voice.reset()
+            }}
+          >
             <RotateCcw size={17} /> Try again
           </button>
         </div>

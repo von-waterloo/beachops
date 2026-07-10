@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   Activity,
@@ -8,6 +9,7 @@ import {
   Cloud,
   GitBranch,
   HeartPulse,
+  Loader2,
   LockKeyhole,
   Monitor,
   Radio,
@@ -18,8 +20,11 @@ import {
 } from 'lucide-react'
 import type { DashboardSnapshot, Event, Job, WorkerNode } from '../types/api'
 import { isActiveJobStatus } from '../types/api'
+import { feedback } from '../lib/feedback'
 
 export type TabId = 'voice' | 'active' | 'history' | 'approvals' | 'repositories'
+
+type Decision = 'approve' | 'reject' | 'revision'
 
 interface Props {
   tab: Exclude<TabId, 'voice'> | 'overview'
@@ -28,7 +33,7 @@ interface Props {
   error: string | null
   liveEvents?: Event[]
   onRefresh: () => void
-  onDecision: (approvalId: string, decision: 'approve' | 'reject' | 'revision', revision?: string) => void
+  onDecision: (approvalId: string, decision: Decision, revision?: string) => Promise<void>
 }
 
 const relativeTime = (value?: string | null) => {
@@ -150,6 +155,32 @@ function WorkerCard({ worker }: { worker: WorkerNode }) {
   )
 }
 
+function ApprovalActions({
+  pending,
+  onApprove,
+  onRevise,
+  onReject,
+}: {
+  pending: boolean
+  onApprove: () => void
+  onRevise: () => void
+  onReject: () => void
+}) {
+  return (
+    <div className="approval-actions">
+      <button type="button" disabled={pending} onClick={onApprove}>
+        {pending ? <Loader2 size={15} className="spin-icon" /> : <Check size={15} />} Approve
+      </button>
+      <button type="button" disabled={pending} onClick={onRevise}>
+        <RotateCcw size={15} /> Revise
+      </button>
+      <button className="danger" type="button" disabled={pending} onClick={onReject}>
+        <X size={15} /> Reject
+      </button>
+    </div>
+  )
+}
+
 function TimelineList({ events }: { events: Event[] }) {
   if (!events.length) {
     return <Empty icon={<Archive />} title="No history yet" copy="Completed runs will appear here." />
@@ -184,11 +215,13 @@ function TimelineList({ events }: { events: Event[] }) {
 function Overview({
   data,
   liveEvents,
-  onDecision,
+  pendingIds,
+  act,
 }: {
   data: DashboardSnapshot
   liveEvents: Event[]
-  onDecision: Props['onDecision']
+  pendingIds: Set<string>
+  act: (approvalId: string, decision: Decision, revision?: string) => void
 }) {
   const activeJobs = data.jobs.filter((job) => isActiveJobStatus(job.status))
   const cloudJobs = activeJobs.filter((job) => job.runtime !== 'windows')
@@ -273,24 +306,16 @@ function Overview({
                 </div>
                 <h2>{approval.title}</h2>
                 {data.role.toLowerCase() === 'owner' && (
-                  <div className="approval-actions">
-                    <button type="button" onClick={() => onDecision(approval.id, 'approve')}>
-                      <Check size={15} /> Approve
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onDecision(
-                        approval.id,
-                        'revision',
-                        'Review the result and correct issues within the approved scope.',
-                      )}
-                    >
-                      <RotateCcw size={15} /> Revise
-                    </button>
-                    <button className="danger" type="button" onClick={() => onDecision(approval.id, 'reject')}>
-                      <X size={15} /> Reject
-                    </button>
-                  </div>
+                  <ApprovalActions
+                    pending={pendingIds.has(approval.id)}
+                    onApprove={() => act(approval.id, 'approve')}
+                    onRevise={() => act(
+                      approval.id,
+                      'revision',
+                      'Review the result and correct issues within the approved scope.',
+                    )}
+                    onReject={() => act(approval.id, 'reject')}
+                  />
                 )}
               </article>
             ))}
@@ -332,6 +357,24 @@ export function DashboardPanels({
   onRefresh,
   onDecision,
 }: Props) {
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
+
+  const act = (approvalId: string, decision: Decision, revision?: string) => {
+    if (pendingIds.has(approvalId)) return
+    feedback('tap')
+    setPendingIds((prev) => new Set(prev).add(approvalId))
+    void onDecision(approvalId, decision, revision)
+      .then(() => feedback(decision === 'reject' ? 'warning' : 'success'))
+      .catch(() => feedback('error'))
+      .finally(() => {
+        setPendingIds((prev) => {
+          const next = new Set(prev)
+          next.delete(approvalId)
+          return next
+        })
+      })
+  }
+
   if (loading && tab !== 'overview') {
     return (
       <section className="panel-page" aria-busy="true">
@@ -346,7 +389,7 @@ export function DashboardPanels({
     return (
       <section className="panel-page overview-page">
         {error && <div className="inline-error" role="alert">{error}</div>}
-        <Overview data={data} liveEvents={liveEvents} onDecision={onDecision} />
+        <Overview data={data} liveEvents={liveEvents} pendingIds={pendingIds} act={act} />
       </section>
     )
   }
@@ -358,7 +401,15 @@ export function DashboardPanels({
           <p className="eyebrow">BEACHOPS CONTROL</p>
           <h1>{tab === 'active' ? 'Active work' : tab[0].toUpperCase() + tab.slice(1)}</h1>
         </div>
-        <button className="icon-button" type="button" aria-label="Refresh" onClick={onRefresh}>
+        <button
+          className="icon-button"
+          type="button"
+          aria-label="Refresh"
+          onClick={() => {
+            feedback('tap')
+            onRefresh()
+          }}
+        >
           <RefreshCw size={17} />
         </button>
       </header>
@@ -400,24 +451,16 @@ export function DashboardPanels({
                   <h2>{approval.title}</h2>
                   <p>{approval.repository ?? 'Protected operation'}</p>
                   {data.role.toLowerCase() === 'owner' && (
-                    <div className="approval-actions">
-                      <button type="button" onClick={() => onDecision(approval.id, 'approve')}>
-                        <Check size={15} /> Approve
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onDecision(
-                          approval.id,
-                          'revision',
-                          'Review the result and correct issues within the approved scope.',
-                        )}
-                      >
-                        <RotateCcw size={15} /> Revise
-                      </button>
-                      <button className="danger" type="button" onClick={() => onDecision(approval.id, 'reject')}>
-                        <X size={15} /> Reject
-                      </button>
-                    </div>
+                    <ApprovalActions
+                      pending={pendingIds.has(approval.id)}
+                      onApprove={() => act(approval.id, 'approve')}
+                      onRevise={() => act(
+                        approval.id,
+                        'revision',
+                        'Review the result and correct issues within the approved scope.',
+                      )}
+                      onReject={() => act(approval.id, 'reject')}
+                    />
                   )}
                 </article>
               ))}

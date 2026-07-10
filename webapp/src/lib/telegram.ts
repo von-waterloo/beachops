@@ -22,6 +22,16 @@ declare global {
 
 export const telegram = () => window.Telegram?.WebApp
 
+/**
+ * `telegram-web-app.js` injects a `window.Telegram.WebApp` stub even in a plain
+ * browser tab, complete with a no-op `ready()`/`expand()`. The only reliable signal
+ * that we are actually running inside a Telegram WebView is a non-empty `initData`,
+ * so detection must key off that rather than the object's mere presence.
+ */
+export function isTelegramWebApp(): boolean {
+  return Boolean(getTelegramInitData())
+}
+
 export function initializeTelegram(): void {
   const app = telegram()
   app?.ready()
@@ -30,6 +40,28 @@ export function initializeTelegram(): void {
 
 export function getTelegramInitData(): string {
   return telegram()?.initData ?? ''
+}
+
+/** Wait briefly for Telegram to inject initData into the WebView. */
+export async function waitForTelegramInitData(
+  timeoutMs = 2500,
+): Promise<string> {
+  const existing = getTelegramInitData()
+  if (existing) return existing
+
+  const started = Date.now()
+  return new Promise((resolve) => {
+    const tick = () => {
+      initializeTelegram()
+      const value = getTelegramInitData()
+      if (value || Date.now() - started >= timeoutMs) {
+        resolve(value)
+        return
+      }
+      window.setTimeout(tick, 50)
+    }
+    tick()
+  })
 }
 
 export function requestTelegramFullscreen(): void {

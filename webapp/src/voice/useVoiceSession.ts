@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import { getTelegramInitData, haptic } from '../lib/telegram'
+import { getTelegramInitData } from '../lib/telegram'
+import { feedback } from '../lib/feedback'
 import { voiceWebSocketUrl } from '../lib/api'
 import {
   shouldReconnectVoice,
@@ -108,7 +109,7 @@ export function useVoiceSession() {
         break
       case 'transcript.final':
         dispatch({ type: 'FINAL', text: event.text ?? '' })
-        haptic('success')
+        feedback('success')
         break
       case 'plan.started':
         dispatch({ type: 'CONFIRM' })
@@ -124,7 +125,7 @@ export function useVoiceSession() {
         break
       case 'error':
         dispatch({ type: 'FAIL', message: event.message ?? 'Voice service unavailable' })
-        haptic('error')
+        feedback('error')
     }
   }, [playNext])
 
@@ -172,7 +173,7 @@ export function useVoiceSession() {
           type: 'FAIL',
           message: event.code === 4429 ? RATE_LIMITED : AUTH_FAILED,
         })
-        haptic('error')
+        feedback('error')
         return
       }
 
@@ -292,11 +293,11 @@ export function useVoiceSession() {
       chunkSeqRef.current = 0
       sendJson({ type: 'audio.start', codec: 'audio/pcm', sampleRate: 24_000 })
       dispatch({ type: 'START_LISTENING', at: Date.now() })
-      haptic('tap')
+      feedback('tap')
       maxDurationRef.current = window.setTimeout(() => {
         stopCapture()
         dispatch({ type: 'STOP_LISTENING' })
-        haptic('warning')
+        feedback('warning')
       }, MAX_RECORDING_MS)
     } catch (error) {
       const denied = error instanceof DOMException && error.name === 'NotAllowedError'
@@ -304,13 +305,13 @@ export function useVoiceSession() {
         type: 'FAIL',
         message: denied ? 'Microphone permission is required' : 'Microphone is unavailable',
       })
-      haptic('error')
+      feedback('error')
     }
   }, [connect, sendJson, state.connected, stopCapture, stopPlayback])
   const finishListening = useCallback(() => {
     stopCapture()
     dispatch({ type: 'STOP_LISTENING' })
-    haptic('tap')
+    feedback('tap')
   }, [stopCapture])
 
   const cancel = useCallback(() => {
@@ -318,14 +319,14 @@ export function useVoiceSession() {
     stopPlayback()
     sendJson({ type: 'session.cancel' })
     dispatch({ type: 'CANCEL' })
-    haptic('selection')
+    feedback('select')
   }, [sendJson, stopCapture, stopPlayback])
 
   const confirmPlan = useCallback(() => {
     if (!state.transcript.trim()) return
     sendJson({ type: 'plan.request', transcript: state.transcript.trim() })
     dispatch({ type: 'CONFIRM' })
-    haptic('success')
+    feedback('success')
   }, [sendJson, state.transcript])
 
   const submitComposer = useCallback((text: string) => {
@@ -342,7 +343,7 @@ export function useVoiceSession() {
     }
     sendJson({ type: 'plan.request', transcript: trimmed })
     dispatch({ type: 'SUBMIT_TEXT', text: trimmed })
-    haptic('success')
+    feedback('success')
     return true
   }, [connect, sendJson, state.connected])
 

@@ -11,6 +11,8 @@ import {
   Monitor,
   ShieldCheck,
   Siren,
+  Volume2,
+  VolumeX,
 } from 'lucide-react'
 import { AuthScreen } from './components/AuthScreen'
 import { VoiceConsole } from './components/VoiceConsole'
@@ -22,10 +24,10 @@ import { useJobStream } from './hooks/useJobStream'
 import type { AuthenticatedUser } from './lib/passkeys'
 import {
   getTelegramInitData,
-  haptic,
   initializeTelegram,
   telegramTheme,
 } from './lib/telegram'
+import { feedback, isSoundMuted, setSoundMuted } from './lib/feedback'
 import { isActiveJobStatus } from './types/api'
 
 const tabs: Array<{ id: TabId; label: string; icon: typeof LayoutDashboard }> = [
@@ -51,7 +53,9 @@ export default function App() {
         busy={auth.busy}
         error={auth.error}
         supported={auth.supported}
+        insideTelegram={auth.insideTelegram}
         onLogin={() => void auth.login()}
+        onRetry={() => void auth.refresh()}
       />
     )
   }
@@ -85,6 +89,14 @@ function ControlRoom({
   const [tab, setTab] = useState<TabId>('voice')
   const dashboard = useDashboard()
   const [now, setNow] = useState(() => Date.now())
+  const [soundMuted, setSoundMutedState] = useState(() => isSoundMuted())
+
+  const toggleSound = () => {
+    const next = !soundMuted
+    setSoundMuted(next)
+    setSoundMutedState(next)
+    feedback('tap')
+  }
 
   const activeJob = useMemo(
     () => dashboard.data.jobs.find((job) => isActiveJobStatus(job.status)) ?? null,
@@ -103,7 +115,7 @@ function ControlRoom({
 
   const selectTab = (next: TabId) => {
     setTab(next)
-    haptic('selection')
+    feedback('select')
   }
 
   const running = dashboard.data.queue?.running ?? dashboard.data.queue?.active ?? 0
@@ -125,12 +137,25 @@ function ControlRoom({
               Live
             </div>
           )}
+          <button
+            className="auth-icon-button"
+            type="button"
+            onClick={toggleSound}
+            title={soundMuted ? 'Включить звук и вибрацию' : 'Выключить звук и вибрацию'}
+            aria-label={soundMuted ? 'Включить звук и вибрацию' : 'Выключить звук и вибрацию'}
+            aria-pressed={!soundMuted}
+          >
+            {soundMuted ? <VolumeX size={17} /> : <Volume2 size={17} />}
+          </button>
           {getTelegramInitData() && user.role === 'owner' && (
             <button
               className="auth-icon-button"
               type="button"
               disabled={busy}
-              onClick={onRegister}
+              onClick={() => {
+                feedback('tap')
+                onRegister()
+              }}
               title={user.hasPasskey ? 'Добавить ключ доступа' : 'Включить Face ID / Passkey'}
               aria-label={user.hasPasskey ? 'Добавить ключ доступа' : 'Включить Face ID / Passkey'}
             >
@@ -143,7 +168,10 @@ function ControlRoom({
               className="auth-icon-button"
               type="button"
               disabled={busy}
-              onClick={onLogout}
+              onClick={() => {
+                feedback('tap')
+                onLogout()
+              }}
               title="Выйти"
               aria-label="Выйти"
             >
@@ -200,9 +228,9 @@ function ControlRoom({
                   error={dashboard.error ?? stream.error}
                   liveEvents={liveEvents}
                   onRefresh={() => void dashboard.refresh()}
-                  onDecision={(approvalId, decision, revision) => {
-                    void dashboard.decideApproval(approvalId, decision, revision)
-                  }}
+                  onDecision={(approvalId, decision, revision) =>
+                    dashboard.decideApproval(approvalId, decision, revision)
+                  }
                 />
               </>
             ) : (
@@ -213,9 +241,9 @@ function ControlRoom({
                 error={dashboard.error}
                 liveEvents={liveEvents}
                 onRefresh={() => void dashboard.refresh()}
-                onDecision={(approvalId, decision, revision) => {
-                  void dashboard.decideApproval(approvalId, decision, revision)
-                }}
+                onDecision={(approvalId, decision, revision) =>
+                  dashboard.decideApproval(approvalId, decision, revision)
+                }
               />
             )}
           </motion.div>

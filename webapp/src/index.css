@@ -766,6 +766,23 @@ main {
   background: color-mix(in srgb, var(--danger) 7%, var(--surface-high));
 }
 
+.approval-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.approval-actions button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.spin-icon {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .progress-track {
   height: 4px;
   margin-top: 16px;
@@ -1468,6 +1485,10 @@ main {
 
 .auth-icon-button:disabled {
   opacity: 0.5;
+}
+
+.auth-icon-button[aria-pressed="false"] {
+  color: var(--muted);
 }
 
 .auth-icon-button i {

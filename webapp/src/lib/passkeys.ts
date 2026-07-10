@@ -59,7 +59,15 @@ export async function logoutBrowserSession(): Promise<void> {
 }
 
 export function passkeysSupported(): boolean {
-  return Boolean(window.PublicKeyCredential && navigator.credentials)
+  return Boolean(
+    typeof window !== 'undefined'
+    && window.PublicKeyCredential
+    && typeof window.PublicKeyCredential === 'function'
+    && navigator.credentials
+    && typeof navigator.credentials.create === 'function'
+    && typeof navigator.credentials.get === 'function'
+    && window.isSecureContext,
+  )
 }
 
 function deviceLabel(): string {

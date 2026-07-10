@@ -7,19 +7,35 @@ import {
   registerPasskey,
   type AuthenticatedUser,
 } from '../lib/passkeys'
+import {
+  getTelegramInitData,
+  isTelegramWebApp,
+  waitForTelegramInitData,
+} from '../lib/telegram'
+import { feedback } from '../lib/feedback'
 
 export function useAuth() {
   const [user, setUser] = useState<AuthenticatedUser | null>(null)
   const [checking, setChecking] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [insideTelegram, setInsideTelegram] = useState(() => isTelegramWebApp())
 
   const refresh = useCallback(async () => {
+    setChecking(true)
     try {
+      if (!getTelegramInitData()) {
+        await waitForTelegramInitData()
+      }
+      setInsideTelegram(isTelegramWebApp())
       setUser(await currentUser())
       setError(null)
     } catch {
       setUser(null)
+      // Inside Telegram, a failed /api/me after a real initData means the
+      // account is not whitelisted. Outside Telegram it just means "not signed
+      // in yet" — the passkey login button handles that, no error needed.
+      setError(isTelegramWebApp() ? 'Нет доступа для этого Telegram-аккаунта.' : null)
     } finally {
       setChecking(false)
     }
@@ -35,12 +51,14 @@ export function useAuth() {
     try {
       await loginWithPasskey()
       await refresh()
+      feedback('success')
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === 'NotAllowedError') {
-        setError('Вход отменён')
+        setError('Вход отменён или ключ на этом устройстве не найден. Привяжите passkey в Telegram Mini App.')
       } else {
-        setError('Ключ доступа не найден или вход не подтверждён')
+        setError('Ключ не найден. Откройте /dashboard в Telegram и нажмите кнопку с отпечатком, затем повторите вход.')
       }
+      feedback('error')
     } finally {
       setBusy(false)
     }
@@ -52,12 +70,14 @@ export function useAuth() {
     try {
       await registerPasskey()
       await refresh()
+      feedback('success')
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === 'NotAllowedError') {
         setError('Создание ключа отменено')
       } else {
         setError('Не удалось создать ключ доступа')
       }
+      feedback('error')
     } finally {
       setBusy(false)
     }
@@ -67,6 +87,7 @@ export function useAuth() {
     setBusy(true)
     try {
       await logoutBrowserSession()
+      feedback('select')
     } finally {
       setUser(null)
       setBusy(false)
@@ -79,8 +100,10 @@ export function useAuth() {
     busy,
     error,
     supported: passkeysSupported(),
+    insideTelegram,
     login,
     register,
     logout,
+    refresh,
   }
 }
