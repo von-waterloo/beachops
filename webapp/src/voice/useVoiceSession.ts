@@ -21,6 +21,29 @@ interface VoiceEvent {
   text?: string
   caption?: string
   message?: string
+  code?: string
+}
+
+const VOICE_ERROR_MESSAGES: Record<string, string> = {
+  provider_unavailable: 'Voice service unavailable',
+  chunk_too_large: 'Audio chunk too large',
+  session_limit: 'Voice session limit reached',
+  invalid_event: 'Invalid voice event',
+  invalid_transcript: 'Transcript is empty or too long',
+  job_missing: 'Task disappeared',
+  missing_run_id: 'Task finished without a run id',
+  memory_missing: 'Task result is not ready yet',
+  no_repository: 'Select a repository first',
+  dispatch_blocked: 'Request blocked',
+}
+
+function voiceErrorMessage(event: VoiceEvent): string {
+  if (event.message?.trim()) return event.message.trim()
+  if (event.code && VOICE_ERROR_MESSAGES[event.code]) {
+    return VOICE_ERROR_MESSAGES[event.code]
+  }
+  if (event.code) return `Voice error: ${event.code}`
+  return 'Voice service unavailable'
 }
 
 export function useVoiceSession() {
@@ -124,8 +147,9 @@ export function useVoiceSession() {
         playNext()
         break
       case 'error':
-        dispatch({ type: 'FAIL', message: event.message ?? 'Voice service unavailable' })
+        dispatch({ type: 'FAIL', message: voiceErrorMessage(event) })
         feedback('error')
+        break
     }
   }, [playNext])
 

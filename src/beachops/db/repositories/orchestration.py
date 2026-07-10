@@ -200,6 +200,10 @@ class NotificationOutboxRepository:
                 )
 
 
+WORKER_STALE_AFTER_SEC = 60
+"""Heartbeat cadence is ~20s; two missed beats mark a node stale/offline."""
+
+
 class WorkerNodeRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
@@ -279,20 +283,30 @@ class WorkerNodeRepository:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT * FROM beachops_worker_nodes
+                SELECT *,
+                       (status = 'online'
+                        AND last_heartbeat_at >= now() - make_interval(secs => $1)
+                       ) AS is_live
+                FROM beachops_worker_nodes
                 ORDER BY last_heartbeat_at DESC NULLS LAST, created_at DESC
-                """
+                """,
+                WORKER_STALE_AFTER_SEC,
             )
         return [dict(row) for row in rows]
 
     async def list_online(self) -> list[dict[str, Any]]:
+        """Nodes with a fresh heartbeat only — a crashed worker stops showing
+        as online instead of sticking at its last-known status forever."""
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT * FROM beachops_worker_nodes
+                SELECT *, true AS is_live
+                FROM beachops_worker_nodes
                 WHERE status = 'online'
+                  AND last_heartbeat_at >= now() - make_interval(secs => $1)
                 ORDER BY last_heartbeat_at DESC NULLS LAST
-                """
+                """,
+                WORKER_STALE_AFTER_SEC,
             )
         return [dict(row) for row in rows]
 

@@ -6,7 +6,8 @@
 - **Cursor Cloud Agents** — через `cursor-sdk` (bridge + cloud repos).
 - **Windows local agents** — outbound worker на ПК (`beachops.windows_worker`) с `LocalAgentOptions(cwd=...)`.
 - **PostgreSQL 16 + pgvector** — пользователи, репозитории, сессии агентов, семантическая память.
-- **Redis + ARQ** — durable jobs, distributed actor locks, rate limits, replay protection.
+- **Redis + ARQ** — durable jobs, distributed actor locks, rate limits, replay protection,
+  short-lived hot cache (dashboard, auth bootstrap, panic write-through, embeddings).
 - **FastAPI + React Mini App** — dashboard, approvals, realtime voice, worker control plane.
 - **OpenAI API** — realtime STT, streaming TTS, эмбеддинги.
 - **Workspace volume** — локальная рабочая директория для cursor-sdk bridge (`WORKSPACE_PATH`).
@@ -47,7 +48,7 @@
 - `pool` — asyncpg
 - `users`, `repos`, `agent_slots`, `jobs`, `approvals`, `audit`, `system_state`, `passkeys`
 - `run_events`, `notification_outbox`, `worker_nodes` — orchestration / Windows workers
-- `redis`, `arq`, AES-GCM crypto, repository/risk policy
+- `redis`, `arq`, `hot_cache`, AES-GCM crypto, repository/risk policy
 - `memory` — индексация и recall
 - `cursor` — CursorAgentService
 - `transcription` — OpenAI STT
@@ -227,6 +228,7 @@ Bot → beachops_jobs → ARQ runner → Cursor (cloud) / Windows worker
 ```
 
 Telegram stream edits — best-effort UI. Источник правды: Postgres. Cancel — Redis `CancelStore` (bot↔worker).
+Hot cache (`HotCache`): dashboard TTL ~3 с, auth bootstrap ~15 мин, panic write-through, embeddings по hash текста.
 
 ## Безопасность
 

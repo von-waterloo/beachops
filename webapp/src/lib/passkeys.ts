@@ -11,16 +11,33 @@ interface PasskeyOptions<T> {
   options: T
 }
 
+export interface CursorModelOption {
+  key: string
+  label: string
+}
+
 export interface AuthenticatedUser {
   userId: number
   role: string
   writesEnabled: boolean
   authMethod: 'telegram' | 'passkey'
   hasPasskey: boolean
+  cursorModelKey?: string
+  models?: CursorModelOption[]
 }
 
 export async function currentUser(): Promise<AuthenticatedUser> {
   return apiFetch<AuthenticatedUser>('/api/me')
+}
+
+export async function setCursorModel(modelKey: string): Promise<{
+  cursorModelKey: string
+  label: string
+}> {
+  return apiFetch('/api/me/model', {
+    method: 'PUT',
+    body: JSON.stringify({ modelKey }),
+  })
 }
 
 export async function registerPasskey(label?: string): Promise<void> {

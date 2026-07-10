@@ -10,11 +10,18 @@ import asyncpg
 
 from beachops.domain.security import Role
 from beachops.services.authz import require_owner
+from beachops.services.hot_cache import HotCache
 
 
 class SystemStateRepository:
-    def __init__(self, pool: asyncpg.Pool) -> None:
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        *,
+        cache: HotCache | None = None,
+    ) -> None:
         self._pool = pool
+        self._cache = cache
 
     async def get(self, key: str) -> dict[str, Any] | None:
         async with self._pool.acquire() as conn:
@@ -55,8 +62,14 @@ class SystemStateRepository:
             raise PermissionError("owner role required")
 
     async def is_panic_enabled(self) -> bool:
-        state = await self.get("panic")
-        return bool(state and state.get("enabled") is True)
+        if self._cache is not None:
+            cached = await self._cache.get_panic()
+            if cached is not None:
+                return cached
+        enabled = bool((await self.get("panic") or {}).get("enabled") is True)
+        if self._cache is not None:
+            await self._cache.warm_panic(enabled)
+        return enabled
 
     async def set_panic(
         self,
@@ -71,6 +84,8 @@ class SystemStateRepository:
             actor_id=actor_id,
             actor_role=actor_role,
         )
+        if self._cache is not None:
+            await self._cache.set_panic(enabled)
 
 
 def _json_object(value: object) -> dict[str, Any]:
@@ -78,4 +93,3 @@ def _json_object(value: object) -> dict[str, Any]:
         decoded = json.loads(value)
         return decoded if isinstance(decoded, dict) else {}
     return dict(value) if isinstance(value, Mapping) else {}
-

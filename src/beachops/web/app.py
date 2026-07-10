@@ -185,6 +185,15 @@ def create_app() -> FastAPI:
     ) -> dict:
         context = _context(request)
         role = context.settings.role_for(principal.user_id)
+        cache_scope = (
+            f"owner:{principal.user_id}"
+            if role == Role.OWNER
+            else f"actor:{principal.user_id}"
+        )
+        cached = await context.hot_cache.get_dashboard(cache_scope)
+        if cached is not None:
+            return cached
+
         jobs = (
             await context.jobs.list_all_internal(limit=100)
             if role == Role.OWNER
@@ -199,7 +208,7 @@ def create_app() -> FastAPI:
         total_tokens = sum(job.total_tokens or 0 for job in jobs)
         user_repos = await context.repos.list_repos(principal.user_id)
         slots = await context.agent_slots.list_slots(principal.user_id)
-        return {
+        snapshot = {
             "jobs": [_job_json(job) for job in jobs],
             "events": events,
             "approvals": [_approval_json(item) for item in approvals],
@@ -221,6 +230,8 @@ def create_app() -> FastAPI:
             ],
             "queue": _queue_stats(jobs),
         }
+        await context.hot_cache.set_dashboard(cache_scope, snapshot)
+        return snapshot
 
     @app.post("/api/repos")
     async def create_repo(
@@ -405,6 +416,7 @@ def create_app() -> FastAPI:
             )
             await reject_job(context, job)
             result = {"status": "rejected", "jobId": str(job.id)}
+        await context.hot_cache.bump_dashboard_generation()
         return result
 
     @app.post("/api/panic")

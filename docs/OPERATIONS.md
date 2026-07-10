@@ -22,7 +22,7 @@ Volumes:
 | Volume | Назначение |
 |--------|------------|
 | `postgres-data` | данные PostgreSQL |
-| `redis-data` | ARQ queue, idempotency, rate limits |
+| `redis-data` | ARQ queue, idempotency, rate limits, hot cache |
 | `bot-data` | workspace cursor-sdk (`/data/workspace`) |
 
 ### Миграции
@@ -160,6 +160,8 @@ docker compose exec -T postgres psql -U bot tg_cursor_bot < backup.sql
 | Бот не стартует | Postgres/Redis, encryption key, repository policy, миграции |
 | Mini App не открывается | нужен `WEBAPP_BASE_URL` с HTTPS, HTTP/IP Telegram не принимает |
 | Mini App: шторм `/api/voice/ws` или dashboard 401 | открывать только из Telegram (нужен `initData`); вне TG реконнект не должен крутиться |
+| Voice WS рвётся без причины в UI | `docker compose logs api webapp` — искать JSON с `"action":"voice_session"` / `"error_code"` / `exception`; auth fail → 4401, rate limit → 4429 |
+| Нет JSON-логов у api/worker | `configure_logging` на старте; `LOG_LEVEL`; ротация `json-file` 50m×5 в compose |
 | Conflict: terminated by other getUpdates | второй инстанс с тем же токеном |
 | Cursor error | `CURSOR_API_KEY`, GitHub подключён в dashboard |
 | Память не работает | `OPENAI_API_KEY`, миграции применены |

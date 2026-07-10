@@ -35,7 +35,7 @@ export function AuthScreen({
         <div className="auth-copy">
           <span className="auth-kicker">
             <ShieldCheck size={15} />
-            PRIVATE CONTROL PLANE
+            Закрытый пульт
           </span>
           <h1>
             {checking
@@ -89,9 +89,9 @@ export function AuthScreen({
         {error && <p className="auth-error">{error}</p>}
 
         <div className="auth-trust">
-          <span><i /> {insideTelegram ? 'Telegram session' : 'WebAuthn'}</span>
-          <span><i /> End-to-end challenge</span>
-          <span><i /> Owner only</span>
+          <span><i /> {insideTelegram ? 'Сессия Telegram' : 'WebAuthn'}</span>
+          <span><i /> Одноразовый challenge</span>
+          <span><i /> Только владелец</span>
         </div>
       </section>
     </main>

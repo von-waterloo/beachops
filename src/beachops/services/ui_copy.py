@@ -398,9 +398,9 @@ def mode_set_next(mode: UserMode) -> str:
 
 def dashboard_message() -> str:
     return (
-        "🎛 BeachOps Control Room\n\n"
-        "Голос, Cloud/Windows агенты, очередь, approvals и timeline — "
-        "в Mini App."
+        "🎛 BeachOps · ваши агенты\n\n"
+        "Голос, Cloud и Windows, очередь и решения — "
+        "в одном Mini App."
     )
 
 
@@ -565,7 +565,7 @@ def build_welcome_message(
     agent_line = active_agent_label or "—"
 
     lines = [
-        "BeachOps · private development control",
+        "BeachOps · ваши агенты в одном диалоге",
         "",
         "Сейчас",
         f"· Режим · {mode_label}",
@@ -601,7 +601,7 @@ def build_welcome_message(
             "Пока агент работает",
             "· Ответ стримится в одном сообщении",
             "· Отмена: кнопка «Отменить» или /cancel",
-            "· Текстовые задачи переживают рестарт в Redis/ARQ",
+            "· Задачи не теряются при перезапуске",
             "",
             "Память",
             "/remember текст — сохранить заметку",

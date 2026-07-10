@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 async def startup(ctx: dict) -> None:
     settings = get_settings()
+    from beachops.services.logging_config import configure_logging
+
+    configure_logging(settings.log_level, service="worker")
     app = await AppContext.create(settings)
     bot = Bot(settings.tg_bot_token)
     await bot.initialize()
@@ -199,14 +202,25 @@ async def _execute_locked(app: AppContext, bot: Bot, job) -> None:
         application=SimpleNamespace(bot_data={"app": app}),
         bot=bot,
     )
-    outcome = await _run_job(
-        context,
-        job.actor_id,
-        prompt,
-        mode,
-        run_context,
-        job_id=job.id,
+    from beachops.services.logging_config import bind_log_context, clear_log_context
+
+    bind_log_context(
+        job_id=str(job.id),
+        user_id=job.actor_id,
+        action="execute_job",
     )
+    try:
+        outcome = await _run_job(
+            context,
+            job.actor_id,
+            prompt,
+            mode,
+            run_context,
+            job_id=job.id,
+        )
+    finally:
+        clear_log_context()
+        bind_log_context(service="worker")
     refreshed = await app.jobs.get_internal(job.id)
     if refreshed is not None:
         await enqueue_milestone(

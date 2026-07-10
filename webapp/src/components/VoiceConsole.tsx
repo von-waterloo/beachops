@@ -15,9 +15,11 @@ import {
 } from 'lucide-react'
 import { requestTelegramFullscreen } from '../lib/telegram'
 import { feedback } from '../lib/feedback'
+import { setCursorModel, type CursorModelOption } from '../lib/passkeys'
 import { useVoiceSession } from '../voice/useVoiceSession'
 import type { VoicePhase } from '../voice/state'
 import type { Event, Job } from '../types/api'
+import { runtimeLabel, statusLabel } from '../lib/uiCopy'
 
 const phaseLabels: Record<VoicePhase, string> = {
   idle: 'На посту',
@@ -42,14 +44,29 @@ const phaseEnergy: Record<VoicePhase, number> = {
 interface Props {
   activeJob?: Job | null
   latestEvent?: Event | null
+  cursorModelKey?: string
+  models?: CursorModelOption[]
+  onModelChange?: (modelKey: string) => void
 }
 
-export function VoiceConsole({ activeJob = null, latestEvent = null }: Props) {
+export function VoiceConsole({
+  activeJob = null,
+  latestEvent = null,
+  cursorModelKey,
+  models = [],
+  onModelChange,
+}: Props) {
   const voice = useVoiceSession()
   const reducedMotion = useReducedMotion()
   const { state } = voice
   const [composer, setComposer] = useState('')
   const [pulse, setPulse] = useState(0.2)
+  const [selectedModel, setSelectedModel] = useState(cursorModelKey ?? '')
+  const [modelBusy, setModelBusy] = useState(false)
+
+  useEffect(() => {
+    if (cursorModelKey) setSelectedModel(cursorModelKey)
+  }, [cursorModelKey])
 
   const active = ['listening', 'transcribing', 'planning', 'speaking'].includes(state.phase)
   const canStart = ['idle', 'error'].includes(state.phase)
@@ -70,9 +87,8 @@ export function VoiceConsole({ activeJob = null, latestEvent = null }: Props) {
 
   const jobCaption = useMemo(() => {
     if (!activeJob) return null
-    const runtime = activeJob.runtime === 'windows' ? 'Windows' : 'Cloud'
     const eventBit = latestEvent?.summary ? ` · ${latestEvent.summary}` : ''
-    return `${runtime} · ${activeJob.status}${eventBit}`
+    return `${runtimeLabel(activeJob.runtime)} · ${statusLabel(activeJob.status)}${eventBit}`
   }, [activeJob, latestEvent])
 
   const handleOrb = () => {
@@ -85,17 +101,32 @@ export function VoiceConsole({ activeJob = null, latestEvent = null }: Props) {
     if (voice.submitComposer(composer)) setComposer('')
   }
 
+  const handleModelSelect = async (modelKey: string) => {
+    if (modelKey === selectedModel || modelBusy) return
+    setModelBusy(true)
+    try {
+      await setCursorModel(modelKey)
+      setSelectedModel(modelKey)
+      onModelChange?.(modelKey)
+      feedback('success')
+    } catch {
+      feedback('error')
+    } finally {
+      setModelBusy(false)
+    }
+  }
+
   return (
     <section className="voice-console" aria-labelledby="voice-heading">
       <header className="voice-heading">
         <div>
-          <p className="eyebrow">WAR ROOM</p>
+          <p className="eyebrow">War room</p>
           <h1 id="voice-heading">BeachOps</h1>
         </div>
         <button
           className="icon-button"
           type="button"
-          aria-label="Open fullscreen"
+          aria-label="На весь экран"
           onClick={() => {
             feedback('tap')
             requestTelegramFullscreen()
@@ -104,6 +135,30 @@ export function VoiceConsole({ activeJob = null, latestEvent = null }: Props) {
           <Expand size={18} />
         </button>
       </header>
+
+      {models.length > 0 && (
+        <div className="model-picker" role="group" aria-label="Модель Cursor">
+          {models.map((model) => {
+            const selected = model.key === selectedModel
+            return (
+              <button
+                key={model.key}
+                type="button"
+                className={`model-chip${selected ? ' is-selected' : ''}`}
+                aria-pressed={selected}
+                disabled={modelBusy}
+                onClick={() => {
+                  feedback('tap')
+                  void handleModelSelect(model.key)
+                }}
+              >
+                {selected ? <Check size={12} aria-hidden="true" /> : null}
+                <span>{model.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       <div className={`voice-stage phase-${state.phase} ${active ? 'is-active' : ''}`}>
         {!reducedMotion && (

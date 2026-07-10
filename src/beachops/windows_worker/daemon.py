@@ -184,7 +184,13 @@ async def execute_claimed_job(
         default_branch=str(job.get("branch") or "dev"),
         is_active=True,
     )
-    model = str(job.get("model") or cursor._model)
+    model_key = str(job.get("modelKey") or job.get("model") or cursor._model)
+    from beachops.domain.cursor_models import resolve_cursor_model
+
+    model = resolve_cursor_model(model_key)
+    memory_block = job.get("memoryBlock")
+    if memory_block is not None:
+        memory_block = str(memory_block) or None
     cursor_agent_id = job.get("cursorAgentId")
     if cursor_agent_id is not None:
         cursor_agent_id = str(cursor_agent_id)
@@ -222,8 +228,14 @@ async def execute_claimed_job(
     await client.post_event(
         job_id,
         event_type="run.started",
-        payload={"localPath": local_path, "mode": mode.value},
+        payload={"localPath": local_path, "mode": mode.value, "modelKey": model_key},
         idempotency_key=f"{job_id}:started",
+    )
+    logger.info(
+        "Windows run starting model=%s memory=%s",
+        model_key,
+        bool(memory_block),
+        extra={"job_id": job_id, "action": "windows_run"},
     )
 
     outcome, new_agent_id = await cursor.run_prompt(
@@ -236,6 +248,7 @@ async def execute_claimed_job(
         api_key=api_key,
         runtime=AgentRuntime.WINDOWS,
         local_path=local_path,
+        memory_block=memory_block,
     )
 
     terminal = "run.failed" if outcome.status == "error" else "run.finished"

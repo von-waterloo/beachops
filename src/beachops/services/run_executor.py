@@ -289,6 +289,13 @@ async def _run_job(
     model_key = await app.users.get_cursor_model_key(
         user_id, default=app.settings.cursor_model
     )
+    from beachops.services.logging_config import bind_log_context
+
+    bind_log_context(
+        user_id=user_id,
+        job_id=str(durable_job_id) if durable_job_id else None,
+        action="run_job",
+    )
     token_key = await resolve_run_token_key(app, user_id, slot)
     api_key = app.settings.cursor_api_key_for(token_key)
     ui_token_key = await current_token_key_for_ui(app, user_id)

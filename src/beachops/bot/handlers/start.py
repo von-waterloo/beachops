@@ -42,7 +42,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         token_key=token_key,
     )
     if webapp_url:
-        text = f"{text}\n\n🎛 Control Room · откройте Mini App кнопкой ниже."
+        text = f"{text}\n\n🎛 Агенты · откройте Mini App кнопкой ниже."
     if update.message:
         await update.message.reply_text(
             text,

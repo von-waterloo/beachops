@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Callable
 
 from openai import AsyncOpenAI
 
 from beachops.domain.voice_persona import SPARTAN_TTS_INSTRUCTIONS, to_spoken_briefing
+
+logger = logging.getLogger(__name__)
 
 
 class SpeechService:
@@ -30,6 +33,10 @@ class SpeechService:
     async def stream_pcm(self, text: str) -> AsyncIterator[bytes]:
         safe_text = to_spoken_briefing(self._redact(text), max_chars=self._max_chars)
         if not safe_text:
+            logger.warning(
+                "TTS skipped empty briefing",
+                extra={"action": "tts", "error_code": "empty_briefing"},
+            )
             return
         create_kwargs: dict = {
             "model": self._model,
@@ -40,13 +47,22 @@ class SpeechService:
         # gpt-4o-mini-tts (and snapshots) accept steerable style instructions.
         if self._instructions and "tts" in self._model:
             create_kwargs["instructions"] = self._instructions
-        async with self._client.audio.speech.with_streaming_response.create(
-            **create_kwargs,
-        ) as response:
-            pending = b""
-            async for chunk in response.iter_bytes():
-                data = pending + chunk
-                even_length = len(data) - (len(data) % 2)
-                if even_length:
-                    yield data[:even_length]
-                pending = data[even_length:]
+        logger.info(
+            "TTS stream start chars=%s",
+            len(safe_text),
+            extra={"action": "tts"},
+        )
+        try:
+            async with self._client.audio.speech.with_streaming_response.create(
+                **create_kwargs,
+            ) as response:
+                pending = b""
+                async for chunk in response.iter_bytes():
+                    data = pending + chunk
+                    even_length = len(data) - (len(data) % 2)
+                    if even_length:
+                        yield data[:even_length]
+                    pending = data[even_length:]
+        except Exception:
+            logger.exception("TTS stream failed", extra={"action": "tts"})
+            raise

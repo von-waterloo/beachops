@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 
+from beachops.services.logging_config import configure_logging
 from beachops.windows_worker.daemon import run_daemon
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s [windows-worker] %(message)s",
-    )
+    configure_logging(os.getenv("LOG_LEVEL", "INFO"), service="windows-worker")
     try:
         asyncio.run(run_daemon())
     except KeyboardInterrupt:

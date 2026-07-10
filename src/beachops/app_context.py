@@ -37,6 +37,7 @@ from beachops.services.payload_crypto import PayloadCrypto
 from beachops.services.rate_limit import RedisRateLimiter
 from beachops.services.idempotency import IdempotencyStore
 from beachops.services.deploy_history import DeployHistory
+from beachops.services.hot_cache import HotCache
 from beachops.services.policy_bootstrap import build_repository_policy
 from beachops.services.repository_policy import RepositoryPolicyService
 from beachops.services.risk_policy import RiskPolicy
@@ -62,6 +63,7 @@ class AppContext:
     system_state: SystemStateRepository
     redis: Redis
     arq: ArqRedis
+    hot_cache: HotCache
     payload_crypto: PayloadCrypto
     repository_policy: RepositoryPolicyService
     risk_policy: RiskPolicy
@@ -90,6 +92,7 @@ class AppContext:
         redis = Redis.from_url(settings.redis_url, decode_responses=False)
         await redis.ping()
         arq = await create_arq_pool(RedisSettings.from_dsn(settings.redis_url))
+        hot_cache = HotCache(redis)
         payload_crypto = PayloadCrypto.from_encoded_key(settings.data_encryption_key)
 
         workspace = settings.workspace_path
@@ -99,6 +102,7 @@ class AppContext:
         embeddings = EmbeddingService(
             api_key=settings.openai_api_key,
             model=settings.embedding_model,
+            redis=redis,
         )
         memory = MemoryService(memory_repo, embeddings, settings)
 
@@ -119,9 +123,10 @@ class AppContext:
             callback_tokens=CallbackTokenRepository(pool),
             passkeys=PasskeyRepository(pool),
             audit=AuditRepository(pool),
-            system_state=SystemStateRepository(pool),
+            system_state=SystemStateRepository(pool, cache=hot_cache),
             redis=redis,
             arq=arq,
+            hot_cache=hot_cache,
             payload_crypto=payload_crypto,
             repository_policy=build_repository_policy(settings),
             risk_policy=RiskPolicy(),

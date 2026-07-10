@@ -37,6 +37,10 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     error = await validate_prompt_request(app, user.id)
     if error:
+        logger.info(
+            "Voice rejected by validation",
+            extra={"user_id": user.id, "action": "voice_telegram"},
+        )
         await message.reply_text(error)
         return
 
@@ -71,12 +75,24 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             text = await app.transcription.transcribe_file(tmp_path)
 
         if not text:
+            logger.warning(
+                "Voice empty transcript",
+                extra={"user_id": user.id, "action": "voice_telegram", "error_code": "empty_transcript"},
+            )
             await status.edit_text(voice_no_speech())
             return
 
         app.remember_user_message(user.id, message.message_id or 0)
         draft_id = str(uuid4())
         mode = await app.users.get_mode(user.id)
+        logger.info(
+            "Voice draft ready",
+            extra={
+                "user_id": user.id,
+                "action": "voice_telegram",
+                "correlation_id": draft_id,
+            },
+        )
         encrypted = app.payload_crypto.encrypt_json(
             {"text": text, "mode": mode.value}
         )
@@ -93,7 +109,10 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             reply_markup=voice_confirmation_keyboard(draft_id),
         )
     except Exception:
-        logger.exception("Voice handling failed")
+        logger.exception(
+            "Voice handling failed",
+            extra={"user_id": user.id, "action": "voice_telegram"},
+        )
         try:
             await status.edit_text(voice_error())
         except BadRequest:

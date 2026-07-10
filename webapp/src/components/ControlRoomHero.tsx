@@ -1,46 +1,81 @@
 import { motion } from 'motion/react'
 import { CloudLightning, Layers3, MonitorSmartphone } from 'lucide-react'
+import type { RuntimeFilter } from '../lib/runtimeFilter'
+import { feedback } from '../lib/feedback'
 
 interface Props {
   running: number
   pending: number
   workersOnline: number
   cloudJobs: number
+  runtimeFilter: RuntimeFilter
+  onSelectFilter: (filter: RuntimeFilter, tabHint?: 'active' | 'voice' | 'approvals') => void
 }
 
-export function ControlRoomHero({ running, pending, workersOnline, cloudJobs }: Props) {
+export function ControlRoomHero({
+  running,
+  pending,
+  workersOnline,
+  cloudJobs,
+  runtimeFilter,
+  onSelectFilter,
+}: Props) {
+  const pick = (filter: RuntimeFilter) => {
+    feedback('select')
+    onSelectFilter(filter, 'active')
+  }
+
   return (
-    <section className="control-hero" aria-label="Control room status">
+    <section className="control-hero" aria-label="Статус пульта">
       <motion.div
         className="control-hero-glow"
-        animate={{ opacity: running > 0 ? [0.35, 0.7, 0.35] : 0.25 }}
-        transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+        animate={{ opacity: running > 0 ? [0.4, 0.75, 0.4] : 0.28 }}
+        transition={{ duration: 2.6, repeat: Infinity, ease: 'easeInOut' }}
       />
       <div className="control-hero-copy">
-        <p className="eyebrow">WAR ROOM</p>
-        <h1>Cloud и Windows — под одним командованием</h1>
-        <p>Очередь, durable jobs, голос. Без лишнего шума.</p>
+        <p className="eyebrow">War room</p>
+        <h1>Cloud и Windows — одно командование</h1>
+        <p>Жмите метрики — откроется нужный срез задач.</p>
       </div>
-      <div className="control-metrics">
-        <article>
+      <div className="control-metrics" role="toolbar" aria-label="Фильтр плоскости">
+        <button
+          type="button"
+          className={runtimeFilter === 'cloud' ? 'live' : ''}
+          onClick={() => pick('cloud')}
+          aria-pressed={runtimeFilter === 'cloud'}
+        >
           <CloudLightning size={16} />
           <strong>{cloudJobs}</strong>
           <span>Cloud</span>
-        </article>
-        <article>
+        </button>
+        <button
+          type="button"
+          onClick={() => pick('all')}
+          aria-pressed={runtimeFilter === 'all'}
+        >
           <Layers3 size={16} />
           <strong>{pending}</strong>
-          <span>Queued</span>
-        </article>
-        <article>
+          <span>Очередь</span>
+        </button>
+        <button
+          type="button"
+          className={runtimeFilter === 'windows' ? 'live' : ''}
+          onClick={() => pick('windows')}
+          aria-pressed={runtimeFilter === 'windows'}
+        >
           <MonitorSmartphone size={16} />
           <strong>{workersOnline}</strong>
           <span>Windows</span>
-        </article>
-        <article className={running ? 'live' : ''}>
+        </button>
+        <button
+          type="button"
+          className={running ? 'live' : ''}
+          onClick={() => pick('all')}
+          aria-pressed={runtimeFilter === 'all' && running > 0}
+        >
           <strong>{running}</strong>
-          <span>Running</span>
-        </article>
+          <span>В работе</span>
+        </button>
       </div>
     </section>
   )

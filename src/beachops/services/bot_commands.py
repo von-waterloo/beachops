@@ -42,7 +42,7 @@ def bot_commands(*, is_admin: bool, is_owner: bool = False) -> list[BotCommand]:
             BotCommand("memory", "Память · поиск"),
             BotCommand("cancel", "Отменить задачу"),
             BotCommand("jobs", "Задачи · статус и история"),
-            BotCommand("dashboard", "Control Room · Mini App"),
+            BotCommand("dashboard", "Агенты · голос и Mini App"),
         ]
     )
     if is_owner:
@@ -90,7 +90,7 @@ async def register_bot_commands(application) -> None:
     if webapp_url:
         await application.bot.set_chat_menu_button(
             menu_button=MenuButtonWebApp(
-                text="Control Room",
+                text="Агенты",
                 web_app=WebAppInfo(url=webapp_url),
             )
         )

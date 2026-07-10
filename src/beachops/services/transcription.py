@@ -24,7 +24,19 @@ class TranscriptionService:
             file=buffer,
         )
         text = (response.text or "").strip()
-        logger.debug("Transcribed %d bytes -> %d chars", len(audio), len(text))
+        if text:
+            logger.info(
+                "Transcribed %d bytes -> %d chars",
+                len(audio),
+                len(text),
+                extra={"action": "transcribe"},
+            )
+        else:
+            logger.warning(
+                "Empty transcription for %d bytes",
+                len(audio),
+                extra={"action": "transcribe", "error_code": "empty_transcript"},
+            )
         return text
 
     async def transcribe_file(self, path: Path) -> str:

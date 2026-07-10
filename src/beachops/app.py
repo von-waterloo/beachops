@@ -77,12 +77,21 @@ async def auth_gate(update: object, context) -> None:
         raise ApplicationHandlerStop
 
     is_new_user = False
+    role = app.settings.role_for(user.id)
+    role_value = role.value if role is not None else "none"
+    cached_role = await app.hot_cache.get_user_ready_role(user.id)
+    if cached_role == role_value:
+        return
+
     lock = _user_setup_locks.setdefault(user.id, asyncio.Lock())
     async with lock:
+        cached_role = await app.hot_cache.get_user_ready_role(user.id)
+        if cached_role == role_value:
+            return
         is_new_user = await app.users.ensure_user(
             user.id,
             app.settings.is_admin(user.id),
-            role=app.settings.role_for(user.id),
+            role=role,
         )
         if (
             is_new_user
@@ -95,6 +104,7 @@ async def auth_gate(update: object, context) -> None:
             await app.repos.seed_default_repo_for_new_user(user.id, app.settings)
         else:
             await app.repos.resolve_active_repo(user.id, app.settings)
+        await app.hot_cache.set_user_ready(user.id, role_value)
 
 
 def register_handlers(application: Application) -> None:
@@ -179,9 +189,6 @@ async def _post_init(application: Application) -> None:
     init_media_group_collector(application, on_flush=on_media_group_flush)
     init_forward_context_buffer(application)
     validate_ui_models(settings.cursor_api_key)
-    from beachops.services.logging_config import configure_logging
-
-    configure_logging(settings.log_level)
     await register_bot_commands(application)
 
 

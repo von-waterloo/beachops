@@ -33,7 +33,7 @@ export function useJobStream(
       setEvents(rows)
       setError(null)
     } catch {
-      setError('Live job stream unavailable')
+      setError('Эфир задачи временно недоступен')
     }
   }, [jobId, enabled])
 
@@ -52,9 +52,16 @@ export function useJobStream(
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void tick()
     }, POLL_MS)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void tick()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
     return () => {
       cancelled = true
       window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
     }
   }, [jobId, enabled, pull])
 

@@ -44,7 +44,7 @@ AGENTS_PER_PAGE = 4
 
 def dashboard_keyboard(url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("🎛 Control Room", web_app=WebAppInfo(url=url))]]
+        [[InlineKeyboardButton("🎛 Агенты", web_app=WebAppInfo(url=url))]]
     )
 
 

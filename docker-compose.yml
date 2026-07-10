@@ -1,3 +1,9 @@
+x-json-logging: &json-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 name: beachops
 
 services:
@@ -17,6 +23,7 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+    logging: *json-logging
 
   redis:
     image: redis:alpine
@@ -29,6 +36,7 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    logging: *json-logging
 
   migrate:
     build: .
@@ -41,6 +49,7 @@ services:
       RUN_MIGRATIONS: "0"
     command: ["alembic", "upgrade", "head"]
     restart: "no"
+    logging: *json-logging
 
   bot:
     build: .
@@ -64,6 +73,7 @@ services:
     volumes:
       - bot-data:/data
     restart: unless-stopped
+    logging: *json-logging
 
   worker:
     build: .
@@ -88,6 +98,7 @@ services:
     volumes:
       - bot-data:/data
     restart: unless-stopped
+    logging: *json-logging
 
   api:
     build: .
@@ -115,6 +126,7 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+    logging: *json-logging
 
   webapp:
     build: ./webapp
@@ -124,6 +136,7 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
+    logging: *json-logging
 
 volumes:
   postgres-data:
