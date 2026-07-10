@@ -34,10 +34,39 @@ from beachops.services.ui_copy import (
 logger = logging.getLogger(__name__)
 
 _LAST_PROMPT_TTL_SEC = 600
+_PROGRESS_BUCKET_SEC = 3
 
 # Длинный результат урезается в сообщении Telegram (4096 с учётом шапки/футера),
 # поэтому сохраняем полный markdown отдельным файлом.
 _RESULT_DOCUMENT_THRESHOLD = 3000
+
+
+async def _maybe_append_run_progress(
+    app: AppContext,
+    job_id,
+    actor_id: int,
+    state: StreamState,
+) -> None:
+    """Throttle durable run.progress events for Mini App / voice live feed."""
+    text = (
+        (state.final_text or state.plan_text or state.assistant_text or "").strip()
+    )
+    tool = (state.tool_lines[-1] if state.tool_lines else "") or ""
+    if not text and not tool:
+        return
+    bucket = int(time.time()) // _PROGRESS_BUCKET_SEC
+    await app.run_events.append(
+        job_id=job_id,
+        actor_id=actor_id,
+        event_type="run.progress",
+        payload={
+            "assistantText": text[:2000] if text else None,
+            "tool": tool[:240] if tool else None,
+            "status": state.status,
+        },
+        idempotency_key=f"{job_id}:progress:{bucket}",
+        sequence=bucket,
+    )
 
 
 async def _maybe_send_result_document(
@@ -365,6 +394,8 @@ async def _run_job(
                 telegram_message_id=message.message_id,
                 telegram_chat_id=message.chat_id,
             )
+        if durable_job_id is not None:
+            await _maybe_append_run_progress(app, durable_job_id, user_id, state)
         if not state.has_visible_output(thinking_display=thinking_display):
             if state.run_id:
                 await placeholder_anim.set_preset("waiting_signal")
@@ -378,6 +409,15 @@ async def _run_job(
     if mode in (UserMode.ASK, UserMode.PLAN):
         entries = await app.memory.recall(user_id, repo.id, prompt)
         memory_block = app.memory.format_recall_block(entries) or None
+
+    from beachops.services.situation_brief import build_situation_brief
+
+    situation_block = await build_situation_brief(
+        app,
+        actor_id=user_id,
+        run_context=run_ctx,
+        role=app.settings.role_for(user_id),
+    )
 
     cursor_model = resolve_cursor_model(model_key)
 
@@ -396,6 +436,7 @@ async def _run_job(
                 cursor_agent_id=slot.cursor_agent_id,
                 on_update=on_update,
                 memory_block=memory_block,
+                situation_block=situation_block,
                 images=images,
                 api_key=api_key,
                 self_improve=app.settings.is_self_improve_repo(repo.github_url),

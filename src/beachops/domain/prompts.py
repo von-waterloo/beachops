@@ -84,6 +84,7 @@ DO_GUIDANCE = """Как работать:
 """
 
 MEMORY_PREFIX = "Контекст из памяти:\n{block}\n\n---\n\n"
+SITUATION_PREFIX = "{block}\n\n---\n\n"
 
 PROTECTED_DEFAULT_BRANCHES = frozenset({"main", "master"})
 
@@ -103,11 +104,14 @@ def build_prompt(
     *,
     default_branch: str = "dev",
     memory_block: str | None = None,
+    situation_block: str | None = None,
     self_improve: bool = False,
 ) -> str:
     body = text.strip()
     if memory_block:
         body = f"{MEMORY_PREFIX.format(block=memory_block)}{body}"
+    if situation_block:
+        body = f"{SITUATION_PREFIX.format(block=situation_block.strip())}{body}"
     if mode == UserMode.ASK:
         return f"{ASK_SYSTEM_PREFIX}{body}"
     if mode == UserMode.PLAN:

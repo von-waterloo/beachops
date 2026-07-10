@@ -216,6 +216,63 @@ class AgentSlotRepository:
             )
         return result.endswith("1")
 
+    async def update_runtime_config(
+        self,
+        tg_user_id: int,
+        slot_id: int,
+        *,
+        runtime: str | None = None,
+        local_path: str | None = None,
+        clear_local_path: bool = False,
+        preferred_worker_id: str | None = None,
+        clear_preferred_worker: bool = False,
+    ) -> AgentSlot | None:
+        """Patch runtime / Windows path / preferred worker for a slot."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT runtime, local_path, preferred_worker_id
+                FROM user_agent_slots
+                WHERE tg_user_id = $1 AND id = $2
+                """,
+                tg_user_id,
+                slot_id,
+            )
+            if row is None:
+                return None
+
+            next_runtime = runtime if runtime is not None else row["runtime"]
+            if clear_local_path:
+                next_path = None
+            elif local_path is not None:
+                next_path = local_path.strip() or None
+            else:
+                next_path = row["local_path"]
+
+            if clear_preferred_worker:
+                next_worker = None
+            elif preferred_worker_id is not None:
+                next_worker = preferred_worker_id.strip() or None
+            else:
+                next_worker = row["preferred_worker_id"]
+
+            await conn.execute(
+                """
+                UPDATE user_agent_slots
+                SET runtime = COALESCE($3, runtime),
+                    local_path = $4,
+                    preferred_worker_id = $5::uuid,
+                    updated_at = now()
+                WHERE tg_user_id = $1 AND id = $2
+                """,
+                tg_user_id,
+                slot_id,
+                next_runtime,
+                next_path,
+                next_worker,
+            )
+        return await self.get_by_id(tg_user_id, slot_id)
+
     async def delete_slot(self, tg_user_id: int, slot_id: int) -> AgentSlot | None:
         """Delete slot; activate another if the deleted one was active."""
         async with self._pool.acquire() as conn:

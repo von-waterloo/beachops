@@ -9,7 +9,6 @@ import {
   LayoutDashboard,
   LogOut,
   Monitor,
-  ShieldCheck,
   Siren,
   Sparkles,
   Volume2,
@@ -19,6 +18,7 @@ import { AuthScreen } from './components/AuthScreen'
 import { VoiceConsole } from './components/VoiceConsole'
 import { DashboardPanels, type TabId } from './components/DashboardPanels'
 import { ControlRoomHero } from './components/ControlRoomHero'
+import { AgentControlPanel, JobChatPanel } from './components/AgentControlPanel'
 import { useAuth } from './hooks/useAuth'
 import { useDashboard } from './hooks/useDashboard'
 import { useJobStream } from './hooks/useJobStream'
@@ -133,9 +133,7 @@ function ControlRoom({
 
   useEffect(() => {
     if (!focusedJobId) return
-    const stillThere = dashboard.data.jobs.some(
-      (job) => job.id === focusedJobId && isActiveJobStatus(job.status),
-    )
+    const stillThere = dashboard.data.jobs.some((job) => job.id === focusedJobId)
     if (!stillThere) setFocusedJobId(null)
   }, [dashboard.data.jobs, focusedJobId])
 
@@ -268,6 +266,26 @@ function ControlRoom({
                   cursorModelKey={cursorModelKey || user.cursorModelKey}
                   models={user.models ?? []}
                   onModelChange={setCursorModelKey}
+                  onJobStarted={(jobId) => {
+                    setFocusedJobId(jobId)
+                    setTab('voice')
+                    void dashboard.refresh()
+                  }}
+                />
+                <AgentControlPanel
+                  slots={dashboard.data.agents}
+                  workers={dashboard.data.workers}
+                  role={dashboard.data.role}
+                  onUpdateAgent={(slotId, input) => dashboard.updateAgent(slotId, input)}
+                  onSubmitPrompt={(input) => dashboard.submitPrompt(input)}
+                  onJobDispatched={(jobId, runtime) => {
+                    selectJob(jobId, runtime)
+                    void dashboard.refresh()
+                  }}
+                />
+                <JobChatPanel
+                  jobId={focusedJobId ?? activeJob?.id ?? null}
+                  enabled={Boolean(focusedJobId ?? activeJob)}
                 />
                 <DashboardPanels
                   tab="overview"

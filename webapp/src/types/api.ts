@@ -62,8 +62,26 @@ export interface AgentSlot {
   runtime?: string
   active?: boolean
   repository?: string | null
+  localPath?: string | null
+  preferredWorkerId?: string | null
   cursorAgentId?: string | null
   cursorUrl?: string | null
+}
+
+export interface JobStreamEvent {
+  id: string
+  eventType: string
+  text: string | null
+  createdAt: string | null
+}
+
+export interface JobStreamSnapshot {
+  jobId: string
+  status: string
+  events: JobStreamEvent[]
+  lastEventId: string
+  latestText: string | null
+  finalText: string | null
 }
 
 export interface Usage {

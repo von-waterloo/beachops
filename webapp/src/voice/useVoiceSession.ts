@@ -22,6 +22,8 @@ interface VoiceEvent {
   caption?: string
   message?: string
   code?: string
+  jobId?: string
+  mode?: string
 }
 
 const VOICE_ERROR_MESSAGES: Record<string, string> = {
@@ -46,7 +48,9 @@ function voiceErrorMessage(event: VoiceEvent): string {
   return 'Голосовой сервис недоступен'
 }
 
-export function useVoiceSession() {
+export function useVoiceSession(options: {
+  onJobStarted?: (jobId: string) => void
+} = {}) {
   const [state, dispatch] = useReducer(voiceReducer, initialVoiceState)
   const [energy, setEnergy] = useState(0)
   const [spectrum, setSpectrum] = useState<number[]>(() => Array(24).fill(0.04))
@@ -65,6 +69,8 @@ export function useVoiceSession() {
   const playbackQueueRef = useRef<ArrayBuffer[]>([])
   const playingRef = useRef<AudioBufferSourceNode | null>(null)
   const playbackContextRef = useRef<AudioContext | null>(null)
+  const onJobStartedRef = useRef(options.onJobStarted)
+  onJobStartedRef.current = options.onJobStarted
 
   const sendJson = useCallback((payload: Record<string, unknown>) => {
     const socket = wsRef.current
@@ -135,7 +141,16 @@ export function useVoiceSession() {
         feedback('success')
         break
       case 'plan.started':
-        dispatch({ type: 'CONFIRM' })
+        dispatch({
+          type: 'PLAN_STARTED',
+          mode: event.mode === 'ask' ? 'ask' : 'plan',
+        })
+        if (event.jobId) onJobStartedRef.current?.(event.jobId)
+        break
+      case 'job.progress':
+        if (event.text?.trim()) {
+          dispatch({ type: 'PROGRESS', caption: event.text.trim().slice(0, 280) })
+        }
         break
       case 'audio.started':
         dispatch({ type: 'SPEAKING', caption: event.caption })
@@ -211,7 +226,7 @@ export function useVoiceSession() {
         })
       ) {
         if (!intentionallyClosedRef.current && navigator.onLine) {
-          dispatch({ type: 'FAIL', message: 'Could not reconnect to voice service' })
+          dispatch({ type: 'FAIL', message: 'Не удалось переподключиться к голосу' })
         }
         return
       }
@@ -227,7 +242,7 @@ export function useVoiceSession() {
     const online = () => connect()
     const offline = () => {
       dispatch({ type: 'CONNECTED', connected: false })
-      dispatch({ type: 'FAIL', message: 'You are offline' })
+      dispatch({ type: 'FAIL', message: 'Нет сети' })
     }
     window.addEventListener('online', online)
     window.addEventListener('offline', offline)
@@ -259,12 +274,12 @@ export function useVoiceSession() {
 
   const startListening = useCallback(async () => {
     if (!navigator.onLine) {
-      dispatch({ type: 'FAIL', message: 'Connect to the internet to use voice' })
+      dispatch({ type: 'FAIL', message: 'Подключитесь к сети, чтобы говорить' })
       return
     }
     if (wsRef.current?.readyState !== WebSocket.OPEN || !state.connected) {
       connect()
-      dispatch({ type: 'FAIL', message: 'Voice service is reconnecting' })
+      dispatch({ type: 'FAIL', message: 'Голос переподключается…' })
       return
     }
 
@@ -327,7 +342,7 @@ export function useVoiceSession() {
       const denied = error instanceof DOMException && error.name === 'NotAllowedError'
       dispatch({
         type: 'FAIL',
-        message: denied ? 'Microphone permission is required' : 'Microphone is unavailable',
+        message: denied ? 'Нужен доступ к микрофону' : 'Микрофон недоступен',
       })
       feedback('error')
     }
@@ -348,25 +363,25 @@ export function useVoiceSession() {
 
   const confirmPlan = useCallback(() => {
     if (!state.transcript.trim()) return
-    sendJson({ type: 'plan.request', transcript: state.transcript.trim() })
+    sendJson({ type: 'plan.request', transcript: state.transcript.trim(), mode: 'plan' })
     dispatch({ type: 'CONFIRM' })
     feedback('success')
   }, [sendJson, state.transcript])
 
-  const submitComposer = useCallback((text: string) => {
+  const submitComposer = useCallback((text: string, mode: 'ask' | 'plan' = 'ask') => {
     const trimmed = text.trim()
     if (!trimmed) return false
     if (!navigator.onLine) {
-      dispatch({ type: 'FAIL', message: 'Connect to the internet to send a request' })
+      dispatch({ type: 'FAIL', message: 'Подключитесь к сети, чтобы отправить запрос' })
       return false
     }
     if (wsRef.current?.readyState !== WebSocket.OPEN || !state.connected) {
       connect()
-      dispatch({ type: 'FAIL', message: 'Voice service is reconnecting' })
+      dispatch({ type: 'FAIL', message: 'Голос переподключается…' })
       return false
     }
-    sendJson({ type: 'plan.request', transcript: trimmed })
-    dispatch({ type: 'SUBMIT_TEXT', text: trimmed })
+    sendJson({ type: 'plan.request', transcript: trimmed, mode })
+    dispatch({ type: 'SUBMIT_TEXT', text: trimmed, mode })
     feedback('success')
     return true
   }, [connect, sendJson, state.connected])

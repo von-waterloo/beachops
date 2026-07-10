@@ -24,6 +24,18 @@
   --radius-sm: 12px;
   --radius-md: 16px;
   --radius-lg: 24px;
+  --radius-pill: 999px;
+  --touch-min: 44px;
+  --chip-h: 36px;
+  --control-pad: 14px;
+  --space-1: 6px;
+  --space-2: 8px;
+  --space-3: 10px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --font-xs: 0.64rem;
+  --font-sm: 0.72rem;
+  --font-md: 0.86rem;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   color-scheme: dark;
 }
@@ -63,7 +75,8 @@ body {
 }
 
 button,
-textarea {
+textarea,
+input {
   font: inherit;
 }
 
@@ -73,6 +86,7 @@ button {
 
 button:focus-visible,
 textarea:focus-visible,
+input:focus-visible,
 a:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--accent) 70%, white);
   outline-offset: 3px;
@@ -1837,5 +1851,203 @@ button.worker-chip:hover {
   .orbit,
   .biometric-core {
     animation: none !important;
+  }
+}
+
+/* Agent control + live job chat — same surface language as composer/cards */
+.agent-control,
+.job-chat {
+  margin: var(--space-4) 0;
+  padding: var(--control-pad);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.agent-control-header h2 {
+  margin-bottom: 4px;
+}
+
+.agent-control-header .muted-hint {
+  margin: var(--space-1) 0 var(--space-4);
+}
+
+.runtime-toggle,
+.prompt-mode-row,
+.composer-mode-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+}
+
+.runtime-toggle button,
+.prompt-mode-row button,
+.composer-mode-row button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--chip-h);
+  padding: var(--space-1) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: var(--font-sm);
+  font-weight: 650;
+}
+
+.runtime-toggle button.selected,
+.prompt-mode-row button.selected,
+.composer-mode-row button.selected {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: transparent;
+}
+
+.runtime-toggle button:disabled,
+.prompt-mode-row button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.agent-path-field,
+.prompt-form {
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+}
+
+.agent-path-field > span,
+.prompt-form > label {
+  color: var(--muted);
+  font-size: var(--font-sm);
+  font-weight: 720;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.agent-path-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-2);
+}
+
+.agent-path-row input,
+.prompt-form textarea {
+  width: 100%;
+  min-height: var(--touch-min);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+.prompt-form textarea {
+  resize: vertical;
+  min-height: 72px;
+  font: inherit;
+}
+
+.agent-path-row button,
+.prompt-form button[type="submit"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--touch-min);
+  padding: 0 var(--space-5);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.agent-path-row button:disabled,
+.prompt-form button[type="submit"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.job-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.job-chat-header .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.job-chat-log {
+  max-height: 280px;
+  overflow: auto;
+  display: grid;
+  gap: var(--space-2);
+  padding-right: 4px;
+  scroll-behavior: smooth;
+}
+
+.job-chat-message {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--surface-high);
+  border: 1px solid var(--line);
+}
+
+.job-chat-message p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--font-md);
+  line-height: 1.35;
+}
+
+.job-chat-message small {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-xs);
+}
+
+.muted-hint {
+  color: var(--muted);
+  font-size: var(--font-sm);
+  line-height: 1.35;
+}
+
+.spin-icon {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 420px) {
+  .agent-path-row {
+    grid-template-columns: 1fr;
+  }
+
+  .job-chat-log {
+    max-height: 220px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .job-chat-log {
+    scroll-behavior: auto;
+  }
+
+  .spin-icon {
+    animation: none;
   }
 }

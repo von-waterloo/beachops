@@ -58,3 +58,20 @@ export function relativeTimeRu(value?: string | null): string {
 export function runtimeLabel(runtime?: string | null): string {
   return runtime === 'windows' ? 'Windows' : 'Cloud'
 }
+
+const EVENT_TYPE_RU: Record<string, string> = {
+  'run.progress': 'Прогресс',
+  'run.finished': 'Готово',
+  'run.failed': 'Сбой',
+  'worker.started': 'Старт',
+  'worker.claimed': 'Воркер взял',
+  'worker.finished': 'Воркер завершил',
+  'worker.observation_done': 'Наблюдение',
+  'approval.requested': 'Ждёт approve',
+  'panic.blocked': 'Panic',
+  'panic.cancelled': 'Отмена panic',
+}
+
+export function eventTypeLabel(eventType: string): string {
+  return EVENT_TYPE_RU[eventType] ?? eventType
+}

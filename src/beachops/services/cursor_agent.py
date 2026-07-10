@@ -69,6 +69,7 @@ class CursorAgentService:
         cursor_agent_id: str | None,
         on_update: OnStreamUpdate,
         memory_block: str | None = None,
+        situation_block: str | None = None,
         images: Sequence[SDKImage] | None = None,
         api_key: str | None = None,
         runtime: str | AgentRuntime | None = None,
@@ -87,6 +88,7 @@ class CursorAgentService:
             mode,
             default_branch=repo.default_branch,
             memory_block=memory_block,
+            situation_block=situation_block,
             self_improve=self_improve,
         )
 

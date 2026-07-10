@@ -105,6 +105,15 @@ GitHub URL). Непустой allowlist по-прежнему ограничив
 **Cloud-чаты:** dashboard отдаёт `cursorUrl` (`https://cursor.com/agents/{bc-…}`)
 для слотов и jobs — открытие чата на компьютере.
 
+**Mini App agent control:** `PATCH /api/agents/{id}` (runtime/localPath),
+`POST /api/prompts` (ask/plan/do), `GET /api/jobs/{id}/stream` (транскрипт
+`beachops_run_events`). Cloud worker пишет throttled `run.progress`; голос шлёт
+`job.progress` captions, пока ждёт финал.
+
+**Situation brief** (`services/situation_brief.py`): перед Cursor-run в промпт
+добавляется снимок control room (panic, очередь, approve, воркеры, слот/репо/модель),
+чтобы оркестратор отвечал с полной осведомлённостью о происходящем.
+
 **Project skills** (`.cursor/skills/`, индекс `project-skills`): `add-bot-feature`, `telegram-ui`, `db-migrations`, `bot-testing`, `agent-run-pipeline`, `github-branches`, `deploy-prod`. В plan/do промптах агенту сказано читать нужный skill перед нетривиальной работой.
 
 У каждого режима свой системный префикс в `domain/prompts.py`:

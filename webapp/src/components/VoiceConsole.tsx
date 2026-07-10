@@ -26,7 +26,7 @@ const phaseLabels: Record<VoicePhase, string> = {
   listening: 'Слушаю',
   transcribing: 'Разбираю',
   confirming: 'Подтверди',
-  planning: 'Строю план',
+  planning: 'В эфире',
   speaking: 'Отвечаю',
   error: 'Сбой',
 }
@@ -47,6 +47,7 @@ interface Props {
   cursorModelKey?: string
   models?: CursorModelOption[]
   onModelChange?: (modelKey: string) => void
+  onJobStarted?: (jobId: string) => void
 }
 
 export function VoiceConsole({
@@ -55,14 +56,17 @@ export function VoiceConsole({
   cursorModelKey,
   models = [],
   onModelChange,
+  onJobStarted,
 }: Props) {
-  const voice = useVoiceSession()
+  const voice = useVoiceSession({ onJobStarted })
   const reducedMotion = useReducedMotion()
   const { state } = voice
   const [composer, setComposer] = useState('')
+  const [composerMode, setComposerMode] = useState<'ask' | 'plan'>('ask')
   const [pulse, setPulse] = useState(0.2)
   const [selectedModel, setSelectedModel] = useState(cursorModelKey ?? '')
   const [modelBusy, setModelBusy] = useState(false)
+  const [modelError, setModelError] = useState<string | null>(null)
 
   useEffect(() => {
     if (cursorModelKey) setSelectedModel(cursorModelKey)
@@ -98,19 +102,21 @@ export function VoiceConsole({
   }
 
   const handleComposer = () => {
-    if (voice.submitComposer(composer)) setComposer('')
+    if (voice.submitComposer(composer, composerMode)) setComposer('')
   }
 
   const handleModelSelect = async (modelKey: string) => {
     if (modelKey === selectedModel || modelBusy) return
     setModelBusy(true)
+    setModelError(null)
     try {
       await setCursorModel(modelKey)
       setSelectedModel(modelKey)
       onModelChange?.(modelKey)
       feedback('success')
-    } catch {
+    } catch (err: unknown) {
       feedback('error')
+      setModelError(err instanceof Error ? err.message : 'Не удалось сменить модель')
     } finally {
       setModelBusy(false)
     }
@@ -159,6 +165,7 @@ export function VoiceConsole({
           })}
         </div>
       )}
+      {modelError && <div className="inline-error" role="alert">{modelError}</div>}
 
       <div className={`voice-stage phase-${state.phase} ${active ? 'is-active' : ''}`}>
         {!reducedMotion && (
@@ -234,6 +241,24 @@ export function VoiceConsole({
 
       {showComposer && (
         <div className="composer-card">
+          <div className="composer-mode-row" role="toolbar" aria-label="Режим текста">
+            <button
+              type="button"
+              className={composerMode === 'ask' ? 'selected' : ''}
+              aria-pressed={composerMode === 'ask'}
+              onClick={() => setComposerMode('ask')}
+            >
+              Спросить
+            </button>
+            <button
+              type="button"
+              className={composerMode === 'plan' ? 'selected' : ''}
+              aria-pressed={composerMode === 'plan'}
+              onClick={() => setComposerMode('plan')}
+            >
+              План
+            </button>
+          </div>
           <label htmlFor="voice-composer">Задача</label>
           <div className="composer-row">
             <input
@@ -241,7 +266,7 @@ export function VoiceConsole({
               type="text"
               value={composer}
               maxLength={4000}
-              placeholder="Коротко: что сделать"
+              placeholder={composerMode === 'ask' ? 'Короткий вопрос агенту' : 'Что спланировать'}
               onChange={(event) => setComposer(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
@@ -255,11 +280,18 @@ export function VoiceConsole({
               type="button"
               disabled={!composer.trim()}
               onClick={handleComposer}
-              aria-label="Отправить"
+              aria-label={composerMode === 'ask' ? 'Спросить' : 'В план'}
             >
               <Send size={17} />
             </button>
           </div>
+        </div>
+      )}
+
+      {state.phase === 'planning' && (
+        <div className="plan-safety" role="status">
+          <Check size={17} />
+          Агент в работе. Эфир задачи и статус control room — ниже.
         </div>
       )}
 
@@ -315,12 +347,6 @@ export function VoiceConsole({
           >
             <RotateCcw size={17} /> Ещё раз
           </button>
-        </div>
-      )}
-
-      {state.phase === 'planning' && (
-        <div className="plan-safety" role="status">
-          <Check size={17} /> Только план. Писать в репо не буду, пока не прикажешь.
         </div>
       )}
 

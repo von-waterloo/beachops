@@ -48,6 +48,31 @@ describe('voiceReducer', () => {
     expect(planning.transcript).toBe('Inspect the deploy pipeline')
   })
 
+  it('updates caption from live job progress while planning', () => {
+    const planning = voiceReducer(initialVoiceState, {
+      type: 'SUBMIT_TEXT',
+      text: 'Что в очереди?',
+      mode: 'ask',
+    })
+    const live = voiceReducer(planning, {
+      type: 'PROGRESS',
+      caption: 'Смотрю активные задачи…',
+    })
+    expect(live.phase).toBe('planning')
+    expect(live.caption).toBe('Смотрю активные задачи…')
+  })
+
+  it('keeps planning on plan.started and refreshes caption', () => {
+    const planning = voiceReducer(initialVoiceState, {
+      type: 'SUBMIT_TEXT',
+      text: 'Статус воркеров',
+      mode: 'ask',
+    })
+    const started = voiceReducer(planning, { type: 'PLAN_STARTED', mode: 'ask' })
+    expect(started.phase).toBe('planning')
+    expect(started.caption).toContain('control room')
+  })
+
   it('supports barge-in by returning from speaking to listening', () => {
     const speaking = voiceReducer(initialVoiceState, { type: 'SPEAKING', caption: 'Working' })
     const listening = voiceReducer(speaking, { type: 'START_LISTENING', at: 200 })

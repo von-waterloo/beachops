@@ -110,6 +110,49 @@ export function useDashboard(pollMs = 15_000) {
     await refresh()
   }, [refresh])
 
+  const updateAgent = useCallback(async (
+    slotId: string,
+    input: {
+      runtime?: string
+      localPath?: string | null
+      preferredWorkerId?: string | null
+      makeActive?: boolean
+    },
+  ) => {
+    await apiFetch(`/api/agents/${slotId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        runtime: input.runtime,
+        localPath: input.localPath,
+        preferredWorkerId: input.preferredWorkerId,
+        makeActive: input.makeActive,
+      }),
+    })
+    await refresh()
+  }, [refresh])
+
+  const submitPrompt = useCallback(async (input: {
+    prompt: string
+    mode?: 'ask' | 'plan' | 'do'
+    slotId?: string
+  }) => {
+    const result = await apiFetch<{
+      job: { id: string }
+      enqueued: boolean
+      reason?: string
+    }>('/api/prompts', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify({
+        prompt: input.prompt,
+        mode: input.mode ?? 'ask',
+        slotId: input.slotId,
+      }),
+    })
+    await refresh()
+    return result
+  }, [refresh])
+
   const hasActive = data.jobs.some((job) => isActiveJobStatus(job.status))
     || (data.queue.running ?? 0) > 0
 
@@ -145,5 +188,7 @@ export function useDashboard(pollMs = 15_000) {
     decideApproval,
     addRepository,
     updateRepository,
+    updateAgent,
+    submitPrompt,
   }
 }

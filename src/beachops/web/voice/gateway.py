@@ -47,7 +47,7 @@ class RealtimeVoiceGateway:
         self,
         websocket: WebSocket,
         *,
-        on_plan_request: Callable[[str], Awaitable[str]] | None = None,
+        on_plan_request: Callable[..., Awaitable[str]] | None = None,
     ) -> None:
         total_bytes = 0
         last_sequence = -1
@@ -173,7 +173,51 @@ class RealtimeVoiceGateway:
                                 }
                             )
                             continue
-                        job_id = await on_plan_request(transcript)
+                        mode_raw = str(event.get("mode") or "plan").strip().lower()
+                        from beachops.domain.models import UserMode
+
+                        try:
+                            mode = UserMode(mode_raw)
+                        except ValueError:
+                            mode = UserMode.PLAN
+                        try:
+                            job_id = await on_plan_request(transcript, mode)
+                        except TypeError:
+                            # Back-compat for single-arg callbacks in tests.
+                            try:
+                                job_id = await on_plan_request(transcript)
+                            except Exception as exc:
+                                logger.warning(
+                                    "Voice plan request failed",
+                                    extra={
+                                        "action": "voice_plan_request",
+                                        "error_code": "dispatch_blocked",
+                                    },
+                                )
+                                await websocket.send_json(
+                                    {
+                                        "type": "error",
+                                        "code": "dispatch_blocked",
+                                        "message": str(exc) or "Запрос заблокирован",
+                                    }
+                                )
+                                continue
+                        except Exception as exc:
+                            logger.warning(
+                                "Voice plan request failed",
+                                extra={
+                                    "action": "voice_plan_request",
+                                    "error_code": "dispatch_blocked",
+                                },
+                            )
+                            await websocket.send_json(
+                                {
+                                    "type": "error",
+                                    "code": "dispatch_blocked",
+                                    "message": str(exc) or "Запрос заблокирован",
+                                }
+                            )
+                            continue
                         bind_log_context(job_id=str(job_id))
                         logger.info(
                             "Voice plan requested",
@@ -183,7 +227,11 @@ class RealtimeVoiceGateway:
                             },
                         )
                         await websocket.send_json(
-                            {"type": "plan.started", "jobId": job_id}
+                            {
+                                "type": "plan.started",
+                                "jobId": job_id,
+                                "mode": mode.value,
+                            }
                         )
                     elif event_type == "ping":
                         await websocket.send_json(

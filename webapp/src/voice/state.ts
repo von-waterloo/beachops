@@ -35,7 +35,9 @@ export type VoiceAction =
   | { type: 'FINAL'; text: string }
   | { type: 'EDIT'; text: string }
   | { type: 'CONFIRM' }
-  | { type: 'SUBMIT_TEXT'; text: string }
+  | { type: 'SUBMIT_TEXT'; text: string; mode?: 'ask' | 'plan' }
+  | { type: 'PLAN_STARTED'; mode?: 'ask' | 'plan' }
+  | { type: 'PROGRESS'; caption: string }
   | { type: 'SPEAKING'; caption?: string }
   | { type: 'PLAYBACK_DONE' }
   | { type: 'CANCEL' }
@@ -80,18 +82,45 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
     case 'CONFIRM':
       if (state.phase !== 'confirming' || !state.transcript.trim()) return state
       return { ...state, phase: 'planning', caption: 'Строю план. Без записи в репо.' }
-    case 'SUBMIT_TEXT':
+    case 'SUBMIT_TEXT': {
       if (!['idle', 'error', 'confirming'].includes(state.phase) || !action.text.trim()) {
         return state
       }
+      const ask = action.mode === 'ask'
       return {
         ...state,
         phase: 'planning',
         transcript: action.text.trim(),
         partialTranscript: '',
         error: null,
-        caption: 'Строю план. Без записи в репо.',
+        caption: ask
+          ? 'Спрашиваю агента. Учитываю очередь и статус control room.'
+          : 'Строю план. Без записи в репо.',
       }
+    }
+    case 'PLAN_STARTED': {
+      if (state.phase === 'planning') {
+        return {
+          ...state,
+          caption: action.mode === 'ask'
+            ? 'Агент в эфире. Жду ответ с учётом control room.'
+            : 'План в очереди. Слежу за прогрессом.',
+        }
+      }
+      if (state.phase === 'confirming' && state.transcript.trim()) {
+        return {
+          ...state,
+          phase: 'planning',
+          caption: action.mode === 'ask'
+            ? 'Агент в эфире. Жду ответ с учётом control room.'
+            : 'План в очереди. Слежу за прогрессом.',
+        }
+      }
+      return state
+    }
+    case 'PROGRESS':
+      if (!['planning', 'speaking'].includes(state.phase)) return state
+      return { ...state, caption: action.caption }
     case 'SPEAKING':
       return { ...state, phase: 'speaking', caption: action.caption ?? 'BeachOps докладывает' }
     case 'PLAYBACK_DONE':
