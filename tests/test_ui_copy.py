@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from tg_cursor_bot.domain.models import UserMode
-from tg_cursor_bot.services.ui_copy import (
+from beachops.domain.models import UserMode
+from beachops.services.ui_copy import (
     build_welcome_message,
     cancel_ok,
     queued_message,

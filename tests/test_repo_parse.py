@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tg_cursor_bot.services.repo_parse import (
+from beachops.services.repo_parse import (
     alias_from_github_url,
     parse_repo_add_args,
     repo_add_usage,

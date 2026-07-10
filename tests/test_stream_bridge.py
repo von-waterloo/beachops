@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from tg_cursor_bot.services.stream_bridge import StreamState
-from tg_cursor_bot.services.ui_copy import EMPTY_STREAM_HINT, format_tool_line
+from beachops.services.stream_bridge import StreamState
+from beachops.services.ui_copy import EMPTY_STREAM_HINT, format_tool_line
 
 
 def test_thinking_count_visible() -> None:
@@ -38,8 +38,27 @@ def test_assistant_visible_output() -> None:
 
 
 def test_tool_line_format() -> None:
-    assert "read_file" in format_tool_line("read_file", "running")
+    assert "читаю файл" in format_tool_line("read_file", "running")
     assert "✅" in format_tool_line("grep", "completed")
+    # Unknown tools keep their raw name.
+    assert "grep" in format_tool_line("grep", "completed")
+
+
+def test_tool_line_upsert_replaces_status_for_ru_label() -> None:
+    state = StreamState()
+    state.upsert_tool("read_file", "running")
+    state.upsert_tool("read_file", "completed")
+    assert len(state.tool_lines) == 1
+    assert "✅" in state.tool_lines[0]
+
+
+def test_set_plan_stores_text_and_name() -> None:
+    state = StreamState()
+    state.set_plan("# План\n\nШаги", name="Мой план")
+    assert state.plan_text == "# План\n\nШаги"
+    assert state.plan_name == "Мой план"
+    state.set_plan("   ")
+    assert state.plan_text is None
 
 
 def test_empty_stream_hint() -> None:

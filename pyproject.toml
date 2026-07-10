@@ -1,12 +1,12 @@
 [project]
-name = "tg-cursor-bot"
-version = "0.1.0"
-description = "Telegram bot interface to Cursor Cloud Agents"
+name = "beachops"
+version = "1.0.0"
+description = "BeachOps secure Telegram control plane for Cursor agents"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "python-telegram-bot>=21.9,<22",
-    "cursor-sdk>=0.1.7",
+    "python-telegram-bot>=22.8,<23",
+    "cursor-sdk>=0.1.9",
     "asyncpg>=0.30.0",
     "pgvector>=0.3.6",
     "pydantic-settings>=2.6.0",
@@ -17,6 +17,14 @@ dependencies = [
     "psycopg[binary]>=3.2.0",
     "pymupdf>=1.25.0",
     "python-docx>=1.1.2",
+    "fastapi>=0.139.0,<1",
+    "uvicorn[standard]>=0.51.0,<1",
+    "redis[hiredis]>=5.3.1,<6",
+    "arq>=0.28.0,<1",
+    "cryptography>=49.0.0,<50",
+    "httpx>=0.28.1,<1",
+    "python-multipart>=0.0.32,<1",
+    "webauthn>=3.0.0,<4",
 ]
 
 [project.optional-dependencies]
@@ -26,7 +34,8 @@ dev = [
 ]
 
 [project.scripts]
-tg-cursor-bot = "tg_cursor_bot.__main__:main"
+beachops = "beachops.__main__:main"
+beachops-api = "beachops.web.__main__:main"
 
 [build-system]
 requires = ["setuptools>=75.0"]

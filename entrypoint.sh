@@ -1,4 +1,12 @@
 #!/bin/sh
 set -e
-alembic upgrade head
-exec python -m tg_cursor_bot
+
+if [ "${RUN_MIGRATIONS:-0}" = "1" ]; then
+    alembic upgrade head
+fi
+
+if [ "$#" -eq 0 ]; then
+    set -- python -m beachops
+fi
+
+exec "$@"

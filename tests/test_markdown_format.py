@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from telegramify_markdown import utf16_len
 
-from tg_cursor_bot.services.markdown_format import (
+from beachops.services.markdown_format import (
     format_markdown_message,
     format_readable_message,
 )

@@ -1,0 +1,846 @@
+"""FastAPI control plane for the authenticated BeachOps Mini App."""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import secrets
+from contextlib import asynccontextmanager, suppress
+from datetime import datetime, timezone
+from typing import Annotated
+from uuid import UUID, uuid4
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
+from beachops.app_context import AppContext
+from beachops.config.settings import Settings, get_settings
+from beachops.domain.models import UserMode
+from beachops.domain.security import (
+    ApprovalDecision,
+    ApprovalKind,
+    JobKind,
+    JobStatus,
+    Role,
+)
+from beachops.services.approval_actions import approve_job, reject_job, request_revision
+from beachops.services.durable_dispatch import dispatch_prompt
+from beachops.web.passkey_auth import (
+    resolve_request_principal,
+    resolve_websocket_principal,
+    router as passkey_auth_router,
+)
+from beachops.web.schemas import DecisionRequest, DeployDispatchRequest, PanicRequest
+from beachops.web.telegram_auth import (
+    TelegramInitDataError,
+    TelegramPrincipal,
+    extract_tma_authorization,
+    validate_init_data,
+)
+from beachops.web.voice import RealtimeVoiceGateway, VoiceGatewayLimits
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    settings = get_settings()
+    context = await AppContext.create(settings)
+    app.state.context = context
+    try:
+        yield
+    finally:
+        await context.close()
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="BeachOps API",
+        version="1.0.0",
+        docs_url=None,
+        redoc_url=None,
+        lifespan=_lifespan,
+    )
+    app.include_router(passkey_auth_router)
+
+    @app.get("/health")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/ready")
+    async def ready(request: Request) -> dict[str, str]:
+        context = _context(request)
+        await context.pool.fetchval("SELECT 1")
+        await context.redis.ping()
+        return {"status": "ready"}
+
+    @app.get("/api/me")
+    async def me(
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        return {
+            "userId": principal.user_id,
+            "role": role.value if role else "none",
+            "writesEnabled": not await context.system_state.is_panic_enabled(),
+            "authMethod": principal.auth_method,
+            "hasPasskey": await context.passkeys.has_any(principal.user_id),
+        }
+
+    @app.get("/api/dashboard")
+    async def dashboard(
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        jobs = (
+            await context.jobs.list_all_internal(limit=100)
+            if role == Role.OWNER
+            else await context.jobs.list_for_actor(principal.user_id, limit=100)
+        )
+        approvals = (
+            await context.approvals.list_pending(limit=100)
+            if role == Role.OWNER
+            else []
+        )
+        events = await _recent_events(context, principal.user_id, role)
+        total_tokens = sum(job.total_tokens or 0 for job in jobs)
+        return {
+            "jobs": [_job_json(job) for job in jobs],
+            "events": events,
+            "approvals": [_approval_json(item) for item in approvals],
+            "repositories": [
+                {
+                    "id": hashlib.sha256(policy.repository_url.encode()).hexdigest()[:12],
+                    "name": policy.repository_url.rsplit("/", 1)[-1],
+                    "branch": policy.allowed_branches[0],
+                    "status": "ready",
+                }
+                for policy in context.repository_policy.policies
+            ],
+            "usage": {
+                "period": "current",
+                "voiceMinutes": 0,
+                "jobs": len(jobs),
+                "limitPercent": 0,
+                "totalTokens": total_tokens,
+            },
+            "panic": await context.system_state.is_panic_enabled(),
+            "role": role.value if role else "none",
+            "workers": [
+                _worker_json(node)
+                for node in await context.worker_nodes.list_online()
+            ],
+            "queue": _queue_stats(jobs),
+        }
+
+    @app.get("/api/jobs/{job_id}/events")
+    async def job_events(
+        job_id: UUID,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> list[dict]:
+        context = _context(request)
+        job = await context.jobs.get(principal.user_id, job_id)
+        if job is None and context.settings.role_for(principal.user_id) != Role.OWNER:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job is None:
+            internal = await context.jobs.get_internal(job_id)
+            if internal is None:
+                raise HTTPException(status_code=404, detail="job not found")
+            actor_id = internal.actor_id
+        else:
+            actor_id = principal.user_id
+        events = await context.jobs.list_events(actor_id, job_id)
+        return [
+            {
+                "id": str(item["id"]),
+                "kind": item["event_type"],
+                "summary": str(item.get("to_status") or item["event_type"]),
+                "createdAt": item["created_at"].isoformat(),
+                "jobId": str(job_id),
+            }
+            for item in events
+        ]
+
+    @app.post("/api/approvals/{approval_id}/decision")
+    async def decide_approval(
+        approval_id: UUID,
+        body: DecisionRequest,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+        idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    ) -> dict:
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        if role != Role.OWNER:
+            raise HTTPException(status_code=403, detail="owner role required")
+        if not idempotency_key or not await context.idempotency.claim(
+            "approval", idempotency_key, ttl_sec=3600
+        ):
+            raise HTTPException(status_code=409, detail="duplicate or missing idempotency key")
+
+        approval = await context.approvals.get_internal(approval_id)
+        if approval is None:
+            raise HTTPException(status_code=404, detail="approval not found")
+        job = await context.jobs.get_internal(approval.job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        if (
+            body.decision == "approve"
+            and approval.kind == ApprovalKind.PLAN_EXECUTION
+            and await context.system_state.is_panic_enabled()
+        ):
+            raise HTTPException(status_code=409, detail="write actions disabled by panic")
+
+        if body.decision == "approve":
+            decided = await context.approvals.decide(
+                approval.actor_id,
+                approval.id,
+                decided_by=principal.user_id,
+                decider_role=Role.OWNER,
+                decision=ApprovalDecision.APPROVED,
+            )
+            if decided is None:
+                raise HTTPException(status_code=409, detail="approval expired or consumed")
+            try:
+                result = await approve_job(context, job, approval.kind)
+            except PermissionError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+        elif body.decision == "revision":
+            if approval.kind != ApprovalKind.RESULT_REVIEW or not body.revision:
+                raise HTTPException(status_code=400, detail="revision text required")
+            await context.approvals.decide(
+                approval.actor_id,
+                approval.id,
+                decided_by=principal.user_id,
+                decider_role=Role.OWNER,
+                decision=ApprovalDecision.REJECTED,
+                reason="revision requested",
+            )
+            try:
+                result = await request_revision(context, job, body.revision)
+            except PermissionError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        else:
+            await context.approvals.decide(
+                approval.actor_id,
+                approval.id,
+                decided_by=principal.user_id,
+                decider_role=Role.OWNER,
+                decision=ApprovalDecision.REJECTED,
+            )
+            await reject_job(context, job)
+            result = {"status": "rejected", "jobId": str(job.id)}
+        return result
+
+    @app.post("/api/panic")
+    async def panic(
+        body: PanicRequest,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+        idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    ) -> dict:
+        context = _context(request)
+        if context.settings.role_for(principal.user_id) != Role.OWNER:
+            raise HTTPException(status_code=403, detail="owner role required")
+        if not idempotency_key or not await context.idempotency.claim(
+            "panic", idempotency_key, ttl_sec=3600
+        ):
+            raise HTTPException(status_code=409, detail="duplicate or missing idempotency key")
+        await context.system_state.set_panic(
+            body.enabled,
+            actor_id=principal.user_id,
+            actor_role=Role.OWNER,
+        )
+        if body.enabled:
+            await _cancel_write_jobs(context)
+        await context.audit.append(
+            actor_id=principal.user_id,
+            event_type="system.panic",
+            action="enable" if body.enabled else "disable",
+            outcome="success",
+            details={},
+        )
+        return {"panic": body.enabled}
+
+    @app.post("/api/deploy/dispatch")
+    async def deploy_dispatch(
+        body: DeployDispatchRequest,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+        idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    ) -> dict:
+        context = _context(request)
+        if context.settings.role_for(principal.user_id) != Role.OWNER:
+            raise HTTPException(status_code=403, detail="owner role required")
+        if not context.settings.github_deploy_dispatch:
+            raise HTTPException(status_code=409, detail="deploy dispatch disabled")
+        if not idempotency_key or not await context.idempotency.claim(
+            "deploy", idempotency_key, ttl_sec=3600
+        ):
+            raise HTTPException(status_code=409, detail="duplicate or missing idempotency key")
+        from beachops.services.deploy_trigger import (
+            DeployTriggerError,
+            trigger_prod_deploy,
+        )
+
+        try:
+            result = await trigger_prod_deploy(
+                token=context.settings.github_token,
+                repository=context.settings.github_repo,
+                sha=body.sha,
+                workflow=context.settings.github_deploy_workflow,
+                ref=body.ref or context.settings.github_deploy_ref,
+            )
+        except DeployTriggerError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        await context.audit.append(
+            actor_id=principal.user_id,
+            event_type="deploy.dispatch",
+            action="workflow_dispatch",
+            outcome="success",
+            details={"sha": result.sha, "ref": result.ref},
+        )
+        return {
+            "repository": result.repository,
+            "workflow": result.workflow,
+            "ref": result.ref,
+            "sha": result.sha,
+        }
+
+    @app.websocket("/api/voice/ws")
+    async def voice(websocket: WebSocket) -> None:
+        await websocket.accept()
+        context: AppContext = websocket.app.state.context
+        try:
+            auth_message = await asyncio.wait_for(websocket.receive_json(), timeout=10)
+            authorization = str(auth_message.get("authorization", ""))
+            principal = await resolve_websocket_principal(websocket, authorization)
+        except (TelegramInitDataError, asyncio.TimeoutError, ValueError):
+            await websocket.close(code=4401)
+            return
+
+        limit = await context.rate_limiter.check(
+            subject=str(principal.user_id),
+            action="voice_session",
+            limit=5,
+            window_sec=60,
+        )
+        if not limit.allowed:
+            await websocket.close(code=4429)
+            return
+
+        await websocket.send_json({"type": "session.ready"})
+
+        gateway = RealtimeVoiceGateway(
+            api_key=context.settings.openai_api_key,
+            model=context.settings.voice_realtime_model,
+            limits=VoiceGatewayLimits(
+                max_session_bytes=24_000
+                * 2
+                * context.settings.voice_max_session_sec
+            ),
+        )
+        result_tasks: set[asyncio.Task] = set()
+
+        async def on_plan_request(transcript: str) -> str:
+            run_context = await context.agent_slots.get_run_context(principal.user_id)
+            if run_context is None:
+                raise ValueError("repository is not selected")
+            dispatched = await dispatch_prompt(
+                context,
+                actor_id=principal.user_id,
+                prompt=transcript,
+                mode=UserMode.PLAN,
+                run_context=run_context,
+                idempotency_key=f"voice:{principal.user_id}:{uuid4()}",
+            )
+            if not dispatched.enqueued:
+                raise ValueError(dispatched.reason or "request blocked")
+            task = asyncio.create_task(
+                _speak_job_result(context, websocket, dispatched.job.id)
+            )
+            result_tasks.add(task)
+            task.add_done_callback(result_tasks.discard)
+            return str(dispatched.job.id)
+
+        try:
+            await gateway.run(websocket, on_plan_request=on_plan_request)
+        except Exception:
+            with suppress(Exception):
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "provider_unavailable",
+                        "message": "Voice service unavailable",
+                    }
+                )
+            with suppress(Exception):
+                await websocket.close(code=1011)
+        finally:
+            for task in result_tasks:
+                task.cancel()
+
+    @app.post("/api/workers/register")
+    async def register_worker(request: Request) -> dict:
+        context = _context(request)
+        body = await request.json()
+        enrolled_by = await _authorize_worker_register(request, context)
+        hostname = str(body.get("hostname") or "").strip()
+        if not hostname:
+            raise HTTPException(status_code=400, detail="hostname required")
+        platform = str(body.get("platform") or "windows").strip() or "windows"
+        capabilities = body.get("capabilities") or {}
+        if not isinstance(capabilities, dict):
+            raise HTTPException(status_code=400, detail="capabilities must be an object")
+
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = _hash_worker_token(raw_token)
+        node = await context.worker_nodes.register(
+            hostname=hostname,
+            token_hash=token_hash,
+            capabilities=capabilities,
+            platform=platform,
+            enrolled_by=enrolled_by,
+        )
+        await context.audit.append(
+            actor_id=enrolled_by,
+            event_type="worker.register",
+            action="register",
+            outcome="success",
+            details={"nodeId": str(node["id"]), "hostname": hostname},
+        )
+        return {
+            "id": str(node["id"]),
+            "hostname": node["hostname"],
+            "platform": node["platform"],
+            "status": node["status"],
+            "token": raw_token,
+        }
+
+    @app.post("/api/workers/heartbeat")
+    async def worker_heartbeat(request: Request) -> dict:
+        context = _context(request)
+        node = await _current_worker_node(request, context)
+        body = await request.json()
+        hostname = str(body.get("hostname") or node["hostname"])
+        capabilities = body.get("capabilities") or {}
+        if not isinstance(capabilities, dict):
+            raise HTTPException(status_code=400, detail="capabilities must be an object")
+        updated = await context.worker_nodes.upsert_heartbeat(
+            node["id"],
+            hostname=hostname,
+            capabilities=capabilities,
+            token_hash=node["token_hash"],
+            platform=str(body.get("platform") or node.get("platform") or "windows"),
+        )
+        return {
+            "status": "ok",
+            "nodeId": str(updated["id"]),
+            "lastHeartbeatAt": updated["last_heartbeat_at"].isoformat()
+            if updated.get("last_heartbeat_at")
+            else None,
+        }
+
+    @app.post("/api/workers/claim")
+    async def worker_claim(request: Request) -> dict:
+        context = _context(request)
+        node = await _current_worker_node(request, context)
+        job = await context.jobs.claim_for_worker(node["id"], runtime="windows")
+        if job is None:
+            return {"job": None}
+
+        payload: dict = {}
+        if job.payload_ciphertext:
+            try:
+                payload = context.payload_crypto.decrypt_json(job.payload_ciphertext)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500, detail="failed to decrypt job payload"
+                ) from exc
+
+        slot_id = payload.get("slot_id")
+        cursor_agent_id = None
+        local_path = payload.get("local_path")
+        model = context.settings.cursor_model
+        if slot_id is not None:
+            slot = await context.agent_slots.get_slot(job.actor_id, int(slot_id))
+            if slot is not None:
+                cursor_agent_id = slot.cursor_agent_id
+                local_path = local_path or slot.local_path
+
+        await context.run_events.append(
+            job_id=job.id,
+            actor_id=job.actor_id,
+            event_type="worker.claimed",
+            payload={"workerNodeId": str(node["id"])},
+            idempotency_key=f"{job.id}:claimed:{node['id']}",
+        )
+        return {
+            "job": {
+                "id": str(job.id),
+                "actorId": job.actor_id,
+                "kind": job.kind.value,
+                "mode": payload.get("mode") or "ask",
+                "prompt": payload.get("prompt") or "",
+                "repositoryUrl": job.repository_url,
+                "repositoryAlias": (job.repository_url or "").rsplit("/", 1)[-1] or "repo",
+                "branch": job.branch,
+                "localPath": local_path,
+                "cursorAgentId": cursor_agent_id,
+                "slotId": slot_id,
+                "repoId": payload.get("repo_id"),
+                "model": model,
+                "runtime": job.runtime,
+            }
+        }
+
+    @app.post("/api/workers/runs/{job_id}/events")
+    async def worker_run_events(
+        job_id: UUID,
+        request: Request,
+    ) -> dict:
+        context = _context(request)
+        node = await _current_worker_node(request, context)
+        job = await context.jobs.get_internal(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job.worker_node_id is not None and job.worker_node_id != node["id"]:
+            raise HTTPException(status_code=403, detail="job assigned to another worker")
+
+        body = await request.json()
+        event_type = str(body.get("eventType") or body.get("event_type") or "").strip()
+        if not event_type:
+            raise HTTPException(status_code=400, detail="eventType required")
+        payload = body.get("payload") or {}
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="payload must be an object")
+        sequence = int(body.get("sequence") or 0)
+        idempotency_key = body.get("idempotencyKey") or body.get("idempotency_key")
+
+        event_id = await context.run_events.append(
+            job_id=job.id,
+            actor_id=job.actor_id,
+            event_type=event_type,
+            payload={**payload, "workerNodeId": str(node["id"])},
+            sequence=sequence,
+            idempotency_key=str(idempotency_key) if idempotency_key else None,
+        )
+
+        agent_id = payload.get("agentId") or payload.get("agent_id")
+        run_id = payload.get("runId") or payload.get("run_id")
+        if agent_id or run_id:
+            await context.jobs.set_runtime(
+                job.actor_id,
+                job.id,
+                cursor_agent_id=str(agent_id) if agent_id else None,
+                cursor_run_id=str(run_id) if run_id else None,
+            )
+
+        if event_type in {"run.finished", "run.failed"}:
+            to_status = (
+                JobStatus.FAILED
+                if event_type == "run.failed" or payload.get("status") == "error"
+                else JobStatus.SUCCEEDED
+            )
+            if payload.get("prUrl") or payload.get("totalTokens") is not None:
+                await context.jobs.set_result(
+                    job.actor_id,
+                    job.id,
+                    pr_url=payload.get("prUrl"),
+                    total_tokens=payload.get("totalTokens"),
+                )
+            await context.jobs.transition(
+                job.actor_id,
+                job.id,
+                from_statuses=[JobStatus.RUNNING, JobStatus.PLANNING],
+                to_status=to_status,
+                event_type=event_type,
+            )
+            await context.notification_outbox.enqueue(
+                job_id=job.id,
+                actor_id=job.actor_id,
+                kind="send",
+                telegram_chat_id=job.telegram_chat_id or job.actor_id,
+                telegram_message_id=job.telegram_message_id,
+                payload={
+                    "text": (
+                        payload.get("finalText")
+                        or payload.get("error")
+                        or f"Job {to_status.value}"
+                    )[:4000]
+                },
+                idempotency_key=f"{job.id}:notify:{event_type}",
+            )
+
+        return {"accepted": True, "eventId": event_id}
+
+    @app.get("/api/workers")
+    async def list_workers(
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> list[dict]:
+        context = _context(request)
+        if context.settings.role_for(principal.user_id) != Role.OWNER:
+            raise HTTPException(status_code=403, detail="owner role required")
+        nodes = await context.worker_nodes.list_all()
+        return [_worker_json(node) for node in nodes]
+
+    return app
+
+
+async def _authorize_worker_register(
+    request: Request,
+    context: AppContext,
+) -> int | None:
+    """Owner TMA session or bootstrap token may enroll a worker."""
+    authorization = request.headers.get("Authorization")
+    bootstrap = (
+        context.settings.worker_bootstrap_token.strip()
+        or context.settings.beachops_worker_bootstrap_token.strip()
+    )
+    if bootstrap and authorization:
+        raw = authorization.removeprefix("Bearer ").strip()
+        if raw and secrets.compare_digest(raw, bootstrap):
+            return None
+    header_bootstrap = request.headers.get("X-BeachOps-Bootstrap-Token")
+    if bootstrap and header_bootstrap and secrets.compare_digest(
+        header_bootstrap.strip(), bootstrap
+    ):
+        return None
+    try:
+        principal = _validate_authorization(context.settings, authorization)
+    except TelegramInitDataError as exc:
+        raise HTTPException(status_code=401, detail="owner or bootstrap auth required") from exc
+    if context.settings.role_for(principal.user_id) != Role.OWNER:
+        raise HTTPException(status_code=403, detail="owner role required")
+    return principal.user_id
+
+
+async def _current_worker_node(request: Request, context: AppContext) -> dict:
+    authorization = request.headers.get("Authorization")
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="worker token required")
+    raw = authorization[7:].strip()
+    if not raw:
+        raise HTTPException(status_code=401, detail="worker token required")
+    node = await context.worker_nodes.get_by_token_hash(_hash_worker_token(raw))
+    if node is None:
+        raise HTTPException(status_code=401, detail="invalid worker token")
+    return node
+
+
+def _hash_worker_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _worker_json(node: dict) -> dict:
+    capabilities = node.get("capabilities") or {}
+    if isinstance(capabilities, str):
+        capabilities = json.loads(capabilities)
+    return {
+        "id": str(node["id"]),
+        "hostname": node["hostname"],
+        "platform": node["platform"],
+        "status": node["status"],
+        "capabilities": capabilities,
+        "lastHeartbeatAt": node["last_heartbeat_at"].isoformat()
+        if node.get("last_heartbeat_at")
+        else None,
+        "enrolledBy": node.get("enrolled_by"),
+        "createdAt": node["created_at"].isoformat() if node.get("created_at") else None,
+    }
+
+
+async def _current_principal(
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+) -> TelegramPrincipal:
+    try:
+        return await resolve_request_principal(request, authorization)
+    except TelegramInitDataError as exc:
+        raise HTTPException(status_code=401, detail="invalid session") from exc
+
+
+def _validate_authorization(
+    settings: Settings,
+    authorization: str | None,
+) -> TelegramPrincipal:
+    raw = extract_tma_authorization(authorization)
+    principal = validate_init_data(
+        raw,
+        settings.tg_bot_token,
+        max_age_sec=settings.web_auth_max_age_sec,
+    )
+    if settings.role_for(principal.user_id) is None:
+        raise TelegramInitDataError("user is not allowlisted")
+    return principal
+
+
+def _context(request: Request) -> AppContext:
+    return request.app.state.context
+
+
+async def _recent_events(
+    context: AppContext,
+    actor_id: int,
+    role: Role | None,
+) -> list[dict]:
+    where = "" if role == Role.OWNER else "WHERE actor_id = $1"
+    args = () if role == Role.OWNER else (actor_id,)
+    async with context.pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT id, job_id, event_type, to_status, created_at
+            FROM beachops_job_events
+            {where}
+            ORDER BY id DESC
+            LIMIT 100
+            """,
+            *args,
+        )
+    return [
+        {
+            "id": str(row["id"]),
+            "kind": row["event_type"],
+            "summary": str(row["to_status"] or row["event_type"]),
+            "createdAt": row["created_at"].isoformat(),
+            "jobId": str(row["job_id"]),
+        }
+        for row in rows
+    ]
+
+
+def _job_json(job) -> dict:
+    status_map = {
+        JobStatus.SUCCEEDED: "completed",
+        JobStatus.ACCEPTED: "completed",
+        JobStatus.AWAITING_APPROVAL: "blocked",
+        JobStatus.REVIEW_REQUIRED: "blocked",
+    }
+    mapped = status_map.get(job.status, job.status.value)
+    return {
+        "id": str(job.id),
+        "title": job.summary or job.kind.value,
+        "status": mapped,
+        "createdAt": (job.created_at or datetime.now(timezone.utc)).isoformat(),
+        "repository": job.repository_url.rsplit("/", 1)[-1] if job.repository_url else None,
+        "runtime": job.runtime or "cloud",
+        "workerNodeId": str(job.worker_node_id) if job.worker_node_id else None,
+        "progress": _job_progress(mapped),
+    }
+
+
+def _job_progress(status: str) -> int:
+    mapping = {
+        "queued": 12,
+        "planning": 28,
+        "approved": 34,
+        "running": 62,
+        "blocked": 78,
+        "awaiting_approval": 78,
+        "review_required": 82,
+        "revision_requested": 55,
+        "completed": 100,
+        "accepted": 100,
+        "failed": 100,
+        "cancelled": 100,
+        "rejected": 100,
+    }
+    return mapping.get(status, 18)
+
+
+def _queue_stats(jobs) -> dict[str, int]:
+    active = 0
+    queued = 0
+    blocked = 0
+    for job in jobs:
+        value = job.status.value if hasattr(job.status, "value") else str(job.status)
+        if value in {"running", "approved", "planning"}:
+            active += 1
+        elif value == "queued":
+            queued += 1
+        elif value in {
+            "blocked",
+            "awaiting_approval",
+            "review_required",
+            "paused",
+            "revision_requested",
+        }:
+            blocked += 1
+    return {
+        "active": active,
+        "queued": queued,
+        "blocked": blocked,
+        "total": len(jobs),
+        "running": active,
+        "pending": queued,
+    }
+
+
+def _approval_json(approval) -> dict:
+    return {
+        "id": str(approval.id),
+        "title": f"{approval.kind.value} · {approval.job_id}",
+        "risk": "high" if approval.kind != ApprovalKind.PLAN_EXECUTION else "medium",
+        "requestedAt": (
+            approval.requested_at or datetime.now(timezone.utc)
+        ).isoformat(),
+    }
+
+
+async def _cancel_write_jobs(context: AppContext) -> None:
+    jobs = await context.jobs.list_by_status_internal(
+        [
+            JobStatus.QUEUED,
+            JobStatus.APPROVED,
+            JobStatus.RUNNING,
+            JobStatus.REVISION_REQUESTED,
+        ]
+    )
+    for job in jobs:
+        if job.kind != JobKind.CHANGE:
+            continue
+        if job.cursor_agent_id and job.cursor_run_id:
+            await context.cursor.cancel_run(job.cursor_agent_id, job.cursor_run_id)
+        await context.jobs.transition(
+            job.actor_id,
+            job.id,
+            from_statuses=[job.status],
+            to_status=JobStatus.CANCELLED,
+            event_type="panic.cancelled",
+        )
+
+
+async def _speak_job_result(
+    context: AppContext,
+    websocket: WebSocket,
+    job_id: UUID,
+) -> None:
+    for _ in range(1800):
+        await asyncio.sleep(2)
+        job = await context.jobs.get_internal(job_id)
+        if job is None:
+            return
+        if job.status in {JobStatus.FAILED, JobStatus.BLOCKED, JobStatus.CANCELLED}:
+            await websocket.send_json(
+                {"type": "error", "message": f"Task {job.status.value}"}
+            )
+            return
+        if job.status not in {
+            JobStatus.AWAITING_APPROVAL,
+            JobStatus.SUCCEEDED,
+            JobStatus.REVIEW_REQUIRED,
+        }:
+            continue
+        if not job.cursor_run_id:
+            return
+        result = await context.memory.get_by_run_id(job.actor_id, job.cursor_run_id)
+        if result is None:
+            return
+        await websocket.send_json({"type": "audio.started", "caption": result.body[:500]})
+        async for chunk in context.speech.stream_pcm(result.body):
+            await websocket.send_bytes(chunk)
+        await websocket.send_json({"type": "audio.ended"})
+        return

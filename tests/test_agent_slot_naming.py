@@ -1,7 +1,7 @@
 """Tests for agent slot naming."""
 
-from tg_cursor_bot.domain.models import RepoConfig
-from tg_cursor_bot.services.agent_slot_naming import (
+from beachops.domain.models import RepoConfig
+from beachops.services.agent_slot_naming import (
     RANDOM_SLOT_LABELS,
     default_slot_label,
     is_auto_slot_label,
@@ -9,8 +9,8 @@ from tg_cursor_bot.services.agent_slot_naming import (
     random_slot_label,
     slot_button_text,
 )
-from tg_cursor_bot.services.forward_format import format_user_text_block, join_prompt_blocks
-from tg_cursor_bot.services.ui_copy import forward_context_default_prompt
+from beachops.services.forward_format import format_user_text_block, join_prompt_blocks
+from beachops.services.ui_copy import forward_context_default_prompt
 
 
 def test_random_pool_has_100_unique_labels():

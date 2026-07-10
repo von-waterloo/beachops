@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tg_cursor_bot.services.markdown_sanitize import (
+from beachops.services.markdown_sanitize import (
     make_telegram_safe_markdown,
     readable_plain,
     strip_poison_markdown,

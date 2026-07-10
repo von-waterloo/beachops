@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from tg_cursor_bot.services.status_animation import AnimatedStatus
+from beachops.services.status_animation import AnimatedStatus
 
 
 @pytest.mark.asyncio

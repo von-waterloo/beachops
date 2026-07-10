@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from tg_cursor_bot.domain.models import UserMode
-from tg_cursor_bot.services.stream_display import resolve_thinking_display
+from beachops.domain.models import UserMode
+from beachops.services.stream_display import resolve_thinking_display
 
 
 def test_preview_mode_ask_is_count() -> None:

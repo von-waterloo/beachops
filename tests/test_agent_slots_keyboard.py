@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from tg_cursor_bot.domain.models import AgentSlot
-from tg_cursor_bot.services.inline_keyboards import (
+from beachops.domain.models import AgentSlot
+from beachops.services.inline_keyboards import (
     AGENTS_PER_PAGE,
     CB_AGENT_DELETE_PREFIX,
     CB_AGENT_PAGE_PREFIX,

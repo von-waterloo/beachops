@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from tg_cursor_bot.config.settings import Settings
-from tg_cursor_bot.domain.models import UserMode
-from tg_cursor_bot.services.run_executor import resolve_history_retry_mode
+from beachops.config.settings import Settings
+from beachops.domain.models import UserMode
+from beachops.services.run_executor import resolve_history_retry_mode
 
 
 def _settings(*, admin_ids: list[int]) -> Settings:

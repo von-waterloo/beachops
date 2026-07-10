@@ -19,3 +19,4 @@ ENV WORKSPACE_PATH=/data/workspace
 ENV PYTHONUNBUFFERED=1
 
 ENTRYPOINT ["/entrypoint.sh"]
+CMD ["python", "-m", "beachops"]

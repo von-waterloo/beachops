@@ -1,0 +1,22 @@
+# Optional: build/push images on version tags.
+# Stub — enable when a container registry and IMAGE_* secrets are ready.
+
+name: Docker publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  stub:
+    name: Publish stub
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip (not configured)
+        run: |
+          echo "docker-publish is a stub."
+          echo "Tag: ${{ github.ref_name }}"
+          echo "Configure GHCR/registry login + buildx when ready; deploy-prod uses compose build on the runner."

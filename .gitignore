@@ -9,3 +9,12 @@ build/
 data/
 *.db
 .cursor/
+.pytest_cache/
+htmlcov/
+.coverage
+node_modules/
+webapp/dist/
+webapp/node_modules/
+*.tgz
+.DS_Store
+Thumbs.db

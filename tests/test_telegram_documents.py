@@ -7,7 +7,7 @@ from io import BytesIO
 import fitz
 from docx import Document
 
-from tg_cursor_bot.services.telegram_documents import (
+from beachops.services.telegram_documents import (
     build_document_prompt,
     build_prompt_text,
     extract_text_from_bytes,

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from tg_cursor_bot.config.settings import CURSOR_MAX_IMAGES_PER_PROMPT, DEFAULT_PHOTO_MAX_COUNT
-from tg_cursor_bot.services.telegram_images import (
+from beachops.config.settings import CURSOR_MAX_IMAGES_PER_PROMPT, DEFAULT_PHOTO_MAX_COUNT
+from beachops.services.telegram_images import (
     build_prompt_text,
     is_supported_image_mime,
     limit_sdk_images,
 )
-from tg_cursor_bot.services.ui_copy import photo_default_prompt
+from beachops.services.ui_copy import photo_default_prompt
 
 
 class _FakeSDKImage:

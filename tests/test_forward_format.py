@@ -12,7 +12,7 @@ from telegram import (
     User,
 )
 
-from tg_cursor_bot.services.forward_format import (
+from beachops.services.forward_format import (
     format_forward_header,
     format_forward_text_block,
     format_user_text_block,

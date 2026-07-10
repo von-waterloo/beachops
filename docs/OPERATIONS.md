@@ -2,12 +2,14 @@
 
 ## Docker Compose (локально / сервер)
 
-Стек: **postgres** (pgvector/pg16) + **bot** (long polling).
+Стек: **postgres** + **redis** + one-shot **migrate** + один long-polling
+**bot** + **worker** (ARQ/Cursor) + **api** (FastAPI) + **webapp** (nginx/React).
 
 ```powershell
 docker compose up -d --build
 docker compose ps
 docker compose logs -f --tail=100 bot
+docker compose logs -f --tail=100 worker api
 ```
 
 Volumes:
@@ -15,13 +17,25 @@ Volumes:
 | Volume | Назначение |
 |--------|------------|
 | `postgres-data` | данные PostgreSQL |
+| `redis-data` | ARQ queue, idempotency, rate limits |
 | `bot-data` | workspace cursor-sdk (`/data/workspace`) |
 
 ### Миграции
 
-**В Docker:** `entrypoint.sh` выполняет `alembic upgrade head` перед стартом бота.
+**В Docker:** сервис `migrate` выполняет `alembic upgrade head`; bot/API/worker
+ждут его успешного завершения.
 
 **Локально без Docker:** миграции вручную (см. [DEVELOPMENT.md](./DEVELOPMENT.md)).
+
+### Windows worker (локальные Cursor-агенты)
+
+На Windows 11 ПК рядом с Cursor IDE:
+
+1. Зарегистрировать node: `POST /api/workers/register` (owner TMA или `WORKER_BOOTSTRAP_TOKEN`).
+2. Выставить env: `BEACHOPS_API_URL`, `BEACHOPS_WORKER_TOKEN`, `CURSOR_API_KEY`.
+3. Запуск: `python -m beachops.windows_worker` или `.\scripts\install-windows-worker.ps1`.
+
+Jobs со `runtime=windows` не уходят в ARQ — их claim'ит Windows daemon.
 
 ### Bind mount workspace (опционально)
 
@@ -31,23 +45,30 @@ docker compose -f docker-compose.yml -f docker-compose.bind.yml up -d --build
 
 ## Прод-сервер (185.244.49.94)
 
-Каталог: `/home/const/tg-cursor-bot`
+Каталог остаётся `/home/const/tg-cursor-bot` для совместимости существующих
+named volumes. Приложение и Python package полностью называются BeachOps.
 
-### Деплой с Windows
+### CI / self-hosted deploy (предпочтительно)
+
+См. [SELF_DEPLOY.md](./SELF_DEPLOY.md): CI на PR/`main`/`dev`, прод — только
+`workflow_dispatch` на runner `[self-hosted, host-185]` (secret
+`ENV_PROD_BEACHOPS` или `ENV_PROD`). Бот не использует SSH.
+
+### Деплой с Windows (legacy)
 
 ```powershell
 .\scripts\deploy-to-prod.ps1
 ```
 
-Скрипт: tar архив (включая `.env`) → pscp → распаковка → **stop/rm старого bot** → build → `up --force-recreate`.
+Скрипт не передаёт `.env`: использует серверный файл, создаёт backup PostgreSQL,
+добавляет отсутствующий encryption key/policy compatibility, останавливает старый
+poller, собирает весь стек и запускает миграции.
 
 Порядок на сервере:
 
 ```bash
-docker compose stop -t 15 bot
-docker compose rm -f bot
-docker compose build bot
-docker compose up -d --force-recreate --remove-orphans --no-deps bot
+docker compose -p tg-cursor-bot build
+docker compose -p tg-cursor-bot up -d --force-recreate --remove-orphans
 ```
 
 Так старый long-polling процесс гарантированно завершается до старта нового (иначе Telegram отдаёт updates двум инстансам → `Conflict`).
@@ -56,23 +77,27 @@ SSH/PuTTY детали — `.cursor/rules/servers-access.mdc`.
 
 ### После деплоя
 
-Миграции применяются entrypoint при старте контейнера. При необходимости вручную:
+Миграции применяет `migrate`. Проверка:
 
 ```powershell
-echo y | plink -ssh -l const -i "C:\Users\vonwa\.ssh\const.ppk" 185.244.49.94 "cd /home/const/tg-cursor-bot && docker compose exec -T bot alembic upgrade head"
+echo y | plink -ssh -l const -i "C:\Users\vonwa\.ssh\const.ppk" 185.244.49.94 "cd /home/const/tg-cursor-bot && docker compose -p tg-cursor-bot logs migrate"
 ```
 
 ### Мониторинг
 
 ```powershell
-echo y | plink -ssh -l const -i "C:\Users\vonwa\.ssh\const.ppk" 185.244.49.94 "cd /home/const/tg-cursor-bot && docker compose ps"
-echo y | plink -ssh -l const -i "C:\Users\vonwa\.ssh\const.ppk" 185.244.49.94 "cd /home/const/tg-cursor-bot && docker compose logs -f --tail=100 bot"
+echo y | plink -ssh -l const -i "C:\Users\vonwa\.ssh\const.ppk" 185.244.49.94 "cd /home/const/tg-cursor-bot && docker compose -p tg-cursor-bot ps"
+echo y | plink -ssh -l const -i "C:\Users\vonwa\.ssh\const.ppk" 185.244.49.94 "cd /home/const/tg-cursor-bot && docker compose -p tg-cursor-bot logs --tail=100 bot worker api"
 ```
 
 ## Важные ограничения
 
 - **Один инстанс бота** — Telegram long polling не поддерживает несколько процессов с одним токеном.
-- **Nginx / webhook не нужны** — используется polling.
+- Bot остаётся на polling. Mini App требует публичный HTTPS URL в `WEBAPP_BASE_URL`.
+- На проде: docker `webapp` слушает host port `8080`; host nginx + Let's Encrypt
+  проксируют `https://beachops.marketolog.tech` → `127.0.0.1:8080`
+  (конфиг `/etc/nginx/sites-available/beachops-marketolog.conf`, шаблон в
+  `scripts/prod-beachops-marketolog.nginx.conf`).
 - Не лезть в `/var/lib/docker` без sudo; использовать `docker compose`.
 
 ## Бэкап PostgreSQL
@@ -81,19 +106,19 @@ echo y | plink -ssh -l const -i "C:\Users\vonwa\.ssh\const.ppk" 185.244.49.94 "c
 
 ```bash
 cd /home/const/tg-cursor-bot
-docker compose exec -T postgres pg_dump -U bot tg_cursor_bot > /tmp/tg_cursor_bot_backup.sql
+docker compose -p tg-cursor-bot exec -T postgres pg_dump -U bot tg_cursor_bot > /tmp/beachops_backup.sql
 ```
 
 Скачать на Windows:
 
 ```powershell
-pscp -i "C:\Users\vonwa\.ssh\const.ppk" const@185.244.49.94:/tmp/tg_cursor_bot_backup.sql "C:\Users\vonwa\tg_cursor_bot_backup.sql"
+pscp -i "C:\Users\vonwa\.ssh\const.ppk" const@185.244.49.94:/tmp/beachops_backup.sql "C:\Users\vonwa\beachops_backup.sql"
 ```
 
 Локально:
 
 ```powershell
-docker compose exec -T postgres pg_dump -U bot tg_cursor_bot -f backup.sql
+docker compose exec -T postgres pg_dump -U bot tg_cursor_bot > backup.sql
 ```
 
 ## Восстановление
@@ -116,8 +141,10 @@ docker compose exec -T postgres psql -U bot tg_cursor_bot < backup.sql
 | Симптом | Проверка |
 |---------|----------|
 | «Доступ запрещён» | `WHITELIST_USER_IDS` содержит Telegram user id |
-| plan/do недоступны | пользователь в `ADMIN_USER_IDS` |
-| Бот не стартует | `docker compose logs bot` — Postgres, `vector` extension |
+| plan/do/task недоступны | пользователь в `OPERATOR_USER_IDS` или `OWNER_USER_IDS` |
+| Бот не стартует | Postgres/Redis, encryption key, repository policy, миграции |
+| Mini App не открывается | нужен `WEBAPP_BASE_URL` с HTTPS, HTTP/IP Telegram не принимает |
+| Mini App: шторм `/api/voice/ws` или dashboard 401 | открывать только из Telegram (нужен `initData`); вне TG реконнект не должен крутиться |
 | Conflict: terminated by other getUpdates | второй инстанс с тем же токеном |
 | Cursor error | `CURSOR_API_KEY`, GitHub подключён в dashboard |
 | Память не работает | `OPENAI_API_KEY`, миграции применены |

@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from tg_cursor_bot.services.job_queue import JobQueue, SubmitResult
+from beachops.services.job_queue import JobQueue, SubmitResult
 
 
 @pytest.mark.asyncio

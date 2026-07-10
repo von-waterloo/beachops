@@ -1,6 +1,6 @@
-# Telegram ↔ Cursor Cloud Agents Bot
+# BeachOps
 
-Natural-language Telegram interface (text, voice, photos) to Cursor Cloud Agents with ask/plan/do modes, streaming updates, multi-repo support, semantic memory (Postgres + pgvector), and access control.
+Private Telegram control plane for Cursor Cloud Agents: read-only inspection, mandatory plan/owner approval before writes, durable ARQ jobs, audit/redaction, panic lock, and a voice-first Telegram Mini App.
 
 **Полная документация:** [docs/README.md](./docs/README.md)
 
@@ -22,13 +22,15 @@ Natural-language Telegram interface (text, voice, photos) to Cursor Cloud Agents
 
 3. Create API key at [Integrations](https://cursor.com/dashboard/integrations).
 
-4. **PostgreSQL 16 + pgvector** — apply migrations before first bot start:
+4. Configure explicit `VIEWER_USER_IDS`, `OPERATOR_USER_IDS`, `OWNER_USER_IDS`, `DATA_ENCRYPTION_KEY` and `REPOSITORY_POLICY_JSON`.
+
+5. **PostgreSQL 16 + pgvector + Redis** — Docker starts both and runs the one-shot migration service:
 
 
 
 ```powershell
 
-docker compose up -d postgres
+docker compose up -d postgres redis
 
 .\.venv\Scripts\Activate.ps1
 
@@ -40,9 +42,9 @@ alembic upgrade head
 
 ```
 
-The bot checks Postgres connectivity and the `vector` extension on startup; it does **not** apply DDL when run locally outside Docker.
+BeachOps checks PostgreSQL, Redis and the `vector` extension on startup.
 
-In Docker, `entrypoint.sh` runs `alembic upgrade head` automatically before start.
+In Docker, the one-shot `migrate` service runs `alembic upgrade head` before bot/API/worker.
 
 New revisions: `alembic revision -m "description"` then `alembic upgrade head`.
 
@@ -62,11 +64,11 @@ pip install -e .
 
 $env:DATABASE_URL="postgresql://bot:botsecret@localhost:5433/tg_cursor_bot"
 
-python -m tg_cursor_bot
+python -m beachops
 
 ```
 
-Requires a running Postgres with schema applied (see above).
+Requires PostgreSQL, Redis, applied schema, encryption key and repository policy.
 
 
 
@@ -74,7 +76,7 @@ Requires a running Postgres with schema applied (see above).
 
 
 
-Postgres data and cursor-sdk workspace use **named volumes**.
+Postgres, Redis and cursor-sdk workspace use **named volumes**.
 
 
 
@@ -84,7 +86,7 @@ docker compose up -d --build
 
 ```
 
-(Migrations run automatically via entrypoint on container start.)
+Stack: `postgres`, `redis`, `migrate`, one polling `bot`, `worker`, `api`, `webapp`.
 
 ### Prod (185.244.49.94)
 
@@ -102,25 +104,13 @@ From Windows (PuTTY `pscp`/`plink`, `.env` in repo root):
 
 
 
-Then migrations on the server (if not run yet):
-
-
-
-```powershell
-
-echo y | plink -ssh -l const -i "C:\Users\vonwa\.ssh\const.ppk" 185.244.49.94 "cd /home/const/tg-cursor-bot && docker compose exec -T bot alembic upgrade head"
-
-```
-
-
-
 See [docs/OPERATIONS.md](./docs/OPERATIONS.md) and `.cursor/rules/servers-access.mdc`.
 
 
 
 Important:
 
-- `DATABASE_URL` is set by compose for the bot service.
+- `DATABASE_URL` and `REDIS_URL` are set by compose.
 
 - `WORKSPACE_PATH=/data/workspace` inside the container (volume `bot-data`).
 
@@ -146,7 +136,7 @@ Backup Postgres:
 
 ```powershell
 
-docker compose exec -T postgres pg_dump -U bot tg_cursor_bot -f backup.sql
+docker compose exec -T postgres pg_dump -U bot tg_cursor_bot > backup.sql
 
 ```
 
@@ -184,9 +174,9 @@ Send `/start` — full quick-start guide (repo, mode, text/voice, queue, cancel)
 
 1. `/start`
 
-2. Add a repo: `/repo add backend https://github.com/you/repo` (ветка `dev` по умолчанию)
+2. Select a repository from the server-side allowlist (`/repo`). `/repo add` accepts only exact allowlisted URL/branch pairs.
 
-3. Select mode: `/ask` (chat, all users); `/plan` and `/do` (admins only) — or buttons on `/start` and `/status`
+3. Use `/ask` for read-only work or `/task` to create a plan. A write-run starts only from a one-time owner approval.
 
 4. Send text, voice, or photo
 
@@ -200,11 +190,13 @@ Send `/start` — full quick-start guide (repo, mode, text/voice, queue, cancel)
 
 |---------|-------------|
 
-| `/start` `/help` | Full usage guide |
+| `/start` (alias `/help`) | Full usage guide |
 
-| `/ask` `/plan` `/do` | Set mode |
+| `/ask` `/plan` `/task` | Read-only answer or mandatory planning phase |
 
-| `/mode` | Show / pick mode (inline buttons) |
+| `/status` (alias `/mode`) | Mode, model, token, active task / queue — with inline buttons |
+
+| `/agents` | List/switch cloud agent sessions |
 
 | `/new` | New cloud agent session (resets to ask) |
 
@@ -214,9 +206,10 @@ Send `/start` — full quick-start guide (repo, mode, text/voice, queue, cancel)
 
 | `/memory` | Last 10 entries; `/memory query` — semantic search |
 
-| `/status` | Current task / queue status |
-
 | `/cancel` | Cancel active run and clear queue |
+| `/jobs` `/approvals` | Durable jobs and owner decisions |
+| `/panic` `/unpanic` | Emergency stop and one-time owner re-enable |
+| `/dashboard` | Open the Telegram Mini App |
 
 
 
@@ -226,10 +219,10 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) and `.env.example`.
 
 ## Notes
 
-- Ask mode prepends: «ПРОСТО ОТВЕЧАЙ код не трогай» and uses Cursor `plan` mode.
-- Ask/plan runs recall top-k memory chunks into the prompt; `/do` does not.
+- Ask is externally read-only: no current-branch writes or PR flags.
+- Ask/plan runs recall top-k memory chunks; write runs require an approved plan hash.
 - Every run is indexed into memory.
-- Plan/Do modes prepend git-safety rules (see [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)).
+- Write runs can create an isolated branch/PR only; merge, deploy, force-push and production access are blocked.
 - Voice: OpenAI `gpt-4o-mini-transcribe`. Photos: up to 20 by default (`PHOTO_MAX_COUNT`, Cursor API max 100).
 - Streaming updates edit a single Telegram message (max ~1 edit/sec).
 

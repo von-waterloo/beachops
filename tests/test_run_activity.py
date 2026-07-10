@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tg_cursor_bot.services.status_animation import format_run_activity_line, run_activity_frame
+from beachops.services.status_animation import format_run_activity_line, run_activity_frame
 
 
 def test_run_activity_frame_cycles() -> None:

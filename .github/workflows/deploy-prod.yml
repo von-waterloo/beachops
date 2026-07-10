@@ -1,0 +1,89 @@
+# Owner-approved prod deploy on self-hosted runner host-185.
+# Trigger: Actions → Deploy prod → Run workflow (sha), or bot via workflow_dispatch API.
+# Secrets: ENV_PROD_BEACHOPS (preferred) or ENV_PROD — full .env contents.
+
+name: Deploy prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Git commit SHA to deploy"
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-prod-host-185
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: prod @ host-185
+    runs-on: [self-hosted, host-185]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          clean: false
+
+      - name: Copy .env from secrets
+        env:
+          ENV_PROD_BEACHOPS: ${{ secrets.ENV_PROD_BEACHOPS }}
+          ENV_PROD: ${{ secrets.ENV_PROD }}
+        run: |
+          set -euo pipefail
+          if [ -n "${ENV_PROD_BEACHOPS:-}" ]; then
+            printf '%s' "$ENV_PROD_BEACHOPS" > .env
+            echo "Using secret ENV_PROD_BEACHOPS"
+          elif [ -n "${ENV_PROD:-}" ]; then
+            printf '%s' "$ENV_PROD" > .env
+            echo "Using secret ENV_PROD"
+          else
+            echo "Missing ENV_PROD_BEACHOPS or ENV_PROD repository secret" >&2
+            exit 1
+          fi
+
+      - name: Free disk if low
+        run: |
+          df -h /
+          AVAIL_GB=$(df -BG / | awk 'NR==2 {gsub(/G/,"",$4); print $4}')
+          if [ "${AVAIL_GB:-0}" -lt 15 ]; then
+            echo "Low disk (${AVAIL_GB}G free) — pruning unused images/cache"
+            docker image prune -af --filter "until=72h" || true
+            docker builder prune -af --filter "until=168h" || true
+          else
+            echo "Disk OK (${AVAIL_GB}G free)"
+          fi
+
+      - name: Build and start stack
+        run: |
+          docker compose -p tg-cursor-bot up --build -d --remove-orphans
+
+      - name: Wait for health
+        run: |
+          set -euo pipefail
+          echo "Waiting for http://127.0.0.1:8080/health ..."
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8080/health >/dev/null; then
+              echo "Healthy after ~${i}0s"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Health check failed within ~10 minutes" >&2
+          docker compose -p tg-cursor-bot ps || true
+          docker compose -p tg-cursor-bot logs --tail=120 bot worker api webapp migrate || true
+          exit 1
+
+      - name: Show status
+        if: success()
+        run: |
+          docker compose -p tg-cursor-bot ps
+          docker compose -p tg-cursor-bot logs --tail=40 bot worker api
+
+      - name: Dump status on failure
+        if: failure()
+        run: |
+          docker compose -p tg-cursor-bot ps || true
+          docker compose -p tg-cursor-bot logs --tail=150 || true

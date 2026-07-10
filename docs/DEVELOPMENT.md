@@ -34,7 +34,7 @@ $env:DATABASE_URL="postgresql://bot:botsecret@localhost:5433/tg_cursor_bot"
 alembic upgrade head
 ```
 
-> Бот при локальном `python -m tg_cursor_bot` **не** применяет миграции — только проверяет подключение и extension `vector`.
+> Бот при локальном `python -m beachops` **не** применяет миграции — только проверяет подключение и extension `vector`.
 
 Новая ревизия (создаёте и запускаете сами):
 
@@ -48,13 +48,13 @@ alembic upgrade head
 ```powershell
 .\.venv\Scripts\Activate.ps1
 $env:DATABASE_URL="postgresql://bot:botsecret@localhost:5433/tg_cursor_bot"
-python -m tg_cursor_bot
+python -m beachops
 ```
 
 ## Структура проекта
 
 ```
-src/tg_cursor_bot/
+src/beachops/
 ├── __main__.py           # точка входа
 ├── app.py                # Application factory, handlers registry
 ├── app_context.py        # DI-контекст
@@ -91,7 +91,7 @@ src/tg_cursor_bot/
 │   └── telegram_images.py
 └── db/
     ├── connection.py
-    └── repositories/     # users, repos, agent_slots, memory
+    └── repositories/     # users, repos, agent_slots, memory, passkeys
 
 alembic/                  # миграции
 tests/                    # pytest
@@ -105,9 +105,19 @@ scripts/
 ```powershell
 .\.venv\Scripts\Activate.ps1
 pytest
+
+cd webapp
+npm ci
+npm run lint
+npm test -- --run
+npm run build
+
+cd ..
+docker compose config --quiet
 ```
 
-Основные тесты: `test_stream_bridge`, `test_stream_display`, `test_telegram_images`, `test_import_smoke`.
+Security/control tests покрывают RBAC, redaction, AES-GCM, repository/risk policy,
+initData и one-time callbacks. Реальные Telegram/Cursor/OpenAI вызовы мокируются.
 
 ## Добавление handler
 
@@ -132,6 +142,9 @@ python scripts/migrate_sqlite_to_postgres.py --sqlite .\data\bot.db
 ```env
 LOG_LEVEL=DEBUG
 DATABASE_URL=postgresql://bot:botsecret@localhost:5433/tg_cursor_bot
+REDIS_URL=redis://localhost:6379/0
+DATA_ENCRYPTION_KEY=<64 hex chars>
+REPOSITORY_POLICY_JSON={"repositories":[{"url":"https://github.com/acme/app","branches":["dev"]}]}
 WORKSPACE_PATH=./data/workspace
 ```
 

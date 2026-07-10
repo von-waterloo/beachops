@@ -1,4 +1,4 @@
-﻿# Deploy tg-cursor-bot to prod (185.244.49.94) via pscp + plink.
+﻿# Deploy BeachOps to prod (185.244.49.94) via pscp + plink.
 # Requires: PuTTY plink/pscp, key C:\Users\vonwa\.ssh\const.ppk, local .env
 #
 # Restart strategy: stop + rm old bot container, then force-recreate.
@@ -11,19 +11,24 @@ $Ppk = "C:\Users\vonwa\.ssh\const.ppk"
 $HostAddr = "185.244.49.94"
 $RemoteUser = "const"
 $RemoteDir = "/home/const/tg-cursor-bot"
-$ArchiveName = "tg-cursor-bot-deploy.tgz"
+$ArchiveName = "beachops-deploy.tgz"
 
 if (-not (Test-Path $Ppk)) {
     throw "SSH key not found: $Ppk"
 }
-if (-not (Test-Path (Join-Path $RepoRoot ".env"))) {
-    throw ".env missing in repo root. Create from .env.example before deploy."
-}
-
 Push-Location $RepoRoot
 try {
     $archive = Join-Path $env:TEMP $ArchiveName
+    $bootstrapUpload = Join-Path $env:TEMP "beachops-prod-deploy.sh"
     if (Test-Path $archive) { Remove-Item $archive -Force }
+    if (Test-Path $bootstrapUpload) { Remove-Item $bootstrapUpload -Force }
+    $bootstrapSource = Join-Path $RepoRoot "scripts\prod-deploy.sh"
+    $bootstrapText = [IO.File]::ReadAllText($bootstrapSource).Replace("`r`n", "`n")
+    [IO.File]::WriteAllText(
+        $bootstrapUpload,
+        $bootstrapText,
+        [Text.UTF8Encoding]::new($false)
+    )
 
     Write-Host "Creating archive..."
     tar -czf $archive `
@@ -35,39 +40,38 @@ try {
         --exclude="data" `
         --exclude=".pytest_cache" `
         --exclude="htmlcov" `
+        --exclude="node_modules" `
+        --exclude="dist" `
         -C $RepoRoot `
-        pyproject.toml README.md alembic.ini alembic src sql docker-compose.yml docker-compose.bind.yml Dockerfile entrypoint.sh .env.example .env
+        pyproject.toml README.md alembic.ini alembic src sql webapp scripts docker-compose.yml docker-compose.bind.yml Dockerfile entrypoint.sh .env.example
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create deployment archive" }
 
     Write-Host "Uploading to ${RemoteUser}@${HostAddr}:${RemoteDir}..."
     echo y | plink -ssh -l $RemoteUser -i $Ppk $HostAddr "mkdir -p $RemoteDir"
+    if ($LASTEXITCODE -ne 0) { throw "Failed to prepare remote directory" }
     pscp -i $Ppk $archive "${RemoteUser}@${HostAddr}:${RemoteDir}/${ArchiveName}"
+    if ($LASTEXITCODE -ne 0) { throw "Failed to upload deployment archive" }
+    pscp -i $Ppk $bootstrapUpload "${RemoteUser}@${HostAddr}:${RemoteDir}/prod-deploy.sh"
+    if ($LASTEXITCODE -ne 0) { throw "Failed to upload deployment bootstrap" }
 
-    Write-Host "Extracting, stopping old bot, rebuilding, starting..."
-    # Single line — avoids CRLF breakage in plink heredocs on Windows.
-    $remoteCmd = @(
-        "set -e"
-        "cd $RemoteDir"
-        "tar -xzf $ArchiveName"
-        "rm -f $ArchiveName"
-        "docker compose stop -t 15 bot || true"
-        "docker compose rm -f bot || true"
-        "docker compose build bot"
-        "docker compose up -d --force-recreate --remove-orphans --no-deps bot"
-        "sleep 3"
-        "docker compose ps"
-        "docker compose logs --tail=12 bot"
-    ) -join " && "
-
+    Write-Host "Backing up database, extracting, rebuilding and starting BeachOps..."
+    $remoteCmd = "cd $RemoteDir && chmod +x prod-deploy.sh && ./prod-deploy.sh"
     echo y | plink -ssh -l $RemoteUser -i $Ppk $HostAddr $remoteCmd
+    if ($LASTEXITCODE -ne 0) { throw "Production deploy failed" }
 
     Write-Host ""
     Write-Host "Deploy finished."
-    Write-Host "  - Old bot container stopped and removed before start"
-    Write-Host "  - Migrations run automatically on bot container start (entrypoint)"
+    Write-Host "  - Pre-deploy PostgreSQL backup created on server"
+    Write-Host "  - Alembic migrations run through the one-shot migrate service"
+    Write-Host "  - Bot, worker, API, Redis and Mini App recreated"
     Write-Host ""
-    Write-Host "IMPORTANT: do not run 'python -m tg_cursor_bot' locally with the prod TG_BOT_TOKEN."
+    Write-Host "IMPORTANT: do not run 'python -m beachops' locally with the prod TG_BOT_TOKEN."
     Write-Host "           Two pollers with one token cause Conflict errors and random behaviour."
 }
 finally {
+    if ($archive -and (Test-Path $archive)) { Remove-Item $archive -Force }
+    if ($bootstrapUpload -and (Test-Path $bootstrapUpload)) {
+        Remove-Item $bootstrapUpload -Force
+    }
     Pop-Location
 }
