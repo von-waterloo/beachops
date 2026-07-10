@@ -175,7 +175,11 @@ export function VoiceConsole({
         )}
         <div className="connection-chip">
           <span className={state.connected ? 'online-dot' : 'offline-dot'} />
-          {state.connected ? 'На связи' : 'Переподключаюсь'}
+          {state.connected
+            ? 'На связи'
+            : state.phase === 'error'
+              ? 'Нет канала'
+              : 'Канал по запросу'}
         </div>
 
         {activeJob && (

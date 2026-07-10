@@ -4,10 +4,8 @@ import {
   Activity,
   Clock3,
   Cloud,
-  Fingerprint,
   GitBranch,
   LayoutDashboard,
-  LogOut,
   Monitor,
   Siren,
   Sparkles,
@@ -25,7 +23,6 @@ import { useJobStream } from './hooks/useJobStream'
 import type { AuthenticatedUser } from './lib/passkeys'
 import { roleLabel } from './lib/uiCopy'
 import {
-  getTelegramInitData,
   initializeTelegram,
   telegramTheme,
 } from './lib/telegram'
@@ -66,31 +63,17 @@ export default function App() {
     )
   }
 
-  return (
-    <ControlRoom
-      user={auth.user}
-      busy={auth.busy}
-      error={auth.error}
-      onRegister={() => void auth.register()}
-      onLogout={() => void auth.logout()}
-    />
-  )
+  return <ControlRoom user={auth.user} error={auth.error} />
 }
 
 interface ControlRoomProps {
   user: AuthenticatedUser
-  busy: boolean
   error: string | null
-  onRegister: () => void
-  onLogout: () => void
 }
 
 function ControlRoom({
   user,
-  busy,
   error,
-  onRegister,
-  onLogout,
 }: ControlRoomProps) {
   const [tab, setTab] = useState<TabId>('voice')
   const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>('all')
@@ -190,37 +173,6 @@ function ControlRoom({
           >
             {soundMuted ? <VolumeX size={17} /> : <Volume2 size={17} />}
           </button>
-          {getTelegramInitData() && user.role === 'owner' && (
-            <button
-              className="auth-icon-button"
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                feedback('tap')
-                onRegister()
-              }}
-              title={user.hasPasskey ? 'Добавить ключ доступа' : 'Включить Face ID / Passkey'}
-              aria-label={user.hasPasskey ? 'Добавить ключ доступа' : 'Включить Face ID / Passkey'}
-            >
-              <Fingerprint size={18} />
-              {!user.hasPasskey && <i />}
-            </button>
-          )}
-          {user.authMethod === 'passkey' && (
-            <button
-              className="auth-icon-button"
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                feedback('tap')
-                onLogout()
-              }}
-              title="Выйти"
-              aria-label="Выйти"
-            >
-              <LogOut size={17} />
-            </button>
-          )}
           <div className="role-badge">
             <span />
             {roleLabel(dashboard.data.role)}

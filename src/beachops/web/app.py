@@ -672,7 +672,9 @@ def create_app() -> FastAPI:
         limit = await context.rate_limiter.check(
             subject=str(principal.user_id),
             action="voice_session",
-            limit=5,
+            # Mini App remounts / tab switches open a new WS; 5/min was too
+            # tight and surfaced as «слишком много сессий» during normal use.
+            limit=30,
             window_sec=60,
         )
         if not limit.allowed:

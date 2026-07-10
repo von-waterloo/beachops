@@ -1,4 +1,4 @@
-import { Fingerprint, KeyRound, RefreshCw, ScanFace, ShieldCheck } from 'lucide-react'
+import { MessageCircle, RefreshCw, ShieldCheck } from 'lucide-react'
 import { feedback } from '../lib/feedback'
 
 interface AuthScreenProps {
@@ -15,9 +15,7 @@ export function AuthScreen({
   checking,
   busy,
   error,
-  supported,
   insideTelegram,
-  onLogin,
   onRetry,
 }: AuthScreenProps) {
   const waiting = checking || busy
@@ -28,26 +26,26 @@ export function AuthScreen({
           <span className="orbit orbit-one" />
           <span className="orbit orbit-two" />
           <span className="biometric-core">
-            {waiting ? <ScanFace size={44} /> : <Fingerprint size={48} />}
+            <MessageCircle size={44} />
           </span>
         </div>
 
         <div className="auth-copy">
           <span className="auth-kicker">
             <ShieldCheck size={15} />
-            Личный доступ
+            Вход через Telegram
           </span>
           <h1>
             {checking
               ? 'Проверяем доступ'
               : insideTelegram
-                ? 'Вход через Telegram'
-                : 'Вход в BeachOps'}
+                ? 'Подключаем Mini App'
+                : 'Откройте BeachOps в Telegram'}
           </h1>
           <p>
             {insideTelegram
-              ? 'В Mini App вход идёт по вашей Telegram-сессии. Отпечаток можно привязать после входа — для браузера вне Telegram.'
-              : 'Сначала привяжите ключ в Telegram Mini App (кнопка с отпечатком после /dashboard). Затем здесь — Face ID, Windows Hello или PIN. QR с телефона сработает только если ключ в облачном менеджере паролей, а не только в Windows Hello.'}
+              ? 'Вход идёт по вашей Telegram-сессии — ничего настраивать не нужно.'
+              : 'Самый простой и безопасный способ: бот → команда /dashboard. Passkey больше не нужен.'}
           </p>
         </div>
 
@@ -67,31 +65,17 @@ export function AuthScreen({
         )}
 
         {!checking && !insideTelegram && (
-          <button
-            className="passkey-button"
-            type="button"
-            disabled={busy || !supported}
-            onClick={() => {
-              feedback('tap')
-              onLogin()
-            }}
-          >
-            <KeyRound size={19} />
-            {busy ? 'Подтвердите на устройстве…' : 'Войти с ключом доступа'}
-          </button>
-        )}
-
-        {!checking && !insideTelegram && !supported && (
-          <p className="auth-error">
-            Этот браузер не поддерживает ключи доступа. Откройте BeachOps через /dashboard в Telegram.
+          <p className="auth-error" style={{ color: 'var(--muted)' }}>
+            В Telegram напишите боту команду <strong>/dashboard</strong> и откройте Mini App оттуда.
           </p>
         )}
+
         {error && <p className="auth-error">{error}</p>}
 
         <div className="auth-trust">
-          <span><i /> {insideTelegram ? 'Сессия Telegram' : 'WebAuthn'}</span>
-          <span><i /> Одноразовый challenge</span>
-          <span><i /> Только владелец</span>
+          <span><i /> Telegram initData</span>
+          <span><i /> Без паролей</span>
+          <span><i /> Только allowlist</span>
         </div>
       </section>
     </main>

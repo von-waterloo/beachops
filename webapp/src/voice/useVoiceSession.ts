@@ -66,11 +66,16 @@ export function useVoiceSession(options: {
   const reconnectRef = useRef(0)
   const reconnectTimerRef = useRef<number | undefined>(undefined)
   const intentionallyClosedRef = useRef(false)
+  const connectedRef = useRef(false)
   const playbackQueueRef = useRef<ArrayBuffer[]>([])
   const playingRef = useRef<AudioBufferSourceNode | null>(null)
   const playbackContextRef = useRef<AudioContext | null>(null)
   const onJobStartedRef = useRef(options.onJobStarted)
   onJobStartedRef.current = options.onJobStarted
+
+  useEffect(() => {
+    connectedRef.current = state.connected
+  }, [state.connected])
 
   const sendJson = useCallback((payload: Record<string, unknown>) => {
     const socket = wsRef.current
@@ -169,7 +174,14 @@ export function useVoiceSession(options: {
   }, [playNext])
 
   const connect = useCallback(() => {
-    if (!navigator.onLine || wsRef.current?.readyState === WebSocket.OPEN) return
+    if (!navigator.onLine) return
+    const existing = wsRef.current
+    if (
+      existing
+      && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)
+    ) {
+      return
+    }
     const initData = getTelegramInitData()
 
     intentionallyClosedRef.current = false
@@ -237,12 +249,15 @@ export function useVoiceSession(options: {
     }
   }, [handleServerEvent, playNext])
 
+  // Lazy connect: open WS only when the user starts talking / sends text.
+  // Eager connect on mount burned the rate limit on every tab remount.
   useEffect(() => {
-    connect()
-    const online = () => connect()
     const offline = () => {
       dispatch({ type: 'CONNECTED', connected: false })
       dispatch({ type: 'FAIL', message: 'Нет сети' })
+    }
+    const online = () => {
+      // Do not auto-reconnect on online — wait for the next user action.
     }
     window.addEventListener('online', online)
     window.addEventListener('offline', offline)
@@ -255,7 +270,7 @@ export function useVoiceSession(options: {
       window.removeEventListener('online', online)
       window.removeEventListener('offline', offline)
     }
-  }, [connect])
+  }, [])
 
   const stopCapture = useCallback((notifyServer = true) => {
     window.clearTimeout(maxDurationRef.current)
@@ -279,8 +294,20 @@ export function useVoiceSession(options: {
     }
     if (wsRef.current?.readyState !== WebSocket.OPEN || !state.connected) {
       connect()
-      dispatch({ type: 'FAIL', message: 'Голос переподключается…' })
-      return
+      // Wait briefly for session.ready instead of forcing a second tap.
+      for (let i = 0; i < 25; i += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 120))
+        if (connectedRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+          break
+        }
+      }
+      if (!connectedRef.current || wsRef.current?.readyState !== WebSocket.OPEN) {
+        dispatch({
+          type: 'FAIL',
+          message: 'Не удалось открыть голосовой канал. Попробуй ещё раз.',
+        })
+        return
+      }
     }
 
     try {
@@ -377,7 +404,10 @@ export function useVoiceSession(options: {
     }
     if (wsRef.current?.readyState !== WebSocket.OPEN || !state.connected) {
       connect()
-      dispatch({ type: 'FAIL', message: 'Голос переподключается…' })
+      dispatch({
+        type: 'FAIL',
+        message: 'Подключаю голос… отправь ещё раз через секунду',
+      })
       return false
     }
     sendJson({ type: 'plan.request', transcript: trimmed, mode })
