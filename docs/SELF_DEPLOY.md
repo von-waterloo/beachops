@@ -42,8 +42,19 @@
    `GITHUB_TOKEN` (fine-grained / PAT с `actions:write` на этот repo) и SHA.
 4. GitHub ставит job на runner host-185; бот только ждёт/показывает статус Actions.
 
-Включение будущего пути: `GITHUB_DEPLOY_DISPATCH=1` в `.env` (см. `.env.example`).
-Пока флаг выключен — helper есть, handler wiring опционален.
+Включение: `GITHUB_DEPLOY_DISPATCH=1` + `GITHUB_TOKEN` в прод-`.env`
+(уже на `von-waterloo/beachops`).
+
+## Secret ENV_PROD_BEACHOPS (Windows)
+
+Не передавайте тело секрета через PowerShell-строку — кавычки в
+`REPOSITORY_POLICY_JSON` могут пропасть. Заливайте файл через `cmd`:
+
+```bat
+cmd /c "gh secret set ENV_PROD_BEACHOPS --repo von-waterloo/beachops < .env"
+```
+
+(файл `.env` — актуальная копия с прод-сервера).
 
 ## Чего нет в контейнере бота
 

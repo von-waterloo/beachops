@@ -75,6 +75,26 @@ jobs:
             sed -i 's/\r$//' scripts/bootstrap-prod-env.sh || true
             sh scripts/bootstrap-prod-env.sh .env
           fi
+          # Fail fast if JSON env was corrupted (e.g. quotes stripped when setting the secret).
+          python3 - <<'PY'
+import json, pathlib, sys
+raw = pathlib.Path(".env").read_text(encoding="utf-8", errors="replace")
+val = ""
+for line in raw.splitlines():
+    if line.startswith("REPOSITORY_POLICY_JSON="):
+        val = line.split("=", 1)[1]
+        break
+if not val:
+    print("REPOSITORY_POLICY_JSON missing", file=sys.stderr)
+    sys.exit(1)
+try:
+    json.loads(val)
+except Exception as exc:
+    print(f"REPOSITORY_POLICY_JSON invalid JSON: {exc}", file=sys.stderr)
+    print("Re-upload ENV_PROD_BEACHOPS with: cmd /c \"gh secret set ENV_PROD_BEACHOPS --repo von-waterloo/beachops < .env\"", file=sys.stderr)
+    sys.exit(1)
+print("REPOSITORY_POLICY_JSON ok")
+PY
 
       - name: Free disk if low
         run: |
