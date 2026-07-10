@@ -46,8 +46,34 @@ class BeachOpsWorkerClient:
             headers={"Authorization": f"Bearer {token}"},
         )
 
+    def set_token(self, token: str) -> None:
+        """Switch from bootstrap token to per-node token after register."""
+        self._token = token
+        self._http.headers["Authorization"] = f"Bearer {token}"
+
+    @property
+    def token(self) -> str:
+        return self._token
+
     async def aclose(self) -> None:
         await self._http.aclose()
+
+    async def register(self, capabilities: Mapping[str, Any]) -> dict[str, Any]:
+        response = await self._http.post(
+            "/api/workers/register",
+            json={
+                "hostname": self._hostname,
+                "platform": "windows",
+                "capabilities": dict(capabilities),
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        node_token = str(payload.get("token") or "").strip()
+        if not node_token:
+            raise RuntimeError("register response missing node token")
+        self.set_token(node_token)
+        return payload
 
     async def heartbeat(self, capabilities: Mapping[str, Any]) -> dict[str, Any]:
         response = await self._http.post(
@@ -245,9 +271,21 @@ async def run_daemon() -> None:
     if not api_key:
         raise SystemExit("CURSOR_API_KEY is required on the Windows worker")
 
+    token_path = Path(
+        _env("BEACHOPS_WORKER_TOKEN_FILE")
+        or str(workspace / ".beachops-worker-node-token")
+    )
     client = BeachOpsWorkerClient(api_url=api_url, token=token, hostname=hostname)
     cursor = CursorAgentService(api_key=api_key, model=model, workspace=workspace)
     discovery_cwd = _env("BEACHOPS_LOCAL_CWD") or str(workspace)
+    enrolled = False
+
+    saved = ""
+    if token_path.is_file():
+        saved = token_path.read_text(encoding="utf-8").strip()
+        if saved:
+            client.set_token(saved)
+            enrolled = True
 
     logger.info("Windows worker starting hostname=%s api=%s", hostname, api_url)
     try:
@@ -265,7 +303,26 @@ async def run_daemon() -> None:
                 )
             )
             try:
+                if not enrolled:
+                    registered = await client.register(capabilities)
+                    token_path.parent.mkdir(parents=True, exist_ok=True)
+                    token_path.write_text(client.token, encoding="utf-8")
+                    enrolled = True
+                    logger.info(
+                        "Registered worker node_id=%s",
+                        registered.get("id"),
+                    )
                 await client.heartbeat(capabilities)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 401 and enrolled:
+                    logger.warning("Node token rejected; re-registering")
+                    enrolled = False
+                    client.set_token(token)
+                    await asyncio.sleep(1.0)
+                    continue
+                logger.exception("Heartbeat failed")
+                await asyncio.sleep(HEARTBEAT_INTERVAL_SEC)
+                continue
             except Exception:
                 logger.exception("Heartbeat failed")
                 await asyncio.sleep(HEARTBEAT_INTERVAL_SEC)
