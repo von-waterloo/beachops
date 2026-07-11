@@ -1,14 +1,16 @@
-"""Passkey enrollment, login, and opaque browser sessions."""
+"""Passkey enrollment, Telegram login, and opaque browser sessions."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import secrets
 import time
 from typing import Annotated
 from urllib.parse import urlsplit
 
+import httpx
 from fastapi import APIRouter, Header, HTTPException, Request, Response, WebSocket
 from webauthn import (
     generate_authentication_options,
@@ -33,14 +35,92 @@ from beachops.web.telegram_auth import (
     TelegramPrincipal,
     extract_tma_authorization,
     validate_init_data,
+    validate_login_widget,
 )
+
+logger = logging.getLogger(__name__)
 
 SESSION_COOKIE = "__Host-beachops_session"
 _CHALLENGE_PREFIX = "beachops:webauthn:challenge:"
 _SESSION_PREFIX = "beachops:web-session:"
+_BOT_USERNAME_KEY = "beachops:bot-username"
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+@router.get("/telegram/config")
+async def telegram_login_config(request: Request) -> dict:
+    """Public config for Telegram Login Widget (bot username + domain readiness)."""
+    context = _context(request)
+    username = await _resolve_bot_username(context)
+    try:
+        _, origin = _rp_config(context)
+    except HTTPException:
+        origin = ""
+    return {
+        "botUsername": username,
+        "loginEnabled": bool(username and origin),
+        "origin": origin or None,
+    }
+
+
+@router.post("/telegram/login")
+async def telegram_login(
+    body: dict,
+    request: Request,
+    response: Response,
+) -> dict:
+    """Exchange a signed Telegram Login Widget payload for a browser session."""
+    context = _context(request)
+    await _check_public_rate_limit(context, request, "telegram_login", limit=20)
+    try:
+        principal = validate_login_widget(
+            body,
+            context.settings.tg_bot_token,
+            max_age_sec=context.settings.web_auth_max_age_sec,
+        )
+    except TelegramInitDataError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    if context.settings.role_for(principal.user_id) is None:
+        raise HTTPException(status_code=403, detail="user is not allowlisted")
+    await _mint_browser_session(
+        context,
+        response,
+        user_id=principal.user_id,
+        auth_method="telegram_login",
+        username=principal.username,
+    )
+    await context.audit.append(
+        actor_id=principal.user_id,
+        event_type="auth.telegram_login",
+        action="login",
+        outcome="success",
+        details={"method": "login_widget"},
+    )
+    return {"authenticated": True, "authMethod": "telegram_login"}
+
+
+@router.post("/session")
+async def mint_session_from_tma(
+    request: Request,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict:
+    """Mint the same browser session cookie from a valid Mini App initData."""
+    context = _context(request)
+    try:
+        principal = _validate_tma(context, authorization)
+    except TelegramInitDataError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    await _mint_browser_session(
+        context,
+        response,
+        user_id=principal.user_id,
+        auth_method="telegram",
+        username=principal.username,
+    )
+    return {"authenticated": True, "authMethod": "telegram"}
 
 
 @router.post("/passkeys/register/options")
@@ -208,20 +288,11 @@ async def authentication_verify(
         device_type=verified.credential_device_type.value,
         backed_up=verified.credential_backed_up,
     )
-    token = secrets.token_urlsafe(32)
-    await context.redis.set(
-        _session_key(token),
-        str(user_id).encode("ascii"),
-        ex=context.settings.web_session_ttl_sec,
-    )
-    response.set_cookie(
-        SESSION_COOKIE,
-        token,
-        max_age=context.settings.web_session_ttl_sec,
-        secure=True,
-        httponly=True,
-        samesite="strict",
-        path="/",
+    await _mint_browser_session(
+        context,
+        response,
+        user_id=user_id,
+        auth_method="passkey",
     )
     await context.audit.append(
         actor_id=user_id,
@@ -230,7 +301,7 @@ async def authentication_verify(
         outcome="success",
         details={"deviceType": verified.credential_device_type.value},
     )
-    return {"authenticated": True}
+    return {"authenticated": True, "authMethod": "passkey"}
 
 
 @router.post("/logout", status_code=204)
@@ -311,28 +382,97 @@ def _validate_tma(
     return principal
 
 
+async def _mint_browser_session(
+    context: AppContext,
+    response: Response,
+    *,
+    user_id: int,
+    auth_method: str,
+    username: str | None = None,
+) -> None:
+    token = secrets.token_urlsafe(32)
+    payload = {
+        "userId": user_id,
+        "authMethod": auth_method,
+        "username": username,
+    }
+    await context.redis.set(
+        _session_key(token),
+        json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+        ex=context.settings.web_session_ttl_sec,
+    )
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=context.settings.web_session_ttl_sec,
+        secure=True,
+        httponly=True,
+        samesite="strict",
+        path="/",
+    )
+
+
 async def _session_principal(
     context: AppContext,
     token: str | None,
 ) -> TelegramPrincipal:
     if not token:
         raise TelegramInitDataError("missing browser session")
-    raw_user_id = await context.redis.get(_session_key(token))
-    if not raw_user_id:
+    raw = await context.redis.get(_session_key(token))
+    if not raw:
         raise TelegramInitDataError("expired browser session")
+    user_id: int
+    auth_method = "session"
+    username: str | None = None
     try:
-        user_id = int(raw_user_id)
-    except (TypeError, ValueError) as exc:
-        raise TelegramInitDataError("invalid browser session") from exc
-    if context.settings.role_for(user_id) != Role.OWNER:
-        raise TelegramInitDataError("browser session is not owner")
+        payload = json.loads(raw)
+        user_id = int(payload["userId"])
+        auth_method = str(payload.get("authMethod") or "session")
+        raw_username = payload.get("username")
+        username = str(raw_username) if raw_username else None
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        # Legacy sessions stored a bare user id.
+        try:
+            user_id = int(raw)
+            auth_method = "passkey"
+        except (TypeError, ValueError) as exc:
+            raise TelegramInitDataError("invalid browser session") from exc
+    if context.settings.role_for(user_id) is None:
+        raise TelegramInitDataError("user is not allowlisted")
     return TelegramPrincipal(
         user_id=user_id,
-        username=None,
+        username=username,
         auth_date=int(time.time()),
         query_id=None,
-        auth_method="passkey",
+        auth_method=auth_method,
     )
+
+
+async def _resolve_bot_username(context: AppContext) -> str | None:
+    configured = context.settings.tg_bot_username.strip().lstrip("@")
+    if configured:
+        return configured
+    cached = await context.redis.get(_BOT_USERNAME_KEY)
+    if cached:
+        return cached.decode("utf-8")
+    token = context.settings.tg_bot_token.strip()
+    if not token:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            response = await client.get(
+                f"https://api.telegram.org/bot{token}/getMe"
+            )
+            response.raise_for_status()
+            username = str(response.json().get("result", {}).get("username") or "")
+    except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+        logger.warning("Failed to resolve bot username via getMe: %s", exc)
+        return None
+    username = username.strip().lstrip("@")
+    if not username:
+        return None
+    await context.redis.set(_BOT_USERNAME_KEY, username.encode("utf-8"), ex=86_400)
+    return username
 
 
 async def _store_challenge(

@@ -161,7 +161,8 @@ docker compose exec -T postgres psql -U bot tg_cursor_bot < backup.sql
 | plan/do/task недоступны | пользователь в `OPERATOR_USER_IDS` или `OWNER_USER_IDS` |
 | Бот не стартует | Postgres/Redis, encryption key, repository policy, миграции |
 | Mini App не открывается | нужен `WEBAPP_BASE_URL` с HTTPS, HTTP/IP Telegram не принимает |
-| Mini App: шторм `/api/voice/ws` или dashboard 401 | открывать только из Telegram (нужен `initData`); вне TG реконнект не должен крутиться |
+| Mini App: шторм `/api/voice/ws` или dashboard 401 | из TG — `initData`; из браузера — Login Widget → session cookie; вне сессии реконнект не должен крутиться |
+| Login Widget не появляется / 401 | BotFather `/setdomain` = host `WEBAPP_BASE_URL`; аккаунт в allowlist |
 | Voice WS рвётся без причины в UI | `docker compose logs api webapp` — искать JSON с `"action":"voice_session"` / `"error_code"` / `exception`; auth fail → 4401, rate limit → 4429 |
 | Нет JSON-логов у api/worker | `configure_logging` на старте; `LOG_LEVEL`; ротация `json-file` 50m×5 в compose |
 | Conflict: terminated by other getUpdates | второй инстанс с тем же токеном |

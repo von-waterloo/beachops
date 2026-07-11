@@ -91,10 +91,11 @@ Docker compose переопределяет `DATABASE_URL` на `@postgres:5432`
 
 | Переменная | По умолчанию | Описание |
 |------------|--------------|----------|
-| `WEBAPP_BASE_URL` | — | публичный HTTPS URL Telegram Mini App (прод: `https://beachops.marketolog.tech`; TLS на host nginx → `:8080`) |
-| `WEB_AUTH_MAX_AGE_SEC` | `3600` | срок валидности Telegram initData |
-| `WEB_SESSION_TTL_SEC` | `43200` | TTL защищённой browser-сессии после входа по Passkey |
-| `WEB_AUTH_CHALLENGE_TTL_SEC` | `300` | TTL одноразового WebAuthn challenge |
+| `WEBAPP_BASE_URL` | — | публичный HTTPS URL Telegram Mini App (прод: `https://beachops.marketolog.tech`; TLS на host nginx → `:8080`); домен также нужен в BotFather `/setdomain` для Login Widget |
+| `TG_BOT_USERNAME` | — (auto via getMe) | username бота без `@` для Login Widget; если пусто — берётся из Telegram `getMe` и кэшируется |
+| `WEB_AUTH_MAX_AGE_SEC` | `3600` | срок валидности Telegram initData и Login Widget payload |
+| `WEB_SESSION_TTL_SEC` | `43200` | TTL opaque browser-сессии после Telegram Login / Mini App |
+| `WEB_AUTH_CHALLENGE_TTL_SEC` | `300` | TTL одноразового WebAuthn challenge (legacy Passkey) |
 | `CALLBACK_TOKEN_TTL_SEC` | `600` | TTL одноразовых owner-кнопок |
 | `CALLBACK_RATE_LIMIT` | `30` | callback actions за окно |
 | `CALLBACK_RATE_WINDOW_SEC` | `60` | окно rate limit |

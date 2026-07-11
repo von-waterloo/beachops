@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import { requestTelegramFullscreen } from '../lib/telegram'
 import { feedback } from '../lib/feedback'
-import { setCursorModel, type CursorModelOption } from '../lib/passkeys'
+import { setCursorModel, type CursorModelOption } from '../lib/auth'
 import { useVoiceSession } from '../voice/useVoiceSession'
 import type { VoicePhase } from '../voice/state'
 import type { Event, Job } from '../types/api'

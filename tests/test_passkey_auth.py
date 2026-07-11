@@ -23,6 +23,9 @@ class FakeRedis:
     async def getdel(self, key: str) -> bytes | None:
         return self.values.pop(key, None)
 
+    async def set(self, key: str, value: bytes, ex: int | None = None) -> None:
+        self.values[key] = value
+
 
 def test_rp_config_uses_public_https_origin() -> None:
     context = SimpleNamespace(
@@ -54,7 +57,28 @@ def test_passkey_enrollment_requires_telegram_owner_session() -> None:
 
 
 @pytest.mark.asyncio
-async def test_session_principal_is_owner_and_marks_auth_method() -> None:
+async def test_session_principal_accepts_allowlisted_json_session() -> None:
+    token = "opaque-token"
+    context = SimpleNamespace(
+        redis=FakeRedis(
+            {
+                _session_key(token): (
+                    b'{"userId":42,"authMethod":"telegram_login","username":"owner"}'
+                )
+            }
+        ),
+        settings=SimpleNamespace(role_for=lambda user_id: Role.OPERATOR),
+    )
+
+    principal = await _session_principal(context, token)
+
+    assert principal.user_id == 42
+    assert principal.auth_method == "telegram_login"
+    assert principal.username == "owner"
+
+
+@pytest.mark.asyncio
+async def test_session_principal_supports_legacy_owner_bytes() -> None:
     token = "opaque-token"
     context = SimpleNamespace(
         redis=FakeRedis({_session_key(token): b"42"}),

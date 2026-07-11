@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   currentUser,
-  loginWithPasskey,
+  loginWithTelegramWidget,
   logoutBrowserSession,
-  passkeysSupported,
-  registerPasskey,
+  mintSessionFromTelegram,
   type AuthenticatedUser,
-} from '../lib/passkeys'
+  type TelegramLoginUser,
+} from '../lib/auth'
 import {
   getTelegramInitData,
   isTelegramWebApp,
@@ -28,14 +28,24 @@ export function useAuth() {
         await waitForTelegramInitData()
       }
       setInsideTelegram(isTelegramWebApp())
-      setUser(await currentUser())
+      const next = await currentUser()
+      setUser(next)
       setError(null)
+      // Best-effort: Mini App also gets the shared session cookie for WS/API.
+      if (getTelegramInitData()) {
+        try {
+          await mintSessionFromTelegram()
+        } catch {
+          // Cookie mint is optional when initData Authorization already works.
+        }
+      }
     } catch {
       setUser(null)
-      // Inside Telegram, a failed /api/me after a real initData means the
-      // account is not whitelisted. Outside Telegram it just means "not signed
-      // in yet" — the passkey login button handles that, no error needed.
-      setError(isTelegramWebApp() ? 'Нет доступа для этого Telegram-аккаунта.' : null)
+      setError(
+        isTelegramWebApp()
+          ? 'Нет доступа для этого Telegram-аккаунта.'
+          : null,
+      )
     } finally {
       setChecking(false)
     }
@@ -45,38 +55,15 @@ export function useAuth() {
     void refresh()
   }, [refresh])
 
-  const login = useCallback(async () => {
+  const loginWithTelegram = useCallback(async (payload: TelegramLoginUser) => {
     setBusy(true)
     setError(null)
     try {
-      await loginWithPasskey()
+      await loginWithTelegramWidget(payload)
       await refresh()
       feedback('success')
-    } catch (cause) {
-      if (cause instanceof DOMException && cause.name === 'NotAllowedError') {
-        setError('Вход отменён или ключ на этом устройстве не найден. Привяжите passkey в Telegram Mini App.')
-      } else {
-        setError('Ключ не найден. Откройте /dashboard в Telegram и нажмите кнопку с отпечатком, затем повторите вход.')
-      }
-      feedback('error')
-    } finally {
-      setBusy(false)
-    }
-  }, [refresh])
-
-  const register = useCallback(async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      await registerPasskey()
-      await refresh()
-      feedback('success')
-    } catch (cause) {
-      if (cause instanceof DOMException && cause.name === 'NotAllowedError') {
-        setError('Создание ключа отменено')
-      } else {
-        setError('Не удалось создать ключ доступа')
-      }
+    } catch {
+      setError('Вход через Telegram не удался. Проверьте, что аккаунт в allowlist.')
       feedback('error')
     } finally {
       setBusy(false)
@@ -99,10 +86,8 @@ export function useAuth() {
     checking,
     busy,
     error,
-    supported: passkeysSupported(),
     insideTelegram,
-    login,
-    register,
+    loginWithTelegram,
     logout,
     refresh,
   }

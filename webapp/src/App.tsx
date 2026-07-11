@@ -20,7 +20,7 @@ import { AgentControlPanel, JobChatPanel } from './components/AgentControlPanel'
 import { useAuth } from './hooks/useAuth'
 import { useDashboard } from './hooks/useDashboard'
 import { useJobStream } from './hooks/useJobStream'
-import type { AuthenticatedUser } from './lib/passkeys'
+import type { AuthenticatedUser } from './lib/auth'
 import { roleLabel } from './lib/uiCopy'
 import {
   initializeTelegram,
@@ -55,9 +55,8 @@ export default function App() {
         checking={auth.checking}
         busy={auth.busy}
         error={auth.error}
-        supported={auth.supported}
         insideTelegram={auth.insideTelegram}
-        onLogin={() => void auth.login()}
+        onTelegramLogin={(user) => void auth.loginWithTelegram(user)}
         onRetry={() => void auth.refresh()}
       />
     )

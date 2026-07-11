@@ -10,8 +10,10 @@
 ## Trust boundaries
 
 - Telegram update and Mini App `initData` are untrusted until server validation;
-- browser Passkey assertions are untrusted until WebAuthn challenge, RP ID, origin,
-  user verification, signature and sign counter checks pass;
+- Telegram Login Widget payloads are untrusted until HMAC (SHA256 bot token) and
+  `auth_date` checks pass;
+- legacy browser Passkey assertions remain untrusted until WebAuthn challenge, RP ID,
+  origin, user verification, signature and sign counter checks pass;
 - Cursor/OpenAI/GitHub outputs are untrusted and pass redaction/policy;
 - browser receives no provider keys;
 - browser sessions use opaque Redis-backed tokens in `Secure`, `HttpOnly`,
@@ -42,8 +44,9 @@
   never provides a raw-shell endpoint or production credentials.
 - Full Mini App operation requires HTTPS. Until `WEBAPP_BASE_URL` is configured,
   `/dashboard` remains disabled.
-- Passkey enrollment is owner-only and requires a fresh signed Telegram Mini App
-  session; there is no public password/bootstrap endpoint.
+- Browser login uses Telegram Login Widget (or Mini App session mint); there is no
+  public password endpoint. Domain must be registered in BotFather `/setdomain`.
+- Legacy Passkey enrollment remains owner-only behind TMA session.
 - Telegram polling bot is intentionally single-instance; worker/API may scale,
   but distributed tests are required before increasing worker count.
 - Existing legacy media queue is in-process; write mode is never allowed there.

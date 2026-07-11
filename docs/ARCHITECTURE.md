@@ -55,17 +55,18 @@
 - `job_queue` — legacy media path; text/voice jobs идут через ARQ
 - `active_runs`, `last_prompts` — in-memory состояние
 
-## Аутентификация Mini App
+## Аутентификация Mini App / сайта
 
-- Внутри Telegram сервер проверяет HMAC-подпись и возраст `initData`, затем RBAC allowlist.
-- В обычном браузере owner входит через WebAuthn Passkey: Face ID, Android-биометрия,
-  Windows Hello или системный PIN.
-- Первый Passkey регистрируется только из уже подтверждённой owner-сессии Telegram.
-- Публичный ключ и счётчик хранятся в `webauthn_credentials`; приватный ключ устройство
-  не покидает. Challenge одноразовый и живёт в Redis.
-- После успешной проверки сервер создаёт случайную Redis-сессию и выдаёт cookie
-  `Secure`, `HttpOnly`, `SameSite=Strict`. Для изменяющих запросов и WebSocket
-  дополнительно проверяется `Origin`.
+- Единый IdP: Telegram user id + RBAC allowlist (`OWNER` / `OPERATOR` / `VIEWER`).
+- Mini App: HMAC-подпись и возраст `initData` (`Authorization: tma …`); после успеха
+  клиент может запросить `POST /api/auth/session` → та же browser cookie.
+- Браузер с любого устройства: Telegram Login Widget → `POST /api/auth/telegram/login`
+  (подпись Login Widget: `HMAC-SHA256(data, SHA256(bot_token))`) → Redis session.
+- Домен сайта должен быть задан в BotFather (`/setdomain` = host из `WEBAPP_BASE_URL`).
+- Session cookie: opaque Redis token, `Secure` / `HttpOnly` / `SameSite=Strict`
+  (`__Host-beachops_session`). Unsafe HTTP methods и WebSocket дополнительно
+  проверяют `Origin`.
+- Passkey/WebAuthn endpoints оставлены как legacy; в UI не используются.
 
 ## Поток обработки промпта
 

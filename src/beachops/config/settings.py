@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     )
 
     tg_bot_token: str = Field(alias="TG_BOT_TOKEN")
+    tg_bot_username: str = Field(default="", alias="TG_BOT_USERNAME")
     cursor_api_key: str = Field(alias="CURSOR_API_KEY")
     cursor_api_key_mt2: str = Field(default="", alias="CURSOR_API_KEY_MT2")
     openai_api_key: str = Field(alias="OPENAI_API_KEY")

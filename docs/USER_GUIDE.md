@@ -130,10 +130,14 @@ approve, воркеры, активный слот/runtime/репо — аген
 ### Вход в Mini App
 
 - Основной способ: `/dashboard` внутри Telegram — вход по подписанному `initData`,
-  без паролей и без Passkey.
-- Прямой браузерный вход по Passkey **снят с UI** (сложно настраивать). Для браузера
-  используйте бота → `/dashboard`.
+  без паролей.
+- С любого браузера/устройства: откройте HTTPS-сайт пульта → кнопка
+  **«Log in with Telegram»** (Login Widget) → подтвердите в Telegram → та же
+  session cookie, что и у Mini App.
+- В BotFather для домена сайта нужен `/setdomain` (тот же host, что в
+  `WEBAPP_BASE_URL`).
 - Доступ только для allowlist (`OWNER` / `OPERATOR` / `VIEWER`).
+- Passkey с UI снят; backend endpoints оставлены только как legacy.
 
 ### Фото
 
