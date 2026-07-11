@@ -39,6 +39,18 @@ describe('voiceReducer', () => {
     expect(planning.caption).toContain('Спрашиваю')
   })
 
+  it('confirm in do mode uses do caption', () => {
+    const confirming = {
+      ...initialVoiceState,
+      phase: 'confirming' as const,
+      transcript: 'Почини баг',
+      voiceRequireConfirm: true,
+    }
+    const planning = voiceReducer(confirming, { type: 'CONFIRM', mode: 'do' })
+    expect(planning.phase).toBe('planning')
+    expect(planning.caption).toContain('действие')
+  })
+
   it('auto-dispatches to planning when confirm is disabled', () => {
     const listening = voiceReducer(initialVoiceState, { type: 'START_LISTENING', at: 1 })
     const done = voiceReducer(listening, { type: 'FINAL', text: 'Fix the deploy' })

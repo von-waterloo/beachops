@@ -61,15 +61,47 @@ export function runtimeLabel(runtime?: string | null): string {
 
 const EVENT_TYPE_RU: Record<string, string> = {
   'run.progress': 'Прогресс',
-  'run.finished': 'Готово',
-  'run.failed': 'Сбой',
-  'worker.started': 'Старт',
-  'worker.claimed': 'Воркер взял',
+  'run.finished': 'Завершён',
+  'run.failed': 'Сбой прогона',
+  'worker.started': 'Воркер запустил',
+  'worker.claimed': 'Воркер взял задачу',
   'worker.finished': 'Воркер завершил',
+  'worker.failed': 'Воркер упал',
   'worker.observation_done': 'Наблюдение',
-  'approval.requested': 'Ждёт approve',
+  'approval.requested': 'Запрошено решение',
+  'approval.approved': 'Одобрено',
+  'approval.rejected': 'Отклонено',
+  'user.cancel': 'Отменено вами',
+  'user.cancel_queued': 'Снято из очереди',
 }
 
 export function eventTypeLabel(eventType: string): string {
   return EVENT_TYPE_RU[eventType] ?? eventType
+}
+
+/** Tone for timeline dots / pills: success | danger | warn | active | muted */
+export function statusTone(status?: string | null): string {
+  const key = (status || '').toLowerCase()
+  if (['completed', 'succeeded', 'accepted'].includes(key)) return 'success'
+  if (['failed', 'rejected', 'cancelled'].includes(key)) return 'danger'
+  if (
+    ['awaiting_approval', 'review_required', 'blocked', 'revision_requested', 'paused'].includes(
+      key,
+    )
+  ) {
+    return 'warn'
+  }
+  if (['running', 'planning', 'queued', 'approved'].includes(key)) return 'active'
+  return 'muted'
+}
+
+export function eventHeadline(event: {
+  summary?: string
+  toStatus?: string | null
+  kind?: string
+}): string {
+  const status = event.toStatus || event.summary
+  if (status && STATUS_RU[status]) return statusLabel(status)
+  if (event.kind) return eventTypeLabel(event.kind)
+  return event.summary || 'Событие'
 }

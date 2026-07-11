@@ -1,6 +1,24 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiFetch } from '../lib/api'
 import { isActiveJobStatus, type AgentSlot, type DashboardSnapshot } from '../types/api'
+
+export function mergeAgentSlot(
+  slots: AgentSlot[],
+  slotId: string,
+  updated: AgentSlot,
+  makeActive?: boolean,
+): AgentSlot[] {
+  return slots.map((slot) => {
+    if (slot.id !== slotId) {
+      return makeActive ? { ...slot, active: false } : slot
+    }
+    return {
+      ...slot,
+      ...updated,
+      active: makeActive ? true : updated.active ?? slot.active,
+    }
+  })
+}
 
 const emptySnapshot: DashboardSnapshot = {
   jobs: [],
@@ -60,16 +78,22 @@ export function useDashboard(pollMs = 15_000) {
   const [data, setData] = useState(emptySnapshot)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Drop in-flight /api/dashboard responses that started before a mutation
+  // (or a newer refresh). Otherwise a slow poll can overwrite Cloud←Windows.
+  const refreshEpoch = useRef(0)
 
   const refresh = useCallback(async () => {
+    const epoch = ++refreshEpoch.current
     try {
       const snapshot = await apiFetch<Partial<DashboardSnapshot>>('/api/dashboard')
+      if (epoch !== refreshEpoch.current) return
       setData(normalize(snapshot))
       setError(null)
     } catch {
+      if (epoch !== refreshEpoch.current) return
       setError(navigator.onLine ? 'BeachOps временно недоступен' : 'Нет сети')
     }
-    setLoading(false)
+    if (epoch === refreshEpoch.current) setLoading(false)
   }, [])
 
   const decideApproval = useCallback(async (
@@ -133,22 +157,20 @@ export function useDashboard(pollMs = 15_000) {
         makeActive: input.makeActive,
       }),
     })
-    // Apply PATCH result immediately so a stale dashboard cache / failed
-    // refresh cannot leave the toggle stuck on the previous runtime.
+    // Invalidate in-flight polls, then apply PATCH so the toggle cannot snap
+    // back to the pre-mutation Cloud snapshot when a slow /api/dashboard lands.
+    refreshEpoch.current += 1
     setData((prev) => ({
       ...prev,
-      agents: prev.agents.map((slot) => {
-        if (slot.id !== slotId) {
-          return input.makeActive ? { ...slot, active: false } : slot
-        }
-        return { ...slot, ...updated, active: input.makeActive ? true : updated.active ?? slot.active }
-      }),
+      agents: mergeAgentSlot(prev.agents, slotId, updated, input.makeActive),
     }))
-    try {
-      await refresh()
-    } catch {
-      // Mutation already succeeded; keep optimistic slot state.
-    }
+    await refresh()
+    // Belt-and-suspenders: a fresh dashboard must still reflect this PATCH
+    // (guards against a rare cache miss that rebuilt from a torn read).
+    setData((prev) => ({
+      ...prev,
+      agents: mergeAgentSlot(prev.agents, slotId, updated, input.makeActive),
+    }))
   }, [refresh])
 
   const submitPrompt = useCallback(async (input: {

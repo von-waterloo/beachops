@@ -53,10 +53,13 @@ import {
   type RuntimeFilter,
 } from '../lib/runtimeFilter'
 import {
+  eventHeadline,
+  eventTypeLabel,
   relativeTimeRu,
   riskLabel,
   runtimeLabel,
   statusLabel,
+  statusTone,
 } from '../lib/uiCopy'
 
 export type TabId = 'voice' | 'active' | 'history' | 'approvals' | 'repositories'
@@ -68,7 +71,6 @@ interface Props {
   data: DashboardSnapshot
   loading: boolean
   error: string | null
-  liveEvents?: Event[]
   runtimeFilter?: RuntimeFilter
   focusedJobId?: string | null
   onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: TabId) => void
@@ -746,46 +748,203 @@ function ApprovalsList({
   )
 }
 
-function TimelineList({ events }: { events: Event[] }) {
-  if (!events.length) {
+function TimelineList({
+  events,
+  jobsById,
+  onSelectJob,
+  limit = 40,
+}: {
+  events: Event[]
+  jobsById?: Map<string, Job>
+  onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
+  limit?: number
+}) {
+  const items = events.slice(0, limit)
+  if (!items.length) {
     return (
       <Empty
         icon={<Archive />}
-        title="История пуста"
-        copy="Завершённые прогоны появятся здесь."
+        title="Лента пуста"
+        copy="Здесь появятся статусы прогонов: старт, approve, сбой, готово."
       />
     )
   }
   return (
     <div className="timeline modern-timeline">
       <AnimatePresence initial={false}>
-        {events.map((event, index) => (
-          <motion.article
-            key={event.id}
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: Math.min(index, 8) * 0.03, ease: [0.22, 1, 0.36, 1] }}
-          >
-            <span className="timeline-dot" />
-            <div>
-              <p>{event.summary}</p>
-              <small>
-                {event.kind}
-                {event.jobId ? ` · ${event.jobId.slice(0, 8)}` : ''}
-                {' · '}
-                {relativeTimeRu(event.createdAt)}
-              </small>
-            </div>
-          </motion.article>
-        ))}
+        {items.map((event, index) => {
+          const job = event.jobId ? jobsById?.get(event.jobId) : undefined
+          const title = event.title || job?.title || null
+          const repository = event.repository || job?.repository || null
+          const runtime = event.runtime || job?.runtime || null
+          const branch = event.branch || job?.branch || null
+          const tone = statusTone(event.toStatus || event.summary)
+          const headline = eventHeadline(event)
+          const metaBits = [
+            eventTypeLabel(event.kind),
+            repository,
+            runtime ? runtimeLabel(runtime) : null,
+            branch,
+          ].filter(Boolean)
+          const selectable = Boolean(onSelectJob && event.jobId)
+          const body = (
+            <>
+              <span className={`timeline-dot tone-${tone}`} />
+              <div className="timeline-body">
+                <div className="timeline-topline">
+                  <span className={`status-pill status-${event.toStatus || event.summary} tone-${tone}`}>
+                    {headline}
+                  </span>
+                  <time>{relativeTimeRu(event.createdAt)}</time>
+                </div>
+                {title ? <p className="timeline-title">{title}</p> : null}
+                <small>{metaBits.join(' · ')}</small>
+              </div>
+            </>
+          )
+          return selectable ? (
+            <motion.button
+              type="button"
+              className="timeline-item is-clickable"
+              key={event.id}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: Math.min(index, 8) * 0.03, ease: [0.22, 1, 0.36, 1] }}
+              onClick={() => onSelectJob?.(event.jobId!, runtime)}
+            >
+              {body}
+            </motion.button>
+          ) : (
+            <motion.article
+              className="timeline-item"
+              key={event.id}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: Math.min(index, 8) * 0.03, ease: [0.22, 1, 0.36, 1] }}
+            >
+              {body}
+            </motion.article>
+          )
+        })}
       </AnimatePresence>
+    </div>
+  )
+}
+
+function HistoryPanel({
+  jobs,
+  events,
+  runtimeFilter,
+  focusedJobId,
+  onRuntimeFilterChange,
+  onSelectJob,
+}: {
+  jobs: Job[]
+  events: Event[]
+  runtimeFilter: RuntimeFilter
+  focusedJobId?: string | null
+  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: TabId) => void
+  onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
+}) {
+  const jobsById = new Map(jobs.map((job) => [job.id, job]))
+  const recentJobs = jobs
+    .filter((job) => matchesRuntimeFilter(job.runtime, runtimeFilter))
+    .slice(0, 40)
+  const failedCount = recentJobs.filter((job) => job.status === 'failed').length
+  const doneCount = recentJobs.filter((job) =>
+    ['completed', 'succeeded', 'accepted'].includes(job.status),
+  ).length
+  const waitingCount = recentJobs.filter((job) =>
+    ['awaiting_approval', 'review_required', 'blocked'].includes(job.status),
+  ).length
+
+  return (
+    <div className="history-feed">
+      <RuntimeFilterBar
+        value={runtimeFilter}
+        onChange={(filter) => onRuntimeFilterChange?.(filter, 'history')}
+      />
+
+      <div className="history-stats" aria-label="Сводка ленты">
+        <div>
+          <strong>{recentJobs.length}</strong>
+          <span>Прогонов</span>
+        </div>
+        <div>
+          <strong>{doneCount}</strong>
+          <span>Готово</span>
+        </div>
+        <div>
+          <strong>{waitingCount}</strong>
+          <span>Ждёт</span>
+        </div>
+        <div>
+          <strong>{failedCount}</strong>
+          <span>Сбои</span>
+        </div>
+      </div>
+
+      <Section eyebrow="Прогоны" title="Недавние задачи">
+        {recentJobs.length ? (
+          <div className="card-list history-job-list">
+            {recentJobs.map((job) => {
+              const selected = focusedJobId === job.id
+              const tone = statusTone(job.status)
+              const className = `work-card history-job-card tone-${tone}${onSelectJob ? ' is-clickable' : ''}${selected ? ' is-selected' : ''}`
+              const body = (
+                <>
+                  <div className="card-topline">
+                    <span className={`status-pill status-${job.status} tone-${tone}`}>
+                      <Radio size={12} />
+                      {statusLabel(job.status)}
+                    </span>
+                    <time>{relativeTimeRu(job.createdAt)}</time>
+                  </div>
+                  <h2>{job.title}</h2>
+                  <p>
+                    {runtimeLabel(job.runtime)}
+                    {job.repository ? ` · ${job.repository}` : ''}
+                    {job.branch ? ` · ${job.branch}` : ''}
+                  </p>
+                </>
+              )
+              return onSelectJob ? (
+                <button
+                  className={className}
+                  type="button"
+                  key={job.id}
+                  onClick={() => onSelectJob(job.id, job.runtime)}
+                >
+                  {body}
+                </button>
+              ) : (
+                <article className={className} key={job.id}>{body}</article>
+              )
+            })}
+          </div>
+        ) : (
+          <Empty
+            icon={<Archive />}
+            title="Пока пусто"
+            copy="Запустите задачу голосом или из Telegram — она появится здесь."
+          />
+        )}
+      </Section>
+
+      <Section eyebrow="Активность" title="Что менялось">
+        <TimelineList
+          events={events}
+          jobsById={jobsById}
+          onSelectJob={onSelectJob}
+          limit={24}
+        />
+      </Section>
     </div>
   )
 }
 
 function Overview({
   data,
-  liveEvents,
   pendingIds,
   act,
   runtimeFilter,
@@ -795,7 +954,6 @@ function Overview({
   onSetSelfImprove,
 }: {
   data: DashboardSnapshot
-  liveEvents: Event[]
   pendingIds: Set<string>
   act: (approvalId: string, decision: Decision, revision?: string) => void
   runtimeFilter: RuntimeFilter
@@ -810,7 +968,8 @@ function Overview({
   const queuedJobs = data.jobs
     .filter((job) => job.status === 'queued')
     .filter((job) => matchesRuntimeFilter(job.runtime, runtimeFilter))
-  const timeline = (liveEvents.length ? liveEvents : data.events).slice(0, 12)
+  const timeline = data.events.slice(0, 12)
+  const jobsById = new Map(data.jobs.map((job) => [job.id, job]))
 
   const active = data.queue?.active ?? data.queue?.running ?? 0
   const queuedCount = data.queue?.queued ?? data.queue?.pending ?? 0
@@ -948,7 +1107,12 @@ function Overview({
       <TipsMap data={data} onSetSelfImprove={onSetSelfImprove} />
 
       <Section eyebrow="Лента" title="События прогонов">
-        <TimelineList events={timeline} />
+        <TimelineList
+          events={timeline}
+          jobsById={jobsById}
+          onSelectJob={onSelectJob}
+          limit={12}
+        />
       </Section>
 
       <Section eyebrow="Воркеры" title="Здоровье узлов">
@@ -990,7 +1154,6 @@ export function DashboardPanels({
   data,
   loading,
   error,
-  liveEvents = [],
   runtimeFilter = 'all',
   focusedJobId = null,
   onRuntimeFilterChange,
@@ -1095,7 +1258,6 @@ export function DashboardPanels({
         {error && <div className="inline-error" role="alert">{error}</div>}
         <Overview
           data={data}
-          liveEvents={liveEvents}
           pendingIds={pendingIds}
           act={act}
           runtimeFilter={runtimeFilter}
@@ -1164,7 +1326,14 @@ export function DashboardPanels({
       )}
 
       {tab === 'history' && (
-        <TimelineList events={liveEvents.length ? liveEvents : data.events} />
+        <HistoryPanel
+          jobs={data.jobs}
+          events={data.events}
+          runtimeFilter={runtimeFilter}
+          focusedJobId={focusedJobId}
+          onRuntimeFilterChange={onRuntimeFilterChange}
+          onSelectJob={onSelectJob}
+        />
       )}
 
       {tab === 'approvals' && (

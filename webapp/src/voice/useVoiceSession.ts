@@ -8,7 +8,7 @@ import {
   VOICE_FATAL_CLOSE_CODES,
   VOICE_RECONNECT_LIMIT,
 } from './reconnect'
-import { initialVoiceState, voiceReducer } from './state'
+import { initialVoiceState, voiceReducer, type VoiceAgentMode } from './state'
 
 const MAX_RECORDING_MS = 60_000
 const AUTH_FAILED = 'Сессия истекла или недействительна'
@@ -74,7 +74,7 @@ export function useVoiceSession(options: {
   const playbackContextRef = useRef<AudioContext | null>(null)
   const onJobStartedRef = useRef(options.onJobStarted)
   const voiceRequireConfirmRef = useRef(false)
-  const submitModeRef = useRef<'ask' | 'plan'>('ask')
+  const submitModeRef = useRef<VoiceAgentMode>('ask')
   onJobStartedRef.current = options.onJobStarted
 
   useEffect(() => {
@@ -82,7 +82,7 @@ export function useVoiceSession(options: {
     voiceRequireConfirmRef.current = state.voiceRequireConfirm
   }, [state.connected, state.voiceRequireConfirm])
 
-  const setSubmitMode = useCallback((mode: 'ask' | 'plan') => {
+  const setSubmitMode = useCallback((mode: VoiceAgentMode) => {
     submitModeRef.current = mode
   }, [])
 
@@ -171,7 +171,7 @@ export function useVoiceSession(options: {
       case 'plan.started':
         dispatch({
           type: 'PLAN_STARTED',
-          mode: event.mode === 'ask' ? 'ask' : 'plan',
+          mode: event.mode === 'ask' || event.mode === 'do' ? event.mode : 'plan',
         })
         if (event.jobId) onJobStartedRef.current?.(event.jobId)
         break
@@ -415,7 +415,7 @@ export function useVoiceSession(options: {
     feedback('select')
   }, [sendJson, stopCapture, stopPlayback])
 
-  const confirmSubmit = useCallback((mode: 'ask' | 'plan' = submitModeRef.current) => {
+  const confirmSubmit = useCallback((mode: VoiceAgentMode = submitModeRef.current) => {
     if (!state.transcript.trim()) return
     submitModeRef.current = mode
     sendJson({ type: 'plan.request', transcript: state.transcript.trim(), mode })
@@ -423,7 +423,7 @@ export function useVoiceSession(options: {
     feedback('success')
   }, [sendJson, state.transcript])
 
-  const submitComposer = useCallback((text: string, mode: 'ask' | 'plan' = 'ask') => {
+  const submitComposer = useCallback((text: string, mode: VoiceAgentMode = 'ask') => {
     const trimmed = text.trim()
     if (!trimmed) return false
     if (!navigator.onLine) {

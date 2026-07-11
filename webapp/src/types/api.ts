@@ -36,6 +36,11 @@ export interface Event {
   summary: string
   createdAt: string
   jobId?: string
+  toStatus?: string | null
+  title?: string | null
+  repository?: string | null
+  runtime?: string | null
+  branch?: string | null
 }
 
 export interface Approval {

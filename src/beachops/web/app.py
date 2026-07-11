@@ -1334,29 +1334,53 @@ async def _recent_events(
     actor_id: int,
     role: Role | None,
 ) -> list[dict]:
-    where = "" if role == Role.OWNER else "WHERE actor_id = $1"
+    where = "" if role == Role.OWNER else "WHERE e.actor_id = $1"
     args = () if role == Role.OWNER else (actor_id,)
     async with context.pool.acquire() as conn:
         rows = await conn.fetch(
             f"""
-            SELECT id, job_id, event_type, to_status, created_at
-            FROM beachops_job_events
+            SELECT
+                e.id,
+                e.job_id,
+                e.event_type,
+                e.to_status,
+                e.created_at,
+                j.summary AS job_summary,
+                j.kind AS job_kind,
+                j.repository_url,
+                j.runtime,
+                j.branch
+            FROM beachops_job_events AS e
+            LEFT JOIN beachops_jobs AS j ON j.id = e.job_id
             {where}
-            ORDER BY id DESC
+            ORDER BY e.id DESC
             LIMIT 100
             """,
             *args,
         )
-    return [
-        {
-            "id": str(row["id"]),
-            "kind": row["event_type"],
-            "summary": str(row["to_status"] or row["event_type"]),
-            "createdAt": row["created_at"].isoformat(),
-            "jobId": str(row["job_id"]),
-        }
-        for row in rows
-    ]
+    payload: list[dict] = []
+    for row in rows:
+        repo_url = row["repository_url"]
+        repo_name = repo_url.rsplit("/", 1)[-1] if repo_url else None
+        title = (row["job_summary"] or "").strip() or (
+            str(row["job_kind"]) if row["job_kind"] else None
+        )
+        to_status = row["to_status"]
+        payload.append(
+            {
+                "id": str(row["id"]),
+                "kind": row["event_type"],
+                "summary": str(to_status or row["event_type"]),
+                "toStatus": str(to_status) if to_status else None,
+                "title": title,
+                "repository": repo_name,
+                "runtime": row["runtime"] or None,
+                "branch": row["branch"] or None,
+                "createdAt": row["created_at"].isoformat(),
+                "jobId": str(row["job_id"]),
+            }
+        )
+    return payload
 
 
 def _job_json(job) -> dict:

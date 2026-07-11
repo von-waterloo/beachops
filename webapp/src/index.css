@@ -347,7 +347,7 @@ main {
 .connection-chip,
 .job-chip,
 .air-chip {
-  position: absolute;
+  position: static;
   z-index: 2;
   gap: 6px;
   padding: 5px 10px;
@@ -359,25 +359,48 @@ main {
   font-weight: 680;
   line-height: 1.2;
   box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.voice-stage-top {
+  position: absolute;
+  z-index: 3;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.voice-stage-top-left,
+.voice-stage-top-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: calc(50% - 4px);
+}
+
+.voice-stage-top-right {
+  justify-content: flex-end;
 }
 
 .connection-chip {
-  top: 16px;
-  right: 16px;
-  max-width: 42%;
+  flex: 0 1 auto;
   justify-content: center;
 }
 
 .job-chip {
-  top: 16px;
-  left: 16px;
-  max-width: calc(100% - 132px);
+  flex: 1 1 auto;
   color: var(--cyan);
 }
 
 .air-chip {
-  top: 52px;
-  right: 16px;
   color: var(--cyan);
   border-color: color-mix(in srgb, var(--cyan) 35%, var(--line));
   background: color-mix(in srgb, var(--cyan) 12%, rgba(0, 0, 0, 0.11));
@@ -1475,27 +1498,91 @@ main {
   padding-left: 11px;
 }
 
-.timeline article {
+.timeline article,
+.timeline-item {
   min-height: 66px;
   padding: 3px 0 18px 24px;
   position: relative;
   border-left: 1px solid var(--line);
+  display: block;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  background: transparent;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  cursor: default;
 }
 
-.timeline article:last-child {
+.timeline article:last-child,
+.timeline-item:last-child {
   border-left-color: transparent;
+}
+
+button.timeline-item.is-clickable {
+  cursor: pointer;
 }
 
 .timeline-dot {
   width: 9px;
   height: 9px;
   position: absolute;
-  top: 4px;
+  top: 8px;
   left: -5px;
   border: 2px solid var(--canvas);
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.timeline-dot.tone-success {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.timeline-dot.tone-danger {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+.timeline-dot.tone-warn {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 16%, transparent);
+}
+
+.timeline-dot.tone-active {
+  background: var(--cyan);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 16%, transparent);
+}
+
+.timeline-dot.tone-muted {
+  background: var(--muted);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted) 12%, transparent);
+}
+
+.timeline-body {
+  min-width: 0;
+}
+
+.timeline-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.64rem;
+}
+
+.timeline-title {
+  margin-bottom: 4px;
+  font-size: 0.88rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  line-height: 1.3;
 }
 
 .timeline p {
@@ -1507,6 +1594,107 @@ main {
 .timeline small {
   color: var(--muted);
   font-size: 0.65rem;
+}
+
+.status-pill.tone-success,
+.status-completed,
+.status-succeeded,
+.status-accepted {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.status-pill.tone-danger,
+.status-failed,
+.status-rejected,
+.status-cancelled {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.status-pill.tone-warn,
+.status-awaiting_approval,
+.status-review_required,
+.status-revision_requested,
+.status-paused {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.status-pill.tone-active,
+.status-running,
+.status-planning,
+.status-queued,
+.status-approved {
+  color: var(--cyan);
+  background: color-mix(in srgb, var(--cyan) 10%, transparent);
+}
+
+.history-feed {
+  display: grid;
+  gap: 18px;
+}
+
+.history-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.history-stats div {
+  min-height: 64px;
+  padding: 10px 8px;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(165deg, color-mix(in srgb, var(--surface-high) 92%, white 4%), var(--surface));
+  text-align: center;
+}
+
+.history-stats strong {
+  font-size: 1.1rem;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+}
+
+.history-stats span {
+  color: var(--muted);
+  font-size: 0.6rem;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.history-job-card.tone-danger::before {
+  background: linear-gradient(180deg, var(--danger), color-mix(in srgb, var(--danger) 40%, transparent));
+}
+
+.history-job-card.tone-success::before {
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 40%, transparent));
+}
+
+.history-job-card.tone-warn::before {
+  background: linear-gradient(180deg, var(--warning), color-mix(in srgb, var(--warning) 40%, transparent));
+}
+
+.history-job-card.tone-active::before {
+  background: linear-gradient(180deg, var(--cyan), color-mix(in srgb, var(--cyan) 40%, transparent));
+}
+
+.history-job-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.history-job-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--accent), var(--cyan));
 }
 
 .control-feed {
@@ -1704,11 +1892,12 @@ button.work-card.is-selected {
   background: linear-gradient(180deg, var(--accent), var(--cyan));
 }
 
-.modern-timeline article {
+.modern-timeline .timeline-item {
   transition: background 180ms ease;
 }
 
-.modern-timeline article:hover {
+.modern-timeline .timeline-item:hover,
+.modern-timeline button.timeline-item.is-clickable:hover {
   background: color-mix(in srgb, var(--surface-high) 55%, transparent);
   border-radius: 0 14px 14px 0;
 }

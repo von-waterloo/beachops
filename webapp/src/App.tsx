@@ -166,7 +166,6 @@ function ControlRoom({
   const running = dashboard.data.queue?.running ?? dashboard.data.queue?.active ?? 0
   const pending = dashboard.data.queue?.pending ?? dashboard.data.queue?.queued ?? 0
   const workersOnline = dashboard.data.workers?.length ?? 0
-  const liveEvents = stream.events.length ? stream.events : dashboard.data.events
 
   return (
     <div className="app-shell control-room">
@@ -253,7 +252,6 @@ function ControlRoom({
                   data={dashboard.data}
                   loading={dashboard.loading}
                   error={dashboard.error ?? stream.error}
-                  liveEvents={liveEvents}
                   runtimeFilter={runtimeFilter}
                   focusedJobId={focusedJobId}
                   onRuntimeFilterChange={selectFilter}
@@ -275,7 +273,6 @@ function ControlRoom({
                 data={dashboard.data}
                 loading={dashboard.loading}
                 error={dashboard.error}
-                liveEvents={liveEvents}
                 runtimeFilter={runtimeFilter}
                 focusedJobId={focusedJobId}
                 onRuntimeFilterChange={selectFilter}

@@ -1,3 +1,5 @@
+export type VoiceAgentMode = 'ask' | 'plan' | 'do'
+
 export type VoicePhase =
   | 'idle'
   | 'listening'
@@ -42,15 +44,26 @@ export type VoiceAction =
   | { type: 'PARTIAL'; text: string }
   | { type: 'FINAL'; text: string }
   | { type: 'EDIT'; text: string }
-  | { type: 'CONFIRM'; mode?: 'ask' | 'plan' }
-  | { type: 'SUBMIT_TEXT'; text: string; mode?: 'ask' | 'plan' }
-  | { type: 'PLAN_STARTED'; mode?: 'ask' | 'plan' }
+  | { type: 'CONFIRM'; mode?: VoiceAgentMode }
+  | { type: 'SUBMIT_TEXT'; text: string; mode?: VoiceAgentMode }
+  | { type: 'PLAN_STARTED'; mode?: VoiceAgentMode }
   | { type: 'PROGRESS'; caption: string }
   | { type: 'SPEAKING'; caption?: string; kind?: SpeakingKind }
   | { type: 'PLAYBACK_DONE' }
   | { type: 'CANCEL' }
   | { type: 'FAIL'; message: string }
   | { type: 'RESET' }
+
+function captionForMode(mode: VoiceAgentMode | undefined, kind: 'submit' | 'started'): string {
+  if (kind === 'submit') {
+    if (mode === 'ask') return 'Спрашиваю агента. Учитываю очередь и статус control room.'
+    if (mode === 'do') return 'Запускаю действие. Пишу в выбранную ветку.'
+    return 'Строю план. Без записи в репо.'
+  }
+  if (mode === 'ask') return 'Агент в эфире. Жду ответ с учётом control room.'
+  if (mode === 'do') return 'Действие в очереди. Слежу за прогрессом.'
+  return 'План в очереди. Слежу за прогрессом.'
+}
 
 export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState {
   switch (action.type) {
@@ -107,20 +120,16 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
       return { ...state, transcript: action.text }
     case 'CONFIRM': {
       if (state.phase !== 'confirming' || !state.transcript.trim()) return state
-      const ask = action.mode === 'ask'
       return {
         ...state,
         phase: 'planning',
-        caption: ask
-          ? 'Спрашиваю агента. Учитываю очередь и статус control room.'
-          : 'Строю план. Без записи в репо.',
+        caption: captionForMode(action.mode, 'submit'),
       }
     }
     case 'SUBMIT_TEXT': {
       if (!['idle', 'error', 'confirming'].includes(state.phase) || !action.text.trim()) {
         return state
       }
-      const ask = action.mode === 'ask'
       return {
         ...state,
         phase: 'planning',
@@ -128,18 +137,14 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
         partialTranscript: '',
         error: null,
         speakingKind: null,
-        caption: ask
-          ? 'Спрашиваю агента. Учитываю очередь и статус control room.'
-          : 'Строю план. Без записи в репо.',
+        caption: captionForMode(action.mode, 'submit'),
       }
     }
     case 'PLAN_STARTED': {
       if (state.phase === 'planning') {
         return {
           ...state,
-          caption: action.mode === 'ask'
-            ? 'Агент в эфире. Жду ответ с учётом control room.'
-            : 'План в очереди. Слежу за прогрессом.',
+          caption: captionForMode(action.mode, 'started'),
         }
       }
       if (state.phase === 'confirming' && state.transcript.trim()) {
@@ -147,9 +152,7 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
           ...state,
           phase: 'planning',
           speakingKind: null,
-          caption: action.mode === 'ask'
-            ? 'Агент в эфире. Жду ответ с учётом control room.'
-            : 'План в очереди. Слежу за прогрессом.',
+          caption: captionForMode(action.mode, 'started'),
         }
       }
       return state

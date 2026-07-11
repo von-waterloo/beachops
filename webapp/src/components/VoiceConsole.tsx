@@ -17,9 +17,21 @@ import { requestTelegramFullscreen } from '../lib/telegram'
 import { feedback } from '../lib/feedback'
 import { setCursorModel, type CursorModelOption } from '../lib/auth'
 import { useVoiceSession } from '../voice/useVoiceSession'
-import type { VoicePhase } from '../voice/state'
+import type { VoiceAgentMode, VoicePhase } from '../voice/state'
 import type { Event, Job } from '../types/api'
 import { runtimeLabel, statusLabel } from '../lib/uiCopy'
+
+const MODE_LABELS: Record<VoiceAgentMode, string> = {
+  ask: 'Спросить',
+  plan: 'План',
+  do: 'Действие',
+}
+
+const MODE_SUBMIT_LABELS: Record<VoiceAgentMode, string> = {
+  ask: 'Спросить',
+  plan: 'В план',
+  do: 'Сделать',
+}
 
 const phaseLabels: Record<VoicePhase, string> = {
   idle: 'Готов',
@@ -76,7 +88,7 @@ export function VoiceConsole({
   const reducedMotion = useReducedMotion()
   const { state } = voice
   const [composer, setComposer] = useState('')
-  const [agentMode, setAgentMode] = useState<'ask' | 'plan'>('ask')
+  const [agentMode, setAgentMode] = useState<VoiceAgentMode>('ask')
   const [pulse, setPulse] = useState(0.2)
   const [selectedModel, setSelectedModel] = useState(cursorModelKey ?? '')
   const [modelBusy, setModelBusy] = useState(false)
@@ -120,7 +132,7 @@ export function VoiceConsole({
     if (voice.submitComposer(composer, agentMode)) setComposer('')
   }
 
-  const selectMode = (mode: 'ask' | 'plan') => {
+  const selectMode = (mode: VoiceAgentMode) => {
     feedback('select')
     setAgentMode(mode)
     voice.setSubmitMode(mode)
@@ -145,22 +157,17 @@ export function VoiceConsole({
 
   const modeToolbar = showModeSwitch ? (
     <div className="composer-mode-row voice-mode-row" role="toolbar" aria-label="Режим запроса">
-      <button
-        type="button"
-        className={agentMode === 'ask' ? 'selected' : ''}
-        aria-pressed={agentMode === 'ask'}
-        onClick={() => selectMode('ask')}
-      >
-        Спросить
-      </button>
-      <button
-        type="button"
-        className={agentMode === 'plan' ? 'selected' : ''}
-        aria-pressed={agentMode === 'plan'}
-        onClick={() => selectMode('plan')}
-      >
-        План
-      </button>
+      {(['ask', 'plan', 'do'] as const).map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          className={agentMode === mode ? 'selected' : ''}
+          aria-pressed={agentMode === mode}
+          onClick={() => selectMode(mode)}
+        >
+          {MODE_LABELS[mode]}
+        </button>
+      ))}
     </div>
   ) : null
 
@@ -217,28 +224,32 @@ export function VoiceConsole({
             {Array.from({ length: 12 }, (_, index) => <i key={index} />)}
           </div>
         )}
-        <div className="connection-chip">
-          <span className={state.connected ? 'online-dot' : 'offline-dot'} />
-          {state.connected
-            ? 'На связи'
-            : state.phase === 'error'
-              ? 'Нет канала'
-              : 'Канал по запросу'}
+        <div className="voice-stage-top">
+          <div className="voice-stage-top-left">
+            {activeJob && (
+              <div className="job-chip" role="status">
+                {activeJob.runtime === 'windows' ? <Monitor size={12} /> : <Cloud size={12} />}
+                <span>{jobChipTitle(activeJob.title)}</span>
+              </div>
+            )}
+          </div>
+          <div className="voice-stage-top-right">
+            {(state.phase === 'planning' || state.speakingKind === 'milestone') && (
+              <div className="air-chip" role="status">
+                <span className="air-pulse" aria-hidden="true" />
+                Эфир
+              </div>
+            )}
+            <div className="connection-chip">
+              <span className={state.connected ? 'online-dot' : 'offline-dot'} />
+              {state.connected
+                ? 'На связи'
+                : state.phase === 'error'
+                  ? 'Нет канала'
+                  : 'По запросу'}
+            </div>
+          </div>
         </div>
-
-        {(state.phase === 'planning' || state.speakingKind === 'milestone') && (
-          <div className="air-chip" role="status">
-            <span className="air-pulse" aria-hidden="true" />
-            Эфир
-          </div>
-        )}
-
-        {activeJob && (
-          <div className="job-chip" role="status">
-            {activeJob.runtime === 'windows' ? <Monitor size={12} /> : <Cloud size={12} />}
-            <span>{jobChipTitle(activeJob.title)}</span>
-          </div>
-        )}
 
         <button
           type="button"
@@ -308,7 +319,13 @@ export function VoiceConsole({
               type="text"
               value={composer}
               maxLength={4000}
-              placeholder={agentMode === 'ask' ? 'Короткий вопрос агенту' : 'Что спланировать'}
+              placeholder={
+                agentMode === 'ask'
+                  ? 'Короткий вопрос агенту'
+                  : agentMode === 'do'
+                    ? 'Что сделать в репо'
+                    : 'Что спланировать'
+              }
               onChange={(event) => setComposer(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
@@ -322,7 +339,7 @@ export function VoiceConsole({
               type="button"
               disabled={!composer.trim()}
               onClick={handleComposer}
-              aria-label={agentMode === 'ask' ? 'Спросить' : 'В план'}
+              aria-label={MODE_SUBMIT_LABELS[agentMode]}
             >
               <Send size={17} />
             </button>
@@ -360,7 +377,9 @@ export function VoiceConsole({
             <p className="security-note">
               {agentMode === 'ask'
                 ? 'Голос отправит вопрос агенту. Approve на запись — только у владельца.'
-                : 'Голос попросит план. Approve на запись — только у владельца.'}
+                : agentMode === 'do'
+                  ? 'Голос запустит действие в репо. Approve на риск — только у владельца.'
+                  : 'Голос попросит план. Approve на запись — только у владельца.'}
             </p>
             <div className="action-row">
               <button className="secondary-button" type="button" onClick={voice.cancel}>
@@ -372,7 +391,7 @@ export function VoiceConsole({
                 onClick={() => voice.confirmSubmit(agentMode)}
                 disabled={!state.transcript.trim()}
               >
-                <Send size={17} /> {agentMode === 'ask' ? 'Спросить' : 'В план'}
+                <Send size={17} /> {MODE_SUBMIT_LABELS[agentMode]}
               </button>
             </div>
           </motion.div>
