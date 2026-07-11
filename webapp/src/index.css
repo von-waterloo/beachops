@@ -157,6 +157,7 @@ h2 {
 .connection-chip,
 .privacy-chip,
 .job-chip,
+.air-chip,
 .status-pill,
 .risk,
 .repo-state {
@@ -297,7 +298,7 @@ main {
 
 .voice-stage {
   min-height: 420px;
-  padding: 20px 16px 26px;
+  padding: 28px 20px 32px;
   position: relative;
   overflow: hidden;
   display: flex;
@@ -315,17 +316,17 @@ main {
 
 .voice-stage::before {
   content: "";
-  width: 280px;
-  height: 280px;
+  width: 220px;
+  height: 220px;
   position: absolute;
-  top: 38%;
+  top: 42%;
   left: 50%;
   border: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
   border-radius: 50%;
   transform: translate(-50%, -50%);
   box-shadow:
-    0 0 0 28px color-mix(in srgb, var(--accent) 4%, transparent),
-    0 0 0 56px color-mix(in srgb, var(--accent) 2.5%, transparent);
+    0 0 0 20px color-mix(in srgb, var(--accent) 4%, transparent),
+    0 0 0 40px color-mix(in srgb, var(--accent) 2.5%, transparent);
   animation: ambient-radar 7.5s linear infinite;
   z-index: -1;
   pointer-events: none;
@@ -344,7 +345,8 @@ main {
 }
 
 .connection-chip,
-.job-chip {
+.job-chip,
+.air-chip {
   position: absolute;
   z-index: 2;
   gap: 6px;
@@ -371,6 +373,32 @@ main {
   left: 16px;
   max-width: calc(100% - 132px);
   color: var(--cyan);
+}
+
+.air-chip {
+  top: 52px;
+  right: 16px;
+  color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 35%, var(--line));
+  background: color-mix(in srgb, var(--cyan) 12%, rgba(0, 0, 0, 0.11));
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.air-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--cyan) 55%, transparent);
+  animation: air-pulse 1.6s ease-out infinite;
+}
+
+@keyframes air-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--cyan) 50%, transparent); }
+  70% { box-shadow: 0 0 0 8px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 .job-chip > svg {
@@ -404,7 +432,7 @@ main {
   --orb-energy: 0.08;
   width: 142px;
   height: 142px;
-  margin: 28px 0 20px;
+  margin: 36px 0 24px;
   padding: 0;
   position: relative;
   display: grid;
@@ -430,7 +458,7 @@ main {
 }
 
 .orb-halo {
-  inset: -10px;
+  inset: -8px;
   background: radial-gradient(
     circle,
     color-mix(in srgb, var(--accent) calc(18% + var(--orb-energy) * 22%), transparent),
@@ -442,7 +470,7 @@ main {
 }
 
 .orb-radar {
-  inset: -28px;
+  inset: -14px;
 }
 
 .orb-radar i {
@@ -462,7 +490,7 @@ main {
 }
 
 .orb-scan {
-  inset: -18px;
+  inset: -12px;
   background: conic-gradient(
     from 0deg,
     transparent 0deg,
@@ -494,7 +522,7 @@ main {
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 55%, white);
   opacity: calc(0.18 + var(--orb-energy) * 0.55);
-  transform: rotate(calc(var(--i, 0) * 15deg)) translateY(-68px);
+  transform: rotate(calc(var(--i, 0) * 15deg)) translateY(-56px);
   box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
@@ -1263,6 +1291,80 @@ main {
   background: color-mix(in srgb, var(--surface-high) 88%, transparent);
 }
 
+.github-connect-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface-high) 88%, transparent);
+}
+
+.github-connect-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.github-connect-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.github-connect-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-decoration: none;
+  width: fit-content;
+}
+
+.github-repo-picker {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.github-repo-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.github-repo-option span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.github-repo-option strong {
+  font-size: 0.9rem;
+}
+
+.github-repo-option small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.github-repo-option:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
 .repo-add-form label {
   display: grid;
   gap: 6px;
@@ -1748,9 +1850,9 @@ button.work-card.is-selected {
 }
 
 @keyframes orb-ping {
-  0% { transform: scale(0.72); opacity: calc(0.35 + var(--orb-energy) * 0.45); }
+  0% { transform: scale(0.78); opacity: calc(0.35 + var(--orb-energy) * 0.45); }
   70% { opacity: 0.12; }
-  100% { transform: scale(1.18); opacity: 0; }
+  100% { transform: scale(1.06); opacity: 0; }
 }
 
 @keyframes orb-scan-spin {
@@ -1792,12 +1894,21 @@ button.work-card.is-selected {
 @media (max-height: 690px) {
   .voice-stage {
     min-height: 345px;
+    padding: 22px 16px 24px;
   }
 
   .orb-button {
     width: 118px;
     height: 118px;
-    margin-bottom: 14px;
+    margin: 28px 0 16px;
+  }
+
+  .orb-radar {
+    inset: -10px;
+  }
+
+  .orb-ticks i {
+    transform: rotate(calc(var(--i, 0) * 15deg)) translateY(-46px);
   }
 
   .spectrum {
@@ -2125,6 +2236,11 @@ button.worker-chip:hover {
   border: 0 !important;
 }
 
+a.telegram-oauth-fallback {
+  text-decoration: none;
+  margin-top: 0.5rem;
+}
+
 .auth-error,
 .auth-inline-error {
   color: var(--danger);
@@ -2238,6 +2354,11 @@ button.worker-chip:hover {
   flex-wrap: wrap;
   gap: var(--space-1);
   margin-bottom: var(--space-3);
+}
+
+.voice-mode-row {
+  justify-content: center;
+  margin: 0 0 var(--space-3);
 }
 
 .runtime-toggle button,
@@ -2430,6 +2551,72 @@ button.worker-chip:hover {
   font: inherit;
 }
 
+.prompt-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.prompt-attachment {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.prompt-attachment img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.prompt-attachment-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
+}
+
+.prompt-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.prompt-attach-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--touch-min);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.prompt-attach-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .agent-path-row button,
 .prompt-form button[type="submit"] {
   display: inline-flex;
@@ -2444,6 +2631,10 @@ button.worker-chip:hover {
   color: var(--accent-ink);
   font-weight: 650;
   cursor: pointer;
+}
+
+.prompt-form-actions button[type="submit"] {
+  margin-left: auto;
 }
 
 .agent-path-row button:disabled,

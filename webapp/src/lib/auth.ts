@@ -19,8 +19,10 @@ export interface AuthenticatedUser {
 
 export interface TelegramLoginConfig {
   botUsername: string | null
+  botId?: number | null
   loginEnabled: boolean
   origin: string | null
+  expectedHost?: string | null
 }
 
 /** Payload returned by Telegram Login Widget `data-onauth`. */

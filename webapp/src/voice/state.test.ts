@@ -3,7 +3,12 @@ import { initialVoiceState, voiceReducer } from './state'
 
 describe('voiceReducer', () => {
   it('moves through capture, transcript confirmation, and planning', () => {
-    const listening = voiceReducer(initialVoiceState, { type: 'START_LISTENING', at: 100 })
+    const connected = voiceReducer(initialVoiceState, {
+      type: 'CONNECTED',
+      connected: true,
+      voiceRequireConfirm: true,
+    })
+    const listening = voiceReducer(connected, { type: 'START_LISTENING', at: 100 })
     expect(listening.phase).toBe('listening')
     expect(listening.recordingStartedAt).toBe(100)
 
@@ -17,8 +22,28 @@ describe('voiceReducer', () => {
     expect(confirming.phase).toBe('confirming')
     expect(confirming.transcript).toBe('Deploy the service')
 
-    const planning = voiceReducer(confirming, { type: 'CONFIRM' })
+    const planning = voiceReducer(confirming, { type: 'CONFIRM', mode: 'plan' })
     expect(planning.phase).toBe('planning')
+    expect(planning.caption).toContain('план')
+  })
+
+  it('confirm in ask mode uses ask caption', () => {
+    const confirming = {
+      ...initialVoiceState,
+      phase: 'confirming' as const,
+      transcript: 'Что в очереди?',
+      voiceRequireConfirm: true,
+    }
+    const planning = voiceReducer(confirming, { type: 'CONFIRM', mode: 'ask' })
+    expect(planning.phase).toBe('planning')
+    expect(planning.caption).toContain('Спрашиваю')
+  })
+
+  it('auto-dispatches to planning when confirm is disabled', () => {
+    const listening = voiceReducer(initialVoiceState, { type: 'START_LISTENING', at: 1 })
+    const done = voiceReducer(listening, { type: 'FINAL', text: 'Fix the deploy' })
+    expect(done.phase).toBe('planning')
+    expect(done.transcript).toBe('Fix the deploy')
   })
 
   it('does not plan an empty transcript', () => {
@@ -78,5 +103,35 @@ describe('voiceReducer', () => {
     const listening = voiceReducer(speaking, { type: 'START_LISTENING', at: 200 })
     expect(listening.phase).toBe('listening')
     expect(listening.caption).toContain('Слушаю')
+  })
+
+  it('returns to planning after milestone playback', () => {
+    const planning = voiceReducer(initialVoiceState, {
+      type: 'SUBMIT_TEXT',
+      text: 'Статус',
+      mode: 'ask',
+    })
+    const speaking = voiceReducer(planning, {
+      type: 'SPEAKING',
+      caption: 'Взял. Cloud.',
+      kind: 'milestone',
+    })
+    expect(speaking.phase).toBe('speaking')
+    expect(speaking.speakingKind).toBe('milestone')
+    const back = voiceReducer(speaking, { type: 'PLAYBACK_DONE' })
+    expect(back.phase).toBe('planning')
+    expect(back.speakingKind).toBeNull()
+    expect(back.caption).toContain('Взял')
+  })
+
+  it('returns to idle after final playback', () => {
+    const speaking = voiceReducer(initialVoiceState, {
+      type: 'SPEAKING',
+      caption: 'Готово.',
+      kind: 'final',
+    })
+    const idle = voiceReducer(speaking, { type: 'PLAYBACK_DONE' })
+    expect(idle.phase).toBe('idle')
+    expect(idle.speakingKind).toBeNull()
   })
 })

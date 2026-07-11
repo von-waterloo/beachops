@@ -12,7 +12,7 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from beachops.app_context import AppContext
-from beachops.services.run_executor import validate_prompt_request
+from beachops.services.run_executor import submit_user_prompt, validate_prompt_request
 from beachops.services.inline_keyboards import voice_confirmation_keyboard
 from beachops.services.redaction import redact_text
 from beachops.services.status_animation import AnimatedStatus, initial_status_text
@@ -83,8 +83,32 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             return
 
         app.remember_user_message(user.id, message.message_id or 0)
-        draft_id = str(uuid4())
         mode = await app.users.get_mode(user.id)
+        preview = redact_text(text)
+        if len(preview) > 1200:
+            preview = f"{preview[:1200]}…"
+
+        if not app.settings.voice_require_confirm:
+            draft_id = str(uuid4())
+            logger.info(
+                "Voice auto-submit",
+                extra={
+                    "user_id": user.id,
+                    "action": "voice_telegram",
+                    "correlation_id": draft_id,
+                },
+            )
+            await status.edit_text(f"🎤 {preview}\n\nОтправляю…")
+            await submit_user_prompt(
+                context=context,
+                user_id=user.id,
+                prompt=text,
+                mode=mode,
+                idempotency_key=f"voice:{user.id}:{draft_id}",
+            )
+            return
+
+        draft_id = str(uuid4())
         logger.info(
             "Voice draft ready",
             extra={
@@ -101,9 +125,6 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             encrypted,
             ex=600,
         )
-        preview = redact_text(text)
-        if len(preview) > 1200:
-            preview = f"{preview[:1200]}…"
         await status.edit_text(
             f"Проверьте расшифровку перед отправкой:\n\n{preview}",
             reply_markup=voice_confirmation_keyboard(draft_id),

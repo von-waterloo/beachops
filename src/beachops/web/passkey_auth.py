@@ -58,10 +58,14 @@ async def telegram_login_config(request: Request) -> dict:
         _, origin = _rp_config(context)
     except HTTPException:
         origin = ""
+    bot_id = _bot_id_from_token(context.settings.tg_bot_token)
+    expected_host = urlsplit(origin).hostname if origin else None
     return {
         "botUsername": username,
-        "loginEnabled": bool(username and origin),
+        "botId": bot_id,
+        "loginEnabled": bool(username and origin and bot_id),
         "origin": origin or None,
+        "expectedHost": expected_host,
     }
 
 
@@ -548,6 +552,17 @@ def _rp_config(context: AppContext) -> tuple[str, str]:
         raise HTTPException(status_code=503, detail="WebAuthn requires HTTPS")
     origin = f"{parsed.scheme}://{parsed.netloc}"
     return parsed.hostname, origin
+
+
+def _bot_id_from_token(token: str) -> int | None:
+    """Telegram bot tokens are ``{bot_id}:{secret}``."""
+    head = token.strip().split(":", 1)[0]
+    if not head.isdigit():
+        return None
+    try:
+        return int(head)
+    except ValueError:
+        return None
 
 
 def _context(request: Request) -> AppContext:

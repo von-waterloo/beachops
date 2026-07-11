@@ -184,9 +184,9 @@ class RepositoryPolicyService:
         policy = self.policy_for(normalized)
         if policy is None:
             raise RepositoryNotAllowedError(
-                f"Репозиторий {normalized} не в списке разрешённых "
-                "(REPOSITORY_POLICY_JSON). Добавьте URL и ветки в allowlist "
-                'или задайте {"repositories":[]} для открытого режима.'
+                f"Репозиторий {normalized} не разрешён на этом сервере. "
+                "Выберите репо из списка разрешённых или попросите владельца "
+                "открыть режим (пустой список репозиториев)."
             )
         if validated_branch not in policy.allowed_branches:
             allowed = ", ".join(policy.allowed_branches)

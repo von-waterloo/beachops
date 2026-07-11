@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 from beachops.app_context import AppContext
@@ -40,6 +42,7 @@ async def dispatch_prompt(
     idempotency_key: str | None = None,
     approved_plan_job_id: UUID | None = None,
     display_summary: str | None = None,
+    images: Sequence[Mapping[str, str]] | None = None,
 ) -> DispatchResult:
     kind = _job_kind(mode)
     repo = run_context.repo
@@ -48,6 +51,7 @@ async def dispatch_prompt(
     redacted_prompt = redact_text(prompt).strip()
     # UI/job chip title: prefer the raw user utterance over injected brief.
     safe_summary = redact_text((display_summary or prompt)).strip()
+    image_payload = [dict(item) for item in images] if images else []
 
     if redacted_prompt != prompt.strip():
         job = await app.jobs.create(
@@ -102,19 +106,24 @@ async def dispatch_prompt(
         return DispatchResult(job, False, reason)
 
     runtime = choose_runtime(slot=run_context.slot)
-    payload = app.payload_crypto.encrypt_json(
-        {
-            "prompt": prompt,
-            "mode": mode.value,
-            "slot_id": run_context.slot.id,
-            "repo_id": repo.id,
-            "runtime": runtime.value,
-            "local_path": run_context.slot.local_path,
-            "approved_plan_job_id": (
-                str(approved_plan_job_id) if approved_plan_job_id else None
-            ),
-        }
-    )
+    body: dict[str, Any] = {
+        "prompt": prompt,
+        "mode": mode.value,
+        "slot_id": run_context.slot.id,
+        "repo_id": repo.id,
+        "runtime": runtime.value,
+        "local_path": run_context.slot.local_path,
+        "approved_plan_job_id": (
+            str(approved_plan_job_id) if approved_plan_job_id else None
+        ),
+    }
+    if image_payload:
+        body["images"] = image_payload
+        if not (display_summary or "").strip():
+            safe_summary = "🖼 Скриншот"
+        elif safe_summary and not safe_summary.startswith("🖼"):
+            safe_summary = f"🖼 {safe_summary}"
+    payload = app.payload_crypto.encrypt_json(body)
     job = await app.jobs.create(
         actor_id,
         kind=kind,

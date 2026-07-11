@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     webapp_base_url: str = Field(default="", alias="WEBAPP_BASE_URL")
     github_token: str = Field(default="", alias="GITHUB_TOKEN")
     github_repo: str = Field(default="", alias="GITHUB_REPO")
+    github_oauth_client_id: str = Field(default="", alias="GITHUB_OAUTH_CLIENT_ID")
+    github_oauth_client_secret: str = Field(
+        default="", alias="GITHUB_OAUTH_CLIENT_SECRET"
+    )
     github_deploy_workflow: str = Field(
         default="deploy-prod.yml", alias="GITHUB_DEPLOY_WORKFLOW"
     )
@@ -117,6 +121,18 @@ class Settings(BaseSettings):
     voice_max_session_sec: int = Field(
         default=300, alias="VOICE_MAX_SESSION_SEC", ge=30, le=900
     )
+    # Mid-run spoken milestones in Mini App voice (ack + status TTS).
+    voice_milestone_tts: bool = Field(default=True, alias="VOICE_MILESTONE_TTS")
+    voice_milestone_min_interval_sec: int = Field(
+        default=15, alias="VOICE_MILESTONE_MIN_INTERVAL_SEC", ge=5, le=120
+    )
+    voice_milestone_max_per_job: int = Field(
+        default=4, alias="VOICE_MILESTONE_MAX_PER_JOB", ge=0, le=20
+    )
+    # After /plan finishes, immediately enqueue DO (no owner Approve buttons).
+    auto_approve_plans: bool = Field(default=True, alias="AUTO_APPROVE_PLANS")
+    # Telegram + Mini App voice: confirm transcript before dispatch.
+    voice_require_confirm: bool = Field(default=False, alias="VOICE_REQUIRE_CONFIRM")
     callback_token_ttl_sec: int = Field(
         default=600, alias="CALLBACK_TOKEN_TTL_SEC", ge=30, le=86_400
     )

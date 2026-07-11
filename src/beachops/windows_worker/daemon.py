@@ -238,6 +238,13 @@ async def execute_claimed_job(
         extra={"job_id": job_id, "action": "windows_run"},
     )
 
+    from beachops.services.telegram_images import decode_payload_images
+
+    try:
+        images = decode_payload_images(job.get("images"))
+    except Exception:
+        images = []
+
     outcome, new_agent_id = await cursor.run_prompt(
         prompt=prompt,
         mode=mode,
@@ -249,6 +256,7 @@ async def execute_claimed_job(
         runtime=AgentRuntime.WINDOWS,
         local_path=local_path,
         memory_block=memory_block,
+        images=images or None,
     )
 
     terminal = "run.failed" if outcome.status == "error" else "run.finished"

@@ -36,6 +36,100 @@ _URL_RE = re.compile(r"https?://\S+")
 _BULLET_RE = re.compile(r"(?m)^\s*[-*•]\s+")
 _MULTI_SPACE_RE = re.compile(r"\s+")
 
+# Status transitions worth speaking mid-run (terminal / ack-covered skipped).
+_STATUS_MILESTONES: dict[str, str] = {
+    "planning": "Строю план.",
+    "approved": "Approve получен. Запускаю.",
+    "running": "Агент в работе.",
+    "awaiting_approval": "Ждёт вашего approve.",
+    "review_required": "Нужен review.",
+    "revision_requested": "Нужна revision.",
+    "paused": "Пауза.",
+    "blocked": "Задача заблокирована.",
+}
+
+_PROGRESS_AGENT_RE = re.compile(
+    r"agent\s+started|агент\s+запущ|connecting|подключ",
+    re.IGNORECASE,
+)
+_PROGRESS_EDIT_RE = re.compile(
+    r"\btool\b|редактир|пишу\s+файл|writing\s+file|editing",
+    re.IGNORECASE,
+)
+
+
+def spoken_ack(*, runtime: str | None = None, room: str | None = None) -> str:
+    """Short take-job acknowledgement for Mini App mid-run voice."""
+    bits = ["Взял."]
+    rt = (runtime or "").strip().lower()
+    if rt == "windows":
+        bits.append("Windows.")
+    elif rt:
+        bits.append("Cloud.")
+    room_bit = (room or "").strip()
+    if room_bit:
+        bits.append(room_bit)
+    return " ".join(bits)
+
+
+def milestone_line(
+    *,
+    status: str | None = None,
+    previous_status: str | None = None,
+    progress_text: str | None = None,
+) -> str | None:
+    """Map a job status change / progress caption to a laconic spoken line.
+
+    Returns None for noise (no change, queued, terminal, empty progress).
+    """
+    current = (status or "").strip().lower() or None
+    previous = (previous_status or "").strip().lower() or None
+
+    if current and current != previous:
+        line = _STATUS_MILESTONES.get(current)
+        if line:
+            return line
+
+    text = (progress_text or "").strip()
+    if not text:
+        return None
+    if _PROGRESS_AGENT_RE.search(text):
+        return "Агент на связи."
+    if _PROGRESS_EDIT_RE.search(text):
+        return "Правит код."
+    return None
+
+
+class MilestoneGate:
+    """Anti-spam gate for mid-run TTS (interval + max count per job)."""
+
+    def __init__(self, *, min_interval_sec: float, max_per_job: int) -> None:
+        self.min_interval_sec = max(0.0, float(min_interval_sec))
+        self.max_per_job = max(0, int(max_per_job))
+        self.count = 0
+        self.last_spoke_at: float | None = None
+        self.last_line: str | None = None
+
+    def allow(self, now: float, line: str | None) -> bool:
+        if not line:
+            return False
+        if line == self.last_line:
+            return False
+        if self.count >= self.max_per_job:
+            return False
+        if (
+            self.last_spoke_at is not None
+            and (now - self.last_spoke_at) < self.min_interval_sec
+        ):
+            return False
+        return True
+
+    def mark(self, now: float, line: str, *, count: bool = True) -> None:
+        if count:
+            self.count += 1
+        self.last_spoke_at = now
+        self.last_line = line
+
 
 def to_spoken_briefing(text: str, *, max_chars: int = 900) -> str:
     """Compress agent output into a voice-ready laconic briefing."""

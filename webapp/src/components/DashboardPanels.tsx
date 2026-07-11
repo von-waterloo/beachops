@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   Activity,
@@ -12,12 +12,14 @@ import {
   HeartPulse,
   Loader2,
   LockKeyhole,
+  LogIn,
   Monitor,
   Plus,
   Radio,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
+  Unplug,
   X,
   Zap,
 } from 'lucide-react'
@@ -31,6 +33,15 @@ import type {
 } from '../types/api'
 import { isActiveJobStatus } from '../types/api'
 import { feedback } from '../lib/feedback'
+import {
+  disconnectGithub,
+  fetchGithubRepos,
+  fetchGithubStatus,
+  githubOAuthStartUrl,
+  pinBranchFor,
+  type GithubConnectionStatus,
+  type GithubRemoteRepo,
+} from '../lib/github'
 import {
   FLOW_TIPS,
   PLACE_TIPS,
@@ -99,6 +110,137 @@ function preferredBranch(branches: string[], defaultBranch: string): string {
   return nonProtected ?? branches[0] ?? defaultBranch
 }
 
+function GithubConnectPanel({
+  onPin,
+  canManage,
+}: {
+  onPin: (url: string, branch: string) => void
+  canManage: boolean
+}) {
+  const [status, setStatus] = useState<GithubConnectionStatus | null>(null)
+  const [repos, setRepos] = useState<GithubRemoteRepo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [listBusy, setListBusy] = useState(false)
+  const [pinning, setPinning] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const next = await fetchGithubStatus()
+      setStatus(next)
+      if (next.connected) {
+        setListBusy(true)
+        try {
+          setRepos(await fetchGithubRepos(1))
+        } catch (err: unknown) {
+          setRepos([])
+          setError(err instanceof Error ? err.message : 'Не удалось загрузить репо GitHub')
+        } finally {
+          setListBusy(false)
+        }
+      } else {
+        setRepos([])
+      }
+    } catch {
+      setStatus({ configured: false, connected: false, login: null })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void refresh()
+  }, [])
+
+  if (!canManage) return null
+
+  return (
+    <Section eyebrow="GitHub" title="Войти и выбрать репо">
+      <article className="github-connect-card">
+        {loading ? (
+          <p className="muted-hint"><Loader2 size={14} className="spin-icon" /> Проверяю GitHub…</p>
+        ) : !status?.configured ? (
+          <p className="muted-hint">
+            GitHub OAuth не настроен на сервере. Пока можно вставить URL вручную ниже.
+          </p>
+        ) : !status.connected ? (
+          <>
+            <p>
+              Войдите в GitHub, выберите репозиторий — он закрепится в BeachOps.
+              Cursor всё равно должен иметь доступ к этому репо в своих Settings.
+            </p>
+            <a
+              className="primary-button github-connect-btn"
+              href={githubOAuthStartUrl()}
+              onClick={() => feedback('tap')}
+            >
+              <LogIn size={17} />
+              Войти через GitHub
+            </a>
+          </>
+        ) : (
+          <>
+            <div className="github-connect-topline">
+              <strong>@{status.login || 'github'}</strong>
+              <button
+                type="button"
+                className="ghost-link"
+                onClick={() => {
+                  feedback('tap')
+                  void disconnectGithub()
+                    .then(() => {
+                      feedback('success')
+                      void refresh()
+                    })
+                    .catch(() => feedback('error'))
+                }}
+              >
+                <Unplug size={14} /> Отключить
+              </button>
+            </div>
+            {listBusy && (
+              <p className="muted-hint"><Loader2 size={14} className="spin-icon" /> Загружаю список…</p>
+            )}
+            {!listBusy && repos.length === 0 && (
+              <p className="muted-hint">Репозиториев не видно — проверьте доступ GitHub.</p>
+            )}
+            <div className="github-repo-picker">
+              {repos.map((repo) => (
+                <button
+                  key={repo.url}
+                  type="button"
+                  className="github-repo-option"
+                  disabled={pinning === repo.url}
+                  onClick={() => {
+                    feedback('tap')
+                    setPinning(repo.url)
+                    const branch = pinBranchFor(repo)
+                    onPin(repo.url, branch)
+                    window.setTimeout(() => setPinning(null), 1200)
+                  }}
+                >
+                  <span>
+                    <strong>{repo.fullName}</strong>
+                    <small>
+                      {repo.private ? 'private' : 'public'} · ветка {pinBranchFor(repo)}
+                    </small>
+                  </span>
+                  {pinning === repo.url
+                    ? <Loader2 size={16} className="spin-icon" />
+                    : <Plus size={16} />}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {error && <div className="inline-error" role="alert">{error}</div>}
+      </article>
+    </Section>
+  )
+}
+
 function RepoPolicyBanner({
   openMode,
   allowedCount,
@@ -116,7 +258,7 @@ function RepoPolicyBanner({
             ? 'Вставьте любой HTTPS GitHub URL и базовую ветку. Запись в main/master запрещена — для работы берите dev или feature.'
             : allowedCount
               ? 'Сервер разрешает только репозитории ниже. Нажмите «Подключить» — URL и ветка подставятся сами.'
-              : 'Allowlist пуст и режим строгий — попросите владельца добавить URL в REPOSITORY_POLICY_JSON или открыть {"repositories":[]}.'}
+              : 'Список разрешённых пуст. Попросите владельца открыть режим или добавить репозитории.'}
         </p>
       </div>
     </div>
@@ -500,8 +642,12 @@ function SelfImprovePanel({
           </p>
           {targetUrl ? (
             <p className="muted-hint">Цель: {targetUrl.replace('https://github.com/', '')}</p>
-          ) : (
+          ) : enabled ? (
             <p className="muted-hint">Сначала сделайте активным репо BeachOps во вкладке «Репо».</p>
+          ) : (
+            <p className="muted-hint">
+              Выключено — обычные задачи идут в активное репо. Для включения закрепите форк BeachOps во вкладке «Репо».
+            </p>
           )}
         </div>
         {isOwner ? (
@@ -1059,6 +1205,11 @@ export function DashboardPanels({
         <>
           <RepoPolicyBanner openMode={openMode} allowedCount={allowedRepos.length} />
 
+          <GithubConnectPanel
+            canManage={Boolean(onAddRepository)}
+            onPin={(url, branch) => connectRepo(url, branch, { quick: true })}
+          />
+
           {!openMode && (
             <AllowedRepoList
               items={allowedRepos}
@@ -1079,8 +1230,8 @@ export function DashboardPanels({
           >
             <p className="repo-add-lead">
               {openMode
-                ? '1. Вставьте URL → 2. Укажите ветку (обычно dev) → 3. Добавить'
-                : 'Или вставьте URL вручную — только из allowlist сервера'}
+                ? 'Или вручную: URL → ветка (обычно dev) → Добавить'
+                : 'Или вставьте URL вручную — только из списка сервера'}
             </p>
             <label>
               <span>GitHub URL</span>

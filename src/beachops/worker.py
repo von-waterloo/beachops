@@ -163,6 +163,13 @@ async def _execute_locked(app: AppContext, bot: Bot, job) -> None:
         await _fail_job(app, job, "invalid encrypted payload")
         raise RuntimeError("invalid job payload") from exc
 
+    from beachops.services.telegram_images import decode_payload_images
+
+    try:
+        images = decode_payload_images(payload.get("images"))
+    except Exception:
+        images = []
+
     run_context = await app.agent_slots.get_run_context(job.actor_id)
     if run_context is None:
         await _fail_job(app, job, "repository context is unavailable")
@@ -203,6 +210,7 @@ async def _execute_locked(app: AppContext, bot: Bot, job) -> None:
             mode,
             run_context,
             job_id=job.id,
+            images=tuple(images) if images else None,
         )
     finally:
         clear_log_context()
@@ -256,15 +264,44 @@ async def _execute_locked(app: AppContext, bot: Bot, job) -> None:
     )
 
     if mode == UserMode.PLAN:
-        await _request_owner_review(
-            app,
-            bot,
-            job,
-            current_status=JobStatus.PLANNING,
-            approval_kind=ApprovalKind.PLAN_EXECUTION,
-            target_status=JobStatus.AWAITING_APPROVAL,
-            text="BeachOps подготовил план. Выполнение требует подтверждения владельца.",
-        )
+        if app.settings.auto_approve_plans:
+            await app.jobs.transition(
+                job.actor_id,
+                job.id,
+                from_statuses=[JobStatus.PLANNING],
+                to_status=JobStatus.AWAITING_APPROVAL,
+                event_type="approval.auto_requested",
+                details={"kind": ApprovalKind.PLAN_EXECUTION.value, "auto": True},
+            )
+            refreshed = await app.jobs.get_internal(job.id)
+            if refreshed is None:
+                await _fail_job(app, job, "job missing after plan")
+                return
+            from beachops.services.approval_actions import approve_job
+
+            try:
+                await approve_job(app, refreshed, ApprovalKind.PLAN_EXECUTION)
+            except Exception as exc:
+                logger.exception(
+                    "Auto-approve plan failed",
+                    extra={"job_id": str(job.id), "action": "auto_approve"},
+                )
+                await _fail_job(app, refreshed, f"auto-approve failed: {exc}")
+                return
+            logger.info(
+                "Plan auto-approved into DO",
+                extra={"job_id": str(job.id), "action": "auto_approve"},
+            )
+        else:
+            await _request_owner_review(
+                app,
+                bot,
+                job,
+                current_status=JobStatus.PLANNING,
+                approval_kind=ApprovalKind.PLAN_EXECUTION,
+                target_status=JobStatus.AWAITING_APPROVAL,
+                text="BeachOps подготовил план. Выполнение требует подтверждения владельца.",
+            )
     else:
         await app.jobs.transition(
             job.actor_id,

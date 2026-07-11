@@ -14,6 +14,7 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
+from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
@@ -295,6 +296,108 @@ def create_app() -> FastAPI:
             await context.agent_slots.sync_active_slot_repo(principal.user_id, repo)
         return _repo_json(repo)
 
+    @app.get("/api/auth/github/status")
+    async def github_oauth_status(
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        from beachops.web.github_oauth import connection_status
+
+        return await connection_status(_context(request), user_id=principal.user_id)
+
+    @app.get("/api/auth/github/start")
+    async def github_oauth_start(
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> RedirectResponse:
+        from beachops.web.github_oauth import (
+            GithubOAuthError,
+            GithubOAuthNotConfigured,
+            begin_oauth,
+        )
+
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        if role not in {Role.OPERATOR, Role.OWNER}:
+            raise HTTPException(status_code=403, detail="operator role required")
+        try:
+            url = await begin_oauth(context, user_id=principal.user_id)
+        except GithubOAuthNotConfigured as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="GitHub OAuth не настроен (GITHUB_OAUTH_CLIENT_ID/SECRET)",
+            ) from exc
+        except GithubOAuthError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return RedirectResponse(url, status_code=302)
+
+    @app.get("/api/auth/github/callback")
+    async def github_oauth_callback(
+        request: Request,
+        code: str = "",
+        state: str = "",
+        error: str = "",
+    ) -> RedirectResponse:
+        from beachops.web.github_oauth import GithubOAuthError, complete_oauth
+
+        context = _context(request)
+        base = context.settings.webapp_base_url.rstrip("/") or "/"
+        if error:
+            return RedirectResponse(f"{base}/?tab=repos&github=denied", status_code=302)
+        try:
+            user_id = await complete_oauth(context, code=code, state=state)
+            await context.audit.append(
+                actor_id=user_id,
+                event_type="auth.github_oauth",
+                action="connect",
+                outcome="success",
+                details={},
+            )
+        except GithubOAuthError:
+            return RedirectResponse(f"{base}/?tab=repos&github=error", status_code=302)
+        return RedirectResponse(f"{base}/?tab=repos&github=connected", status_code=302)
+
+    @app.delete("/api/auth/github")
+    async def github_oauth_disconnect(
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        from beachops.web.github_oauth import disconnect
+
+        await disconnect(_context(request), user_id=principal.user_id)
+        return {"connected": False}
+
+    @app.get("/api/github/repos")
+    async def github_list_repos(
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+        page: int = 1,
+    ) -> dict:
+        from beachops.web.github_oauth import (
+            GithubOAuthError,
+            GithubOAuthNotConnected,
+            list_repositories,
+        )
+
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        if role not in {Role.OPERATOR, Role.OWNER}:
+            raise HTTPException(status_code=403, detail="operator role required")
+        try:
+            repos = await list_repositories(
+                context, user_id=principal.user_id, page=page
+            )
+        except GithubOAuthNotConnected as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+        except GithubOAuthError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.warning("GitHub repos list failed: %s", exc)
+            raise HTTPException(
+                status_code=502, detail="Не удалось получить репозитории GitHub"
+            ) from exc
+        return {"repositories": repos}
+
     @app.patch("/api/repos/{repo_id}")
     async def update_repo(
         repo_id: int,
@@ -425,6 +528,24 @@ def create_app() -> FastAPI:
             build_situation_brief,
             with_situation,
         )
+        from beachops.services.telegram_images import (
+            WebImageError,
+            encode_images_for_payload,
+        )
+
+        user_prompt = body.resolved_prompt()
+        if not user_prompt:
+            raise HTTPException(status_code=400, detail="prompt or images required")
+
+        try:
+            image_payload = encode_images_for_payload(
+                [
+                    {"mimeType": item.mimeType, "data": item.data}
+                    for item in (body.images or [])
+                ]
+            )
+        except WebImageError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         situation = await build_situation_brief(
             context,
@@ -432,7 +553,7 @@ def create_app() -> FastAPI:
             run_context=run_context,
             role=role,
         )
-        prompt = with_situation(body.prompt, situation)
+        prompt = with_situation(user_prompt, situation)
         key = idempotency_key or f"web:{principal.user_id}:{uuid4()}"
         dispatched = await dispatch_prompt(
             context,
@@ -441,7 +562,8 @@ def create_app() -> FastAPI:
             mode=mode,
             run_context=run_context,
             idempotency_key=key,
-            display_summary=body.prompt,
+            display_summary=user_prompt,
+            images=image_payload or None,
         )
         await context.hot_cache.bump_dashboard_generation()
         return {
@@ -717,7 +839,12 @@ def create_app() -> FastAPI:
             "Voice WS session ready",
             extra={"user_id": principal.user_id, "action": "voice_session"},
         )
-        await websocket.send_json({"type": "session.ready"})
+        await websocket.send_json(
+            {
+                "type": "session.ready",
+                "voiceRequireConfirm": bool(context.settings.voice_require_confirm),
+            }
+        )
 
         gateway = RealtimeVoiceGateway(
             api_key=context.settings.openai_api_key,
@@ -972,6 +1099,7 @@ def create_app() -> FastAPI:
                 "modelKey": model_key,
                 "memoryBlock": memory_block,
                 "runtime": job.runtime,
+                "images": payload.get("images") if isinstance(payload.get("images"), list) else [],
             }
         }
 
@@ -1412,17 +1540,93 @@ def _approval_json(approval, *, job=None) -> dict:
     }
 
 
+async def _stream_voice_pcm(
+    context: AppContext,
+    websocket: WebSocket,
+    text: str,
+    *,
+    kind: str,
+) -> None:
+    """Push audio.started + PCM + audio.ended for Mini App playback."""
+    from beachops.domain.voice_persona import to_spoken_briefing
+
+    briefing = to_spoken_briefing(
+        text,
+        max_chars=context.settings.voice_spoken_max_chars,
+    )
+    if not briefing:
+        return
+    await websocket.send_json(
+        {
+            "type": "audio.started",
+            "caption": briefing[:500],
+            "kind": kind,
+        }
+    )
+    async for chunk in context.speech.stream_pcm(text):
+        await websocket.send_bytes(chunk)
+    await websocket.send_json({"type": "audio.ended", "kind": kind})
+
+
 async def _speak_job_result(
     context: AppContext,
     websocket: WebSocket,
     job_id: UUID,
 ) -> None:
+    from beachops.domain.voice_persona import (
+        MilestoneGate,
+        milestone_line,
+        spoken_ack,
+        to_spoken_briefing,
+    )
+    from beachops.services.situation_brief import build_spoken_room_bits
+
     logger.info(
         "Voice speak poll started",
         extra={"job_id": str(job_id), "action": "voice_speak"},
     )
+    milestones_enabled = bool(context.settings.voice_milestone_tts)
+    gate = MilestoneGate(
+        min_interval_sec=context.settings.voice_milestone_min_interval_sec,
+        max_per_job=context.settings.voice_milestone_max_per_job,
+    )
     last_caption = ""
     after_event_id = 0
+    previous_status: str | None = None
+
+    job = await context.jobs.get_internal(job_id)
+    if job is None:
+        logger.warning(
+            "Voice speak: job missing",
+            extra={
+                "job_id": str(job_id),
+                "action": "voice_speak",
+                "error_code": "job_missing",
+            },
+        )
+        with suppress(Exception):
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "job_missing",
+                    "message": "Задача исчезла",
+                }
+            )
+        return
+
+    previous_status = job.status.value
+    if milestones_enabled:
+        try:
+            room = await build_spoken_room_bits(context, actor_id=job.actor_id)
+            ack = spoken_ack(runtime=job.runtime, room=room)
+            await _stream_voice_pcm(context, websocket, ack, kind="milestone")
+            gate.mark(time.monotonic(), ack, count=False)
+        except Exception:
+            logger.exception(
+                "Voice speak ack failed",
+                extra={"job_id": str(job_id), "action": "voice_speak"},
+            )
+
     for _ in range(1800):
         await asyncio.sleep(2)
         job = await context.jobs.get_internal(job_id)
@@ -1445,6 +1649,9 @@ async def _speak_job_result(
                 )
             return
 
+        status_value = job.status.value
+        progress_for_milestone: str | None = None
+
         # Live awareness: push run progress captions while the agent works.
         rows = await context.run_events.list_for_job(
             job_id, after_id=after_event_id, limit=50
@@ -1456,6 +1663,7 @@ async def _speak_job_result(
             if not text or text == last_caption:
                 continue
             last_caption = text
+            progress_for_milestone = text
             with suppress(Exception):
                 await websocket.send_json(
                     {
@@ -1463,9 +1671,46 @@ async def _speak_job_result(
                         "jobId": str(job_id),
                         "text": text[:500],
                         "eventType": event["eventType"],
-                        "status": job.status.value,
+                        "status": status_value,
                     }
                 )
+
+        if milestones_enabled and job.status not in {
+            JobStatus.SUCCEEDED,
+            JobStatus.AWAITING_APPROVAL,
+            JobStatus.APPROVED,
+            JobStatus.REVIEW_REQUIRED,
+            JobStatus.FAILED,
+            JobStatus.BLOCKED,
+            JobStatus.CANCELLED,
+        }:
+            line = milestone_line(
+                status=status_value,
+                previous_status=previous_status,
+                progress_text=(
+                    None
+                    if status_value != previous_status
+                    else progress_for_milestone
+                ),
+            )
+            now = time.monotonic()
+            if gate.allow(now, line) and line:
+                try:
+                    await _stream_voice_pcm(
+                        context, websocket, line, kind="milestone"
+                    )
+                    gate.mark(now, line, count=True)
+                except Exception:
+                    logger.exception(
+                        "Voice speak milestone failed",
+                        extra={
+                            "job_id": str(job_id),
+                            "action": "voice_speak",
+                        },
+                    )
+
+        if status_value != previous_status:
+            previous_status = status_value
 
         if job.status in {JobStatus.FAILED, JobStatus.BLOCKED, JobStatus.CANCELLED}:
             logger.warning(
@@ -1487,6 +1732,7 @@ async def _speak_job_result(
             return
         if job.status not in {
             JobStatus.AWAITING_APPROVAL,
+            JobStatus.APPROVED,
             JobStatus.SUCCEEDED,
             JobStatus.REVIEW_REQUIRED,
         }:
@@ -1529,20 +1775,30 @@ async def _speak_job_result(
                     }
                 )
             return
-        from beachops.domain.voice_persona import to_spoken_briefing
 
+        room = ""
+        if milestones_enabled:
+            with suppress(Exception):
+                room = await build_spoken_room_bits(
+                    context, actor_id=job.actor_id
+                )
+        speak_text = f"{room} {result.body}".strip() if room else result.body
         briefing = to_spoken_briefing(
-            result.body,
+            speak_text,
             max_chars=context.settings.voice_spoken_max_chars,
         )
-        await websocket.send_json(
-            {"type": "audio.started", "caption": briefing[:500] or result.body[:500]}
+        await _stream_voice_pcm(
+            context,
+            websocket,
+            speak_text,
+            kind="final",
         )
-        async for chunk in context.speech.stream_pcm(result.body):
-            await websocket.send_bytes(chunk)
-        await websocket.send_json({"type": "audio.ended"})
         logger.info(
             "Voice speak completed",
-            extra={"job_id": str(job_id), "action": "voice_speak"},
+            extra={
+                "job_id": str(job_id),
+                "action": "voice_speak",
+                "caption_chars": len(briefing),
+            },
         )
         return

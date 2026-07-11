@@ -155,6 +155,7 @@ export function useDashboard(pollMs = 15_000) {
     prompt: string
     mode?: 'ask' | 'plan' | 'do'
     slotId?: string
+    images?: Array<{ mimeType: string; data: string }>
   }) => {
     const result = await apiFetch<{
       job: { id: string }
@@ -167,6 +168,7 @@ export function useDashboard(pollMs = 15_000) {
         prompt: input.prompt,
         mode: input.mode ?? 'ask',
         slotId: input.slotId,
+        images: input.images?.length ? input.images : undefined,
       }),
     })
     await refresh()

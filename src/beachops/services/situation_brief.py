@@ -6,6 +6,8 @@ jobs, approvals, workers, and the active slot — not only the latest utterance.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from beachops.app_context import AppContext
 from beachops.domain.security import JobStatus, Role
 from beachops.services.agent_slots import RunContext
@@ -22,6 +24,89 @@ _ACTIVE = {
     JobStatus.PAUSED,
     JobStatus.BLOCKED,
 }
+
+
+@dataclass(frozen=True)
+class ControlRoomCounts:
+    running: int
+    queued: int
+    blocked: int
+    pending_approvals: int
+    workers_online: int
+
+
+async def collect_control_room_counts(
+    app: AppContext,
+    *,
+    actor_id: int,
+    role: Role | None = None,
+) -> ControlRoomCounts:
+    """Fresh queue / approve / worker counts for prompts and spoken TTS."""
+    resolved_role = role or app.settings.role_for(actor_id)
+    jobs = (
+        await app.jobs.list_all_internal(limit=40)
+        if resolved_role == Role.OWNER
+        else await app.jobs.list_for_actor(actor_id, limit=40)
+    )
+    active = [job for job in jobs if job.status in _ACTIVE]
+    queued = sum(1 for job in active if job.status == JobStatus.QUEUED)
+    running = sum(
+        1
+        for job in active
+        if job.status in {JobStatus.RUNNING, JobStatus.PLANNING, JobStatus.APPROVED}
+    )
+    blocked = sum(
+        1
+        for job in active
+        if job.status
+        in {
+            JobStatus.BLOCKED,
+            JobStatus.AWAITING_APPROVAL,
+            JobStatus.REVIEW_REQUIRED,
+            JobStatus.PAUSED,
+            JobStatus.REVISION_REQUESTED,
+        }
+    )
+    approvals = (
+        await app.approvals.list_pending(limit=20)
+        if resolved_role == Role.OWNER
+        else []
+    )
+    workers = await app.worker_nodes.list_online()
+    return ControlRoomCounts(
+        running=running,
+        queued=queued,
+        blocked=blocked,
+        pending_approvals=len(approvals),
+        workers_online=len(workers),
+    )
+
+
+def format_spoken_room(counts: ControlRoomCounts) -> str:
+    """2–3 laconic facts for mid/final TTS (not a full prompt brief)."""
+    bits: list[str] = []
+    if counts.queued:
+        bits.append(f"В очереди ещё {counts.queued}.")
+    if counts.pending_approvals:
+        bits.append(f"Ждёт approve: {counts.pending_approvals}.")
+    elif counts.blocked:
+        bits.append(f"На блоке: {counts.blocked}.")
+    if counts.running > 1:
+        bits.append(f"Активных {counts.running}.")
+    if counts.workers_online:
+        bits.append(f"Воркеры онлайн: {counts.workers_online}.")
+    return " ".join(bits[:3])
+
+
+async def build_spoken_room_bits(
+    app: AppContext,
+    *,
+    actor_id: int,
+    role: Role | None = None,
+) -> str:
+    """Rebuild control-room spoken bits right before TTS."""
+    counts = await collect_control_room_counts(app, actor_id=actor_id, role=role)
+    return format_spoken_room(counts)
 
 
 async def build_situation_brief(
@@ -107,6 +192,17 @@ async def build_situation_brief(
     )
     lines.append(f"- Модель Cursor: {model_key}")
     return "\n".join(lines)
+
+
+def with_situation(prompt: str, situation: str | None) -> str:
+    """Prepend situation brief to a user prompt when present."""
+    body = (prompt or "").strip()
+    brief = (situation or "").strip()
+    if not brief:
+        return body
+    if not body:
+        return brief
+    return f"{brief}\n\n---\n\nЗапрос пользователя:\n{body}"
 
 
 def with_situation(prompt: str, situation: str | None) -> str:

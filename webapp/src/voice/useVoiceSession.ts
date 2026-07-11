@@ -24,6 +24,8 @@ interface VoiceEvent {
   code?: string
   jobId?: string
   mode?: string
+  kind?: string
+  voiceRequireConfirm?: boolean
 }
 
 const VOICE_ERROR_MESSAGES: Record<string, string> = {
@@ -71,11 +73,18 @@ export function useVoiceSession(options: {
   const playingRef = useRef<AudioBufferSourceNode | null>(null)
   const playbackContextRef = useRef<AudioContext | null>(null)
   const onJobStartedRef = useRef(options.onJobStarted)
+  const voiceRequireConfirmRef = useRef(false)
+  const submitModeRef = useRef<'ask' | 'plan'>('ask')
   onJobStartedRef.current = options.onJobStarted
 
   useEffect(() => {
     connectedRef.current = state.connected
-  }, [state.connected])
+    voiceRequireConfirmRef.current = state.voiceRequireConfirm
+  }, [state.connected, state.voiceRequireConfirm])
+
+  const setSubmitMode = useCallback((mode: 'ask' | 'plan') => {
+    submitModeRef.current = mode
+  }, [])
 
   const sendJson = useCallback((payload: Record<string, unknown>) => {
     const socket = wsRef.current
@@ -136,15 +145,29 @@ export function useVoiceSession(options: {
     switch (event.type) {
       case 'session.ready':
         reconnectRef.current = 0
-        dispatch({ type: 'CONNECTED', connected: true })
+        voiceRequireConfirmRef.current = event.voiceRequireConfirm === true
+        dispatch({
+          type: 'CONNECTED',
+          connected: true,
+          voiceRequireConfirm: event.voiceRequireConfirm === true,
+        })
         break
       case 'transcript.partial':
         dispatch({ type: 'PARTIAL', text: event.text ?? '' })
         break
-      case 'transcript.final':
-        dispatch({ type: 'FINAL', text: event.text ?? '' })
+      case 'transcript.final': {
+        const text = event.text ?? ''
+        dispatch({ type: 'FINAL', text })
         feedback('success')
+        if (!voiceRequireConfirmRef.current && text.trim()) {
+          sendJson({
+            type: 'plan.request',
+            transcript: text.trim(),
+            mode: submitModeRef.current,
+          })
+        }
         break
+      }
       case 'plan.started':
         dispatch({
           type: 'PLAN_STARTED',
@@ -158,7 +181,11 @@ export function useVoiceSession(options: {
         }
         break
       case 'audio.started':
-        dispatch({ type: 'SPEAKING', caption: event.caption })
+        dispatch({
+          type: 'SPEAKING',
+          caption: event.caption,
+          kind: event.kind === 'milestone' ? 'milestone' : 'final',
+        })
         break
       case 'caption':
         dispatch({ type: 'SPEAKING', caption: event.text })
@@ -171,7 +198,7 @@ export function useVoiceSession(options: {
         feedback('error')
         break
     }
-  }, [playNext])
+  }, [playNext, sendJson])
 
   const connect = useCallback(() => {
     if (!navigator.onLine) return
@@ -388,10 +415,11 @@ export function useVoiceSession(options: {
     feedback('select')
   }, [sendJson, stopCapture, stopPlayback])
 
-  const confirmPlan = useCallback(() => {
+  const confirmSubmit = useCallback((mode: 'ask' | 'plan' = submitModeRef.current) => {
     if (!state.transcript.trim()) return
-    sendJson({ type: 'plan.request', transcript: state.transcript.trim(), mode: 'plan' })
-    dispatch({ type: 'CONFIRM' })
+    submitModeRef.current = mode
+    sendJson({ type: 'plan.request', transcript: state.transcript.trim(), mode })
+    dispatch({ type: 'CONFIRM', mode })
     feedback('success')
   }, [sendJson, state.transcript])
 
@@ -410,6 +438,7 @@ export function useVoiceSession(options: {
       })
       return false
     }
+    submitModeRef.current = mode
     sendJson({ type: 'plan.request', transcript: trimmed, mode })
     dispatch({ type: 'SUBMIT_TEXT', text: trimmed, mode })
     feedback('success')
@@ -423,8 +452,9 @@ export function useVoiceSession(options: {
     startListening,
     finishListening,
     cancel,
-    confirmPlan,
+    confirmSubmit,
     submitComposer,
+    setSubmitMode,
     editTranscript: (text: string) => dispatch({ type: 'EDIT', text }),
     reset: () => dispatch({ type: 'RESET' }),
   }

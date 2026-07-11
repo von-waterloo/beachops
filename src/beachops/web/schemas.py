@@ -101,10 +101,26 @@ class AgentUpdateRequest(ApiModel):
     makeActive: bool | None = None
 
 
+class PromptImage(ApiModel):
+    mimeType: str = Field(min_length=3, max_length=64)
+    data: str = Field(min_length=8, max_length=8_000_000)
+
+
 class PromptRequest(ApiModel):
-    prompt: str = Field(min_length=1, max_length=8000)
+    prompt: str = Field(default="", max_length=8000)
     mode: str = Field(default="ask", pattern="^(ask|plan|do)$")
     slotId: str | None = Field(default=None, max_length=32)
+    images: list[PromptImage] | None = Field(default=None, max_length=8)
+
+    def resolved_prompt(self) -> str:
+        text = self.prompt.strip()
+        if text:
+            return text
+        if self.images:
+            from beachops.services.ui_copy import photo_default_prompt
+
+            return photo_default_prompt()
+        return ""
 
 
 class SelfImproveRequest(ApiModel):

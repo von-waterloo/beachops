@@ -73,13 +73,34 @@ function ControlRoom({
   user,
   error,
 }: ControlRoomProps) {
-  const [tab, setTab] = useState<TabId>('voice')
+  const [tab, setTab] = useState<TabId>(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('tab') === 'repos' || params.get('tab') === 'repositories'
+      ? 'repositories'
+      : 'voice'
+  })
   const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>('all')
   const [focusedJobId, setFocusedJobId] = useState<string | null>(null)
   const [cursorModelKey, setCursorModelKey] = useState(user.cursorModelKey ?? '')
   const dashboard = useDashboard()
   const [now, setNow] = useState(() => Date.now())
   const [soundMuted, setSoundMutedState] = useState(() => isSoundMuted())
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const github = params.get('github')
+    if (!github) return
+    if (github === 'connected') feedback('success')
+    else if (github === 'denied' || github === 'error') feedback('error')
+    params.delete('github')
+    params.delete('tab')
+    const next = params.toString()
+    window.history.replaceState(
+      {},
+      '',
+      `${window.location.pathname}${next ? `?${next}` : ''}${window.location.hash}`,
+    )
+  }, [])
 
   const toggleSound = () => {
     const next = !soundMuted

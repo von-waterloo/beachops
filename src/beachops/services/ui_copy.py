@@ -255,9 +255,8 @@ def repo_not_allowed(reason: str | None = None) -> str:
     if detail:
         return detail
     return (
-        "Репозиторий или ветка не разрешены политикой "
-        "(REPOSITORY_POLICY_JSON). Проверьте URL и ветку в allowlist "
-        'или задайте {"repositories":[]} для открытого режима.'
+        "Репозиторий или ветка не разрешены на этом сервере. "
+        "Проверьте URL и ветку или попросите владельца открыть режим."
     )
 
 
@@ -593,7 +592,7 @@ def build_welcome_message(
         lines.extend(
             [
                 "· действие (/do) — сразу правки в базовой ветке репо",
-                "· план (/plan, /task) — сначала план, потом approve",
+                "· план (/plan, /task) — разбор, затем сразу выполнение",
             ]
         )
     else:

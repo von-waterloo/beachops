@@ -43,7 +43,7 @@ def test_allows_only_exact_repo_and_branch() -> None:
     assert not policy.is_allowed("https://github.com/acme/beachops-extra", "dev")
     assert not policy.is_allowed("https://github.com/acme/beachops", "Dev")
 
-    with pytest.raises(RepositoryNotAllowedError, match="не в списке разрешённых"):
+    with pytest.raises(RepositoryNotAllowedError, match="не разрешён"):
         policy.require_allowed("https://github.com/acme/other", "dev")
     with pytest.raises(RepositoryNotAllowedError, match="не разрешена"):
         policy.require_allowed("https://github.com/acme/beachops", "feature")

@@ -3,12 +3,14 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import {
   CheckCircle2,
   Cloud,
+  ImagePlus,
   Loader2,
   MessageSquare,
   Monitor,
   Send,
   Wifi,
   WifiOff,
+  X,
 } from 'lucide-react'
 import type { AgentSlot, WorkerNode } from '../types/api'
 import { useJobTranscript } from '../hooks/useJobTranscript'
@@ -23,6 +25,17 @@ const MODE_LABELS: Record<PromptMode, string> = {
   do: 'Сделать',
 }
 
+const MAX_ATTACHMENTS = 8
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024
+const ACCEPTED_MIME = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'])
+
+interface PromptAttachment {
+  id: string
+  mimeType: string
+  previewUrl: string
+  dataUrl: string
+}
+
 interface UpdateAgentInput {
   runtime?: string
   localPath?: string | null
@@ -34,6 +47,7 @@ interface SubmitPromptInput {
   prompt: string
   mode?: PromptMode
   slotId?: string
+  images?: Array<{ mimeType: string; data: string }>
 }
 
 interface SubmitPromptResult {
@@ -57,6 +71,34 @@ function canUseMode(role: string, mode: PromptMode): boolean {
   return normalized === 'owner' || normalized === 'operator' || normalized === 'admin'
 }
 
+function normalizeMime(mime: string): string {
+  const value = mime.trim().toLowerCase()
+  if (value === 'image/jpg') return 'image/jpeg'
+  return value
+}
+
+async function fileToAttachment(file: File): Promise<PromptAttachment> {
+  const mimeType = normalizeMime(file.type || 'image/png')
+  if (!ACCEPTED_MIME.has(mimeType)) {
+    throw new Error('Нужен PNG, JPEG, WebP или GIF')
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    throw new Error('Картинка больше 4 МБ')
+  }
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('Не удалось прочитать файл'))
+    reader.readAsDataURL(file)
+  })
+  return {
+    id: crypto.randomUUID(),
+    mimeType,
+    previewUrl: dataUrl,
+    dataUrl,
+  }
+}
+
 type RuntimeFlash = {
   tone: 'ok' | 'warn'
   title: string
@@ -78,6 +120,7 @@ export function AgentControlPanel({
   const activeSlot = slots.find((slot) => slot.active) ?? slots[0] ?? null
   const [localPath, setLocalPath] = useState(activeSlot?.localPath ?? '')
   const [prompt, setPrompt] = useState('')
+  const [attachments, setAttachments] = useState<PromptAttachment[]>([])
   const [mode, setMode] = useState<PromptMode>('ask')
   const [runtimeBusy, setRuntimeBusy] = useState(false)
   const [promptBusy, setPromptBusy] = useState(false)
@@ -87,6 +130,7 @@ export function AgentControlPanel({
   const [pathSaved, setPathSaved] = useState(false)
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pathSavedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const reducedMotion = useReducedMotion()
 
   useEffect(() => {
@@ -104,6 +148,31 @@ export function AgentControlPanel({
       if (pathSavedTimer.current) clearTimeout(pathSavedTimer.current)
     }
   }, [])
+
+  const addFiles = async (files: FileList | File[]) => {
+    const list = Array.from(files)
+    if (!list.length) return
+    const room = MAX_ATTACHMENTS - attachments.length
+    if (room <= 0) {
+      setPromptError(`Максимум ${MAX_ATTACHMENTS} скринов за раз`)
+      feedback('warning')
+      return
+    }
+    try {
+      const next = await Promise.all(list.slice(0, room).map((file) => fileToAttachment(file)))
+      setAttachments((prev) => [...prev, ...next].slice(0, MAX_ATTACHMENTS))
+      setPromptError(null)
+      feedback('select')
+    } catch (err: unknown) {
+      feedback('error')
+      setPromptError(err instanceof Error ? err.message : 'Не удалось добавить картинку')
+    }
+  }
+
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => prev.filter((item) => item.id !== id))
+    feedback('select')
+  }
 
   if (!activeSlot) return null
 
@@ -214,7 +283,7 @@ export function AgentControlPanel({
   }
 
   const send = () => {
-    if (!prompt.trim() || promptBusy) return
+    if ((!prompt.trim() && attachments.length === 0) || promptBusy) return
     if (!canUseMode(role, mode)) {
       setPromptError('Этот режим недоступен для вашей роли')
       return
@@ -226,7 +295,15 @@ export function AgentControlPanel({
     setPromptBusy(true)
     setPromptError(null)
     feedback('tap')
-    void onSubmitPrompt({ prompt: prompt.trim(), mode, slotId: activeSlot.id })
+    void onSubmitPrompt({
+      prompt: prompt.trim(),
+      mode,
+      slotId: activeSlot.id,
+      images: attachments.map((item) => ({
+        mimeType: item.mimeType,
+        data: item.dataUrl,
+      })),
+    })
       .then((result) => {
         if (!result.enqueued) {
           feedback('warning')
@@ -235,6 +312,7 @@ export function AgentControlPanel({
         }
         feedback('success')
         setPrompt('')
+        setAttachments([])
         onJobDispatched?.(result.job.id, activeSlot.runtime)
       })
       .catch((err: unknown) => {
@@ -255,7 +333,7 @@ export function AgentControlPanel({
         <p className="eyebrow">Управление</p>
         <h2>{activeSlot.label}</h2>
         <p className="muted-hint">
-          Агент видит очередь, approve и активный runtime — пишите как в чате.
+          Агент видит очередь и approve. Можно прикрепить скрины багов.
         </p>
       </header>
 
@@ -405,19 +483,73 @@ export function AgentControlPanel({
         }}
       >
         <label htmlFor="agent-prompt">Запрос агенту</label>
+        {attachments.length > 0 && (
+          <div className="prompt-attachments" aria-label="Вложения">
+            {attachments.map((item) => (
+              <div className="prompt-attachment" key={item.id}>
+                <img src={item.previewUrl} alt="" />
+                <button
+                  type="button"
+                  className="prompt-attachment-remove"
+                  aria-label="Убрать картинку"
+                  onClick={() => removeAttachment(item.id)}
+                  disabled={promptBusy}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <textarea
           id="agent-prompt"
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
-          placeholder="Опишите задачу для агента…"
+          onPaste={(event) => {
+            const files = Array.from(event.clipboardData?.files ?? []).filter((file) =>
+              file.type.startsWith('image/'),
+            )
+            if (!files.length) return
+            event.preventDefault()
+            void addFiles(files)
+          }}
+          placeholder="Опишите задачу или вставьте скрин (Ctrl+V)…"
           rows={3}
           maxLength={8000}
           disabled={promptBusy}
         />
-        <button type="submit" disabled={promptBusy || !prompt.trim()}>
-          {promptBusy ? <Loader2 size={16} className="spin-icon" aria-hidden="true" /> : <Send size={16} aria-hidden="true" />}
-          {MODE_LABELS[mode]}
-        </button>
+        <div className="prompt-form-actions">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            hidden
+            onChange={(event) => {
+              if (event.target.files) void addFiles(event.target.files)
+              event.target.value = ''
+            }}
+          />
+          <button
+            type="button"
+            className="prompt-attach-btn"
+            disabled={promptBusy || attachments.length >= MAX_ATTACHMENTS}
+            onClick={() => {
+              feedback('tap')
+              fileInputRef.current?.click()
+            }}
+          >
+            <ImagePlus size={16} aria-hidden="true" />
+            Скрин
+          </button>
+          <button
+            type="submit"
+            disabled={promptBusy || (!prompt.trim() && attachments.length === 0)}
+          >
+            {promptBusy ? <Loader2 size={16} className="spin-icon" aria-hidden="true" /> : <Send size={16} aria-hidden="true" />}
+            {MODE_LABELS[mode]}
+          </button>
+        </div>
       </form>
       {promptError && <div className="inline-error" role="alert">{promptError}</div>}
     </motion.section>

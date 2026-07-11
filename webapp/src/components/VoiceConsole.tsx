@@ -76,7 +76,7 @@ export function VoiceConsole({
   const reducedMotion = useReducedMotion()
   const { state } = voice
   const [composer, setComposer] = useState('')
-  const [composerMode, setComposerMode] = useState<'ask' | 'plan'>('ask')
+  const [agentMode, setAgentMode] = useState<'ask' | 'plan'>('ask')
   const [pulse, setPulse] = useState(0.2)
   const [selectedModel, setSelectedModel] = useState(cursorModelKey ?? '')
   const [modelBusy, setModelBusy] = useState(false)
@@ -89,6 +89,7 @@ export function VoiceConsole({
   const active = ['listening', 'transcribing', 'planning', 'speaking'].includes(state.phase)
   const canStart = ['idle', 'error'].includes(state.phase)
   const showComposer = ['idle', 'error'].includes(state.phase)
+  const showModeSwitch = ['idle', 'error', 'confirming'].includes(state.phase)
 
   useEffect(() => {
     if (reducedMotion || state.phase === 'listening') return undefined
@@ -116,7 +117,13 @@ export function VoiceConsole({
   }
 
   const handleComposer = () => {
-    if (voice.submitComposer(composer, composerMode)) setComposer('')
+    if (voice.submitComposer(composer, agentMode)) setComposer('')
+  }
+
+  const selectMode = (mode: 'ask' | 'plan') => {
+    feedback('select')
+    setAgentMode(mode)
+    voice.setSubmitMode(mode)
   }
 
   const handleModelSelect = async (modelKey: string) => {
@@ -135,6 +142,27 @@ export function VoiceConsole({
       setModelBusy(false)
     }
   }
+
+  const modeToolbar = showModeSwitch ? (
+    <div className="composer-mode-row voice-mode-row" role="toolbar" aria-label="Режим запроса">
+      <button
+        type="button"
+        className={agentMode === 'ask' ? 'selected' : ''}
+        aria-pressed={agentMode === 'ask'}
+        onClick={() => selectMode('ask')}
+      >
+        Спросить
+      </button>
+      <button
+        type="button"
+        className={agentMode === 'plan' ? 'selected' : ''}
+        aria-pressed={agentMode === 'plan'}
+        onClick={() => selectMode('plan')}
+      >
+        План
+      </button>
+    </div>
+  ) : null
 
   return (
     <section className="voice-console" aria-labelledby="voice-heading">
@@ -181,6 +209,8 @@ export function VoiceConsole({
       )}
       {modelError && <div className="inline-error" role="alert">{modelError}</div>}
 
+      {modeToolbar}
+
       <div className={`voice-stage phase-${state.phase} ${active ? 'is-active' : ''}`}>
         {!reducedMotion && (
           <div className="particles" aria-hidden="true">
@@ -195,6 +225,13 @@ export function VoiceConsole({
               ? 'Нет канала'
               : 'Канал по запросу'}
         </div>
+
+        {(state.phase === 'planning' || state.speakingKind === 'milestone') && (
+          <div className="air-chip" role="status">
+            <span className="air-pulse" aria-hidden="true" />
+            Эфир
+          </div>
+        )}
 
         {activeJob && (
           <div className="job-chip" role="status">
@@ -264,24 +301,6 @@ export function VoiceConsole({
 
       {showComposer && (
         <div className="composer-card">
-          <div className="composer-mode-row" role="toolbar" aria-label="Режим текста">
-            <button
-              type="button"
-              className={composerMode === 'ask' ? 'selected' : ''}
-              aria-pressed={composerMode === 'ask'}
-              onClick={() => setComposerMode('ask')}
-            >
-              Спросить
-            </button>
-            <button
-              type="button"
-              className={composerMode === 'plan' ? 'selected' : ''}
-              aria-pressed={composerMode === 'plan'}
-              onClick={() => setComposerMode('plan')}
-            >
-              План
-            </button>
-          </div>
           <label htmlFor="voice-composer">Задача</label>
           <div className="composer-row">
             <input
@@ -289,7 +308,7 @@ export function VoiceConsole({
               type="text"
               value={composer}
               maxLength={4000}
-              placeholder={composerMode === 'ask' ? 'Короткий вопрос агенту' : 'Что спланировать'}
+              placeholder={agentMode === 'ask' ? 'Короткий вопрос агенту' : 'Что спланировать'}
               onChange={(event) => setComposer(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
@@ -303,7 +322,7 @@ export function VoiceConsole({
               type="button"
               disabled={!composer.trim()}
               onClick={handleComposer}
-              aria-label={composerMode === 'ask' ? 'Спросить' : 'В план'}
+              aria-label={agentMode === 'ask' ? 'Спросить' : 'В план'}
             >
               <Send size={17} />
             </button>
@@ -311,10 +330,10 @@ export function VoiceConsole({
         </div>
       )}
 
-      {state.phase === 'planning' && (
+      {(state.phase === 'planning' || state.speakingKind === 'milestone') && (
         <div className="plan-safety" role="status">
           <Check size={17} />
-          Агент в работе. Эфир задачи и статус control room — ниже.
+          Агент в работе. Устные вехи и эфир задачи — ниже.
         </div>
       )}
 
@@ -339,7 +358,9 @@ export function VoiceConsole({
               autoFocus
             />
             <p className="security-note">
-              Голос просит план. Approve — только у владельца.
+              {agentMode === 'ask'
+                ? 'Голос отправит вопрос агенту. Approve на запись — только у владельца.'
+                : 'Голос попросит план. Approve на запись — только у владельца.'}
             </p>
             <div className="action-row">
               <button className="secondary-button" type="button" onClick={voice.cancel}>
@@ -348,10 +369,10 @@ export function VoiceConsole({
               <button
                 className="primary-button"
                 type="button"
-                onClick={voice.confirmPlan}
+                onClick={() => voice.confirmSubmit(agentMode)}
                 disabled={!state.transcript.trim()}
               >
-                <Send size={17} /> В план
+                <Send size={17} /> {agentMode === 'ask' ? 'Спросить' : 'В план'}
               </button>
             </div>
           </motion.div>
@@ -375,7 +396,14 @@ export function VoiceConsole({
 
       <div className="voice-footnote">
         {state.phase === 'speaking'
-          ? <><Mic size={14} /> Орб — прервать брифинг</>
+          ? (
+            <>
+              <Mic size={14} />
+              {state.speakingKind === 'milestone'
+                ? 'Орб — прервать статус'
+                : 'Орб — прервать брифинг'}
+            </>
+          )
           : <><MicOff size={14} /> Микрофон молчит, пока не коснёшься орба</>}
       </div>
     </section>
