@@ -7,12 +7,35 @@ import {
   type AuthenticatedUser,
   type TelegramLoginUser,
 } from '../lib/auth'
+import { ApiError } from '../lib/api'
 import {
   getTelegramInitData,
   isTelegramWebApp,
   waitForTelegramInitData,
 } from '../lib/telegram'
 import { feedback } from '../lib/feedback'
+
+function authErrorMessage(err: unknown, insideTelegram: boolean): string | null {
+  if (!insideTelegram) return null
+  if (err instanceof ApiError) {
+    const detail = err.message.toLowerCase()
+    if (
+      err.status === 403
+      || detail.includes('allowlist')
+      || detail.includes('not allowlisted')
+    ) {
+      return 'Нет доступа для этого Telegram-аккаунта.'
+    }
+    if (err.status >= 500) {
+      return 'Сервер временно недоступен. Нажмите «Повторить вход».'
+    }
+    if (err.status === 401) {
+      return 'Не удалось подтвердить Telegram-сессию. Откройте Mini App заново из бота (/dashboard).'
+    }
+    return 'Не удалось войти. Нажмите «Повторить вход».'
+  }
+  return 'Нет связи с сервером. Проверьте сеть и нажмите «Повторить вход».'
+}
 
 export function useAuth() {
   const [user, setUser] = useState<AuthenticatedUser | null>(null)
@@ -27,7 +50,8 @@ export function useAuth() {
       if (!getTelegramInitData()) {
         await waitForTelegramInitData()
       }
-      setInsideTelegram(isTelegramWebApp())
+      const inTg = isTelegramWebApp()
+      setInsideTelegram(inTg)
       const next = await currentUser()
       setUser(next)
       setError(null)
@@ -39,13 +63,9 @@ export function useAuth() {
           // Cookie mint is optional when initData Authorization already works.
         }
       }
-    } catch {
+    } catch (err) {
       setUser(null)
-      setError(
-        isTelegramWebApp()
-          ? 'Нет доступа для этого Telegram-аккаунта.'
-          : null,
-      )
+      setError(authErrorMessage(err, isTelegramWebApp()))
     } finally {
       setChecking(false)
     }

@@ -1307,6 +1307,9 @@ async def _current_principal(
     try:
         return await resolve_request_principal(request, authorization)
     except TelegramInitDataError as exc:
+        detail = str(exc)
+        if "allowlisted" in detail:
+            raise HTTPException(status_code=403, detail="user is not allowlisted") from exc
         raise HTTPException(status_code=401, detail="invalid session") from exc
 
 

@@ -1,7 +1,7 @@
 # BeachOps — документация
 
-Диалог программиста с Cursor-агентами: Telegram + voice Mini App, ask/plan/do,
-слоты агентов, Cloud/Windows runtime, plan/owner approval, durable jobs и audit.
+Диалог программиста с Cursor Cloud Agents: Telegram + voice Mini App, ask/plan/do,
+слоты агентов, plan/owner approval, durable jobs, self-improve (`dev` → CI → prod).
 
 ## Содержание
 

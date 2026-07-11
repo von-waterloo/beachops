@@ -330,7 +330,22 @@ async def resolve_request_principal(
 ) -> TelegramPrincipal:
     context = _context(request)
     if authorization and authorization.lower().startswith("tma "):
-        return _validate_tma(context, authorization)
+        try:
+            return _validate_tma(context, authorization)
+        except TelegramInitDataError as tma_exc:
+            # Stale Mini App initData must not block a still-valid session cookie.
+            try:
+                principal = await _session_principal(
+                    context,
+                    request.cookies.get(SESSION_COOKIE),
+                )
+            except TelegramInitDataError:
+                raise tma_exc from None
+            if request.method.upper() not in _SAFE_METHODS:
+                _, origin = _rp_config(context)
+                if request.headers.get("origin") != origin:
+                    raise TelegramInitDataError("invalid request origin")
+            return principal
     principal = await _session_principal(
         context,
         request.cookies.get(SESSION_COOKIE),
@@ -348,7 +363,16 @@ async def resolve_websocket_principal(
 ) -> TelegramPrincipal:
     context: AppContext = websocket.app.state.context
     if authorization and authorization.lower().startswith("tma "):
-        return _validate_tma(context, authorization)
+        try:
+            return _validate_tma(context, authorization)
+        except TelegramInitDataError as tma_exc:
+            try:
+                return await _session_principal(
+                    context,
+                    websocket.cookies.get(SESSION_COOKIE),
+                )
+            except TelegramInitDataError:
+                raise tma_exc from None
     _, origin = _rp_config(context)
     if websocket.headers.get("origin") != origin:
         raise TelegramInitDataError("invalid websocket origin")

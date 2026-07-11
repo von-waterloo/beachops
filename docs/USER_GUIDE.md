@@ -159,8 +159,9 @@ approve, воркеры, активный слот/runtime/репо — аген
 - Основной способ: `/dashboard` внутри Telegram — вход по подписанному `initData`,
   без паролей.
 - С любого браузера/устройства: откройте HTTPS-сайт пульта → кнопка
-  Telegram Login Widget → подтвердите в Telegram → та же session cookie, что и у Mini App.
-  Если виджет пустой — проверьте BotFather `/setdomain` = host из `WEBAPP_BASE_URL`
+  Telegram Login Widget / кнопка OAuth → подтвердите в Telegram → та же session cookie, что и у Mini App.
+  Если виджет пустой — используйте «Открыть вход Telegram» (после подтверждения вернёт на сайт с сессией).
+  Домен в BotFather `/setdomain` = host из `WEBAPP_BASE_URL`.
   (без `www` и без `https://`); на экране появится запасная ссылка «Открыть вход Telegram».
 - Доступ только для allowlist (`OWNER` / `OPERATOR` / `VIEWER`).
 - Passkey с UI снят; backend endpoints оставлены только как legacy.

@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { ExternalLink, MessageCircle, RefreshCw, ShieldCheck } from 'lucide-react'
 import {
+  consumeTelegramAuthResult,
   fetchTelegramLoginConfig,
-  type TelegramLoginConfig,
+  telegramOauthUrl,
   type TelegramLoginUser,
 } from '../lib/auth'
 import { feedback } from '../lib/feedback'
 
 const WIDGET_CALLBACK = 'onBeachOpsTelegramAuth'
-const WIDGET_WAIT_MS = 2800
+const WIDGET_WAIT_MS = 3200
 
 declare global {
   interface Window {
@@ -28,21 +29,9 @@ interface AuthScreenProps {
 function setDomainHint(host: string | null | undefined): string {
   const domain = host || 'beachops.marketolog.tech'
   return (
-    `Виджет не загрузился. В BotFather: /setdomain = ${domain} `
-    + '(без www и без https://). Обновите страницу на этом же host.'
+    `Встроенная кнопка Telegram не отобразилась. В BotFather: /setdomain = ${domain} `
+    + '(без www и без https://). Можно войти кнопкой ниже.'
   )
-}
-
-function oauthFallbackUrl(config: TelegramLoginConfig): string | null {
-  if (!config.botId || !config.origin) return null
-  const params = new URLSearchParams({
-    bot_id: String(config.botId),
-    origin: config.origin,
-    embed: '1',
-    request_access: 'write',
-    return_to: window.location.href,
-  })
-  return `https://oauth.telegram.org/auth?${params.toString()}`
 }
 
 export function AuthScreen({
@@ -57,10 +46,21 @@ export function AuthScreen({
   const widgetHostRef = useRef<HTMLDivElement | null>(null)
   const onLoginRef = useRef(onTelegramLogin)
   onLoginRef.current = onTelegramLogin
+  const consumedReturnRef = useRef(false)
   const [widgetError, setWidgetError] = useState<string | null>(null)
   const [botUsername, setBotUsername] = useState<string | null>(null)
-  const [fallbackUrl, setFallbackUrl] = useState<string | null>(null)
-  const [showFallback, setShowFallback] = useState(false)
+  const [oauthUrl, setOauthUrl] = useState<string | null>(null)
+  const [configReady, setConfigReady] = useState(false)
+
+  // OAuth return: Telegram redirects back with #tgAuthResult=… — handle before widget.
+  useEffect(() => {
+    if (insideTelegram || consumedReturnRef.current) return
+    const user = consumeTelegramAuthResult()
+    if (!user) return
+    consumedReturnRef.current = true
+    feedback('tap')
+    onLoginRef.current(user)
+  }, [insideTelegram])
 
   useEffect(() => {
     if (insideTelegram || checking) return
@@ -77,17 +77,17 @@ export function AuthScreen({
       try {
         const config = await fetchTelegramLoginConfig()
         if (cancelled) return
-        if (!config.loginEnabled || !config.botUsername) {
+        if (!config.loginEnabled || !config.botUsername || !config.botId) {
           setWidgetError(
             'Вход с сайта временно недоступен. Откройте бота → /dashboard.',
           )
-          setShowFallback(true)
+          setConfigReady(true)
           return
         }
         setBotUsername(config.botUsername)
-        setFallbackUrl(oauthFallbackUrl(config))
+        setOauthUrl(telegramOauthUrl(config))
+        setConfigReady(true)
 
-        // Wait one frame so the host div is mounted after checking flips false.
         await new Promise<void>((resolve) => {
           window.requestAnimationFrame(() => resolve())
         })
@@ -95,7 +95,6 @@ export function AuthScreen({
         const host = widgetHostRef.current
         if (!host) {
           setWidgetError(setDomainHint(config.expectedHost))
-          setShowFallback(true)
           return
         }
         host.replaceChildren()
@@ -115,15 +114,14 @@ export function AuthScreen({
           const iframe = host.querySelector('iframe')
           if (!iframe || iframe.clientHeight < 8) {
             setWidgetError(setDomainHint(config.expectedHost))
-            setShowFallback(true)
           }
         }, WIDGET_WAIT_MS)
       } catch {
         if (!cancelled) {
           setWidgetError(
-            'Не удалось загрузить вход Telegram. Откройте бота → /dashboard.',
+            'Не удалось загрузить вход Telegram. Откройте бота → /dashboard или обновите страницу.',
           )
-          setShowFallback(true)
+          setConfigReady(true)
         }
       }
     })()
@@ -183,19 +181,17 @@ export function AuthScreen({
 
         {!checking && !insideTelegram && (
           <div className="telegram-login-slot">
-            <div ref={widgetHostRef} className="telegram-login-widget" />
-            {showFallback && fallbackUrl && (
+            {configReady && oauthUrl && (
               <a
                 className="passkey-button telegram-oauth-fallback"
-                href={fallbackUrl}
-                target="_blank"
-                rel="noreferrer"
+                href={oauthUrl}
                 onClick={() => feedback('tap')}
               >
                 <ExternalLink size={19} />
-                Открыть вход Telegram
+                {busy ? 'Входим…' : 'Открыть вход Telegram'}
               </a>
             )}
+            <div ref={widgetHostRef} className="telegram-login-widget" />
             {botUsername && (
               <p className="muted-hint" style={{ marginTop: '0.75rem' }}>
                 Или в боте @{botUsername}: команда /dashboard
