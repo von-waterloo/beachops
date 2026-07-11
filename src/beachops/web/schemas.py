@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ApiModel(BaseModel):
@@ -111,6 +111,12 @@ class PromptRequest(ApiModel):
     mode: str = Field(default="ask", pattern="^(ask|plan|do)$")
     slotId: str | None = Field(default=None, max_length=32)
     images: list[PromptImage] | None = Field(default=None, max_length=8)
+
+    @model_validator(mode="after")
+    def require_prompt_or_images(self) -> PromptRequest:
+        if not self.prompt.strip() and not self.images:
+            raise ValueError("prompt or images required")
+        return self
 
     def resolved_prompt(self) -> str:
         text = self.prompt.strip()

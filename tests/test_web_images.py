@@ -53,5 +53,5 @@ def test_prompt_request_defaults_text_when_images() -> None:
 
 
 def test_prompt_request_empty_without_images() -> None:
-    body = PromptRequest(prompt="  ")
-    assert body.resolved_prompt() == ""
+    with pytest.raises(Exception):
+        PromptRequest(prompt="  ")
