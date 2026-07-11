@@ -56,7 +56,8 @@ export function relativeTimeRu(value?: string | null): string {
 }
 
 export function runtimeLabel(runtime?: string | null): string {
-  return runtime === 'windows' ? 'Windows' : 'Cloud'
+  void runtime
+  return 'Cloud'
 }
 
 const EVENT_TYPE_RU: Record<string, string> = {

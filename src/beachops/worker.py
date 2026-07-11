@@ -165,6 +165,7 @@ async def _execute_locked(app: AppContext, bot: Bot, job) -> None:
 
     from beachops.services.telegram_images import decode_payload_images
 
+    channel = str(payload.get("channel") or "").strip().lower() or None
     try:
         images = decode_payload_images(payload.get("images"))
     except Exception:
@@ -175,7 +176,7 @@ async def _execute_locked(app: AppContext, bot: Bot, job) -> None:
         await _fail_job(app, job, "repository context is unavailable")
         await bot.send_message(
             chat_id=job.actor_id,
-            text="BeachOps: репозиторий или агент для задачи больше не доступен.",
+            text="Репозиторий или агент для задачи больше не доступен.",
         )
         return
 
@@ -211,25 +212,11 @@ async def _execute_locked(app: AppContext, bot: Bot, job) -> None:
             run_context,
             job_id=job.id,
             images=tuple(images) if images else None,
+            channel=channel,
         )
     finally:
         clear_log_context()
         bind_log_context(service="worker")
-    refreshed = await app.jobs.get_internal(job.id)
-    if refreshed is not None:
-        await enqueue_milestone(
-            app,
-            job_id=job.id,
-            actor_id=job.actor_id,
-            event_type="worker.observation_done",
-            text=(
-                "BeachOps: агент завершил работу."
-                if outcome and outcome.status == "finished" and not outcome.error_message
-                else "BeachOps: наблюдение за run завершилось — сверяю статус."
-            ),
-            telegram_chat_id=refreshed.telegram_chat_id,
-            telegram_message_id=refreshed.telegram_message_id,
-        )
     if outcome is None or outcome.status != "finished" or outcome.error_message:
         # If Cursor IDs were persisted, leave job for reconciler instead of
         # permanently failing a run that may still finish in the cloud.
@@ -300,7 +287,7 @@ async def _execute_locked(app: AppContext, bot: Bot, job) -> None:
                 current_status=JobStatus.PLANNING,
                 approval_kind=ApprovalKind.PLAN_EXECUTION,
                 target_status=JobStatus.AWAITING_APPROVAL,
-                text="BeachOps подготовил план. Выполнение требует подтверждения владельца.",
+                text="План готов. Подтверди выполнение — или отклони / запроси правки.",
             )
     else:
         await app.jobs.transition(

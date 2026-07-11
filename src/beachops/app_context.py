@@ -142,6 +142,9 @@ class AppContext:
                 api_key=settings.cursor_api_key,
                 model=settings.cursor_model,
                 workspace=workspace,
+                mcp_enabled=settings.mcp_enabled,
+                mcp_public_url=settings.mcp_public_url,
+                mcp_bearer_token=settings.mcp_bearer_token,
             ),
             transcription=TranscriptionService(
                 api_key=settings.openai_api_key,

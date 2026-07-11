@@ -23,6 +23,8 @@ export interface VoiceState {
   speakingKind: SpeakingKind | null
   /** When false, FINAL auto-dispatches without confirming UI. */
   voiceRequireConfirm: boolean
+  /** Extra prompts queued while a run is still speaking/planning. */
+  queuedHint: string | null
 }
 
 export const initialVoiceState: VoiceState = {
@@ -35,6 +37,7 @@ export const initialVoiceState: VoiceState = {
   recordingStartedAt: null,
   speakingKind: null,
   voiceRequireConfirm: false,
+  queuedHint: null,
 }
 
 export type VoiceAction =
@@ -56,13 +59,13 @@ export type VoiceAction =
 
 function captionForMode(mode: VoiceAgentMode | undefined, kind: 'submit' | 'started'): string {
   if (kind === 'submit') {
-    if (mode === 'ask') return 'Спрашиваю агента. Учитываю очередь и статус control room.'
-    if (mode === 'do') return 'Запускаю действие. Пишу в выбранную ветку.'
-    return 'Строю план. Без записи в репо.'
+    if (mode === 'ask') return 'Спрашиваю…'
+    if (mode === 'do') return 'Делаю…'
+    return 'Думаю над планом…'
   }
-  if (mode === 'ask') return 'Агент в эфире. Жду ответ с учётом control room.'
-  if (mode === 'do') return 'Действие в очереди. Слежу за прогрессом.'
-  return 'План в очереди. Слежу за прогрессом.'
+  if (mode === 'ask') return 'Жду ответ…'
+  if (mode === 'do') return 'В работе…'
+  return 'Собираю план…'
 }
 
 export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState {
@@ -81,7 +84,7 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
         voiceRequireConfirm: state.voiceRequireConfirm,
         phase: 'listening',
         recordingStartedAt: action.at,
-        caption: 'Слушаю. Канал открыт.',
+        caption: 'Слушаю…',
       }
     case 'STOP_LISTENING':
       if (state.phase !== 'listening') return state
@@ -103,7 +106,8 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
           partialTranscript: '',
           recordingStartedAt: null,
           speakingKind: null,
-          caption: 'Отправляю. Учитываю control room.',
+          queuedHint: null,
+          caption: 'Отправляю…',
         }
       }
       return {
@@ -113,7 +117,7 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
         partialTranscript: '',
         recordingStartedAt: null,
         speakingKind: null,
-        caption: 'Проверь текст и режим перед отправкой',
+        caption: 'Проверь текст перед отправкой',
       }
     case 'EDIT':
       if (state.phase !== 'confirming') return state
@@ -123,11 +127,26 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
       return {
         ...state,
         phase: 'planning',
+        queuedHint: null,
         caption: captionForMode(action.mode, 'submit'),
       }
     }
     case 'SUBMIT_TEXT': {
-      if (!['idle', 'error', 'confirming'].includes(state.phase) || !action.text.trim()) {
+      if (!action.text.trim()) return state
+      // Allow queueing while a run is still planning/speaking.
+      if (['planning', 'speaking'].includes(state.phase)) {
+        return {
+          ...state,
+          transcript: action.text.trim(),
+          partialTranscript: '',
+          error: null,
+          speakingKind: null,
+          phase: 'planning',
+          queuedHint: 'В очереди — доделаю текущее и возьмусь',
+          caption: captionForMode(action.mode, 'submit'),
+        }
+      }
+      if (!['idle', 'error', 'confirming'].includes(state.phase)) {
         return state
       }
       return {
@@ -137,6 +156,7 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
         partialTranscript: '',
         error: null,
         speakingKind: null,
+        queuedHint: null,
         caption: captionForMode(action.mode, 'submit'),
       }
     }
@@ -164,7 +184,7 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
       return {
         ...state,
         phase: 'speaking',
-        caption: action.caption ?? state.caption ?? 'BeachOps докладывает',
+        caption: action.caption ?? state.caption ?? 'Отвечаю',
         speakingKind: action.kind ?? state.speakingKind ?? 'final',
       }
     case 'PLAYBACK_DONE':
@@ -174,7 +194,7 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
           ...state,
           phase: 'planning',
           speakingKind: null,
-          caption: state.caption || 'В эфире. Жду следующий статус.',
+          caption: state.caption || 'Ещё работаю…',
         }
       }
       return {
@@ -195,6 +215,7 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
         error: action.message,
         recordingStartedAt: null,
         speakingKind: null,
+        queuedHint: null,
         caption: action.message,
       }
     case 'RESET':

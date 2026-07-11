@@ -47,7 +47,9 @@ from beachops.web.passkey_auth import (
     resolve_websocket_principal,
     router as passkey_auth_router,
 )
+from beachops.web.mcp_server import router as mcp_router
 from beachops.web.schemas import (
+    AgentCreateRequest,
     AgentUpdateRequest,
     DecisionRequest,
     DeployDispatchRequest,
@@ -119,6 +121,7 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(RequestLogMiddleware)
     app.include_router(passkey_auth_router)
+    app.include_router(mcp_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -437,6 +440,60 @@ def create_app() -> FastAPI:
             await context.agent_slots.sync_active_slot_repo(principal.user_id, repo)
         return _repo_json(repo)
 
+    @app.post("/api/agents")
+    async def create_agent(
+        body: AgentCreateRequest,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        if role not in {Role.OPERATOR, Role.OWNER}:
+            raise HTTPException(status_code=403, detail="operator role required")
+        from beachops.services.agent_slots import AgentSlotsFullError
+
+        try:
+            slot = await context.agent_slots.create_new_slot(principal.user_id)
+        except AgentSlotsFullError:
+            raise HTTPException(status_code=409, detail="agent slots full") from None
+        if body.label and body.label.strip():
+            renamed = await context.agent_slots.rename_slot(
+                principal.user_id, slot.id, body.label.strip()
+            )
+            if renamed is not None:
+                slot = renamed
+        if body.makeActive:
+            activated = await context.agent_slots.activate_slot(
+                principal.user_id, slot.id
+            )
+            if activated is not None:
+                slot = activated
+        await context.hot_cache.bump_dashboard_generation()
+        return _agent_slot_json(slot)
+
+    @app.delete("/api/agents/{slot_id}")
+    async def delete_agent(
+        slot_id: int,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        if role not in {Role.OPERATOR, Role.OWNER}:
+            raise HTTPException(status_code=403, detail="operator role required")
+        slots = await context.agent_slots.list_slots(principal.user_id)
+        if len(slots) <= 1:
+            raise HTTPException(status_code=409, detail="cannot delete the last agent")
+        deleted = await context.agent_slots.delete_slot(principal.user_id, slot_id)
+        if deleted is None:
+            raise HTTPException(status_code=404, detail="agent slot not found")
+        await context.hot_cache.bump_dashboard_generation()
+        active = await context.agent_slots.get_active(principal.user_id)
+        return {
+            "deleted": True,
+            "active": _agent_slot_json(active) if active else None,
+        }
+
     @app.patch("/api/agents/{slot_id}")
     async def update_agent(
         slot_id: int,
@@ -453,38 +510,38 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="agent slot not found")
 
         fields = body.model_fields_set
+        if "runtime" in fields and body.runtime and body.runtime != "cloud":
+            raise HTTPException(
+                status_code=400, detail="only cloud runtime is supported"
+            )
+        if "label" in fields and body.label is not None:
+            renamed = await context.agent_slots.rename_slot(
+                principal.user_id, slot_id, body.label
+            )
+            if renamed is None:
+                raise HTTPException(status_code=400, detail="invalid label")
+            slot = renamed
         if "makeActive" in fields and body.makeActive:
             activated = await context.agent_slots.activate_slot(
                 principal.user_id, slot_id
             )
             if activated is None:
                 raise HTTPException(status_code=404, detail="agent slot not found")
+            slot = activated
 
-        if {"runtime", "localPath", "preferredWorkerId"} & fields:
-            try:
-                updated = await context.agent_slots.update_runtime_config(
-                    principal.user_id,
-                    slot_id,
-                    runtime=body.runtime if "runtime" in fields else None,
-                    local_path=body.localPath if "localPath" in fields else None,
-                    clear_local_path=(
-                        "localPath" in fields and body.localPath is None
-                    ),
-                    preferred_worker_id=(
-                        body.preferredWorkerId
-                        if "preferredWorkerId" in fields
-                        else None
-                    ),
-                    clear_preferred_worker=(
-                        "preferredWorkerId" in fields
-                        and body.preferredWorkerId is None
-                    ),
-                )
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            if updated is None:
-                raise HTTPException(status_code=404, detail="agent slot not found")
-            slot = updated
+        if {"localPath", "preferredWorkerId"} & fields:
+            # Cloud-only: clear legacy windows fields if sent.
+            updated = await context.agent_slots.update_runtime_config(
+                principal.user_id,
+                slot_id,
+                runtime="cloud",
+                local_path=None,
+                clear_local_path=True,
+                preferred_worker_id=None,
+                clear_preferred_worker=True,
+            )
+            if updated is not None:
+                slot = updated
         else:
             slot = await context.agent_slots.get_slot(principal.user_id, slot_id)
             if slot is None:
@@ -885,6 +942,7 @@ def create_app() -> FastAPI:
                 actor_id=principal.user_id,
                 run_context=run_context,
                 role=context.settings.role_for(principal.user_id),
+                channel="voice",
             )
             prompt = with_situation(transcript, situation)
             dispatched = await dispatch_prompt(
@@ -895,6 +953,7 @@ def create_app() -> FastAPI:
                 run_context=run_context,
                 idempotency_key=f"voice:{principal.user_id}:{uuid4()}",
                 display_summary=transcript,
+                channel="voice",
             )
             if not dispatched.enqueued:
                 logger.warning(
@@ -1606,7 +1665,6 @@ async def _speak_job_result(
         spoken_ack,
         to_spoken_briefing,
     )
-    from beachops.services.situation_brief import build_spoken_room_bits
 
     logger.info(
         "Voice speak poll started",
@@ -1642,17 +1700,15 @@ async def _speak_job_result(
         return
 
     previous_status = job.status.value
-    if milestones_enabled:
-        try:
-            room = await build_spoken_room_bits(context, actor_id=job.actor_id)
-            ack = spoken_ack(runtime=job.runtime, room=room)
-            await _stream_voice_pcm(context, websocket, ack, kind="milestone")
-            gate.mark(time.monotonic(), ack, count=False)
-        except Exception:
-            logger.exception(
-                "Voice speak ack failed",
-                extra={"job_id": str(job_id), "action": "voice_speak"},
-            )
+    try:
+        ack = spoken_ack()
+        await _stream_voice_pcm(context, websocket, ack, kind="milestone")
+        gate.mark(time.monotonic(), ack, count=False)
+    except Exception:
+        logger.exception(
+            "Voice speak ack failed",
+            extra={"job_id": str(job_id), "action": "voice_speak"},
+        )
 
     for _ in range(1800):
         await asyncio.sleep(2)
@@ -1803,21 +1859,14 @@ async def _speak_job_result(
                 )
             return
 
-        room = ""
-        if milestones_enabled:
-            with suppress(Exception):
-                room = await build_spoken_room_bits(
-                    context, actor_id=job.actor_id
-                )
-        speak_text = f"{room} {result.body}".strip() if room else result.body
         briefing = to_spoken_briefing(
-            speak_text,
+            result.body,
             max_chars=context.settings.voice_spoken_max_chars,
         )
         await _stream_voice_pcm(
             context,
             websocket,
-            speak_text,
+            briefing or result.body,
             kind="final",
         )
         logger.info(

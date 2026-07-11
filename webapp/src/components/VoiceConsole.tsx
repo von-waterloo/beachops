@@ -7,7 +7,6 @@ import {
   Expand,
   Mic,
   MicOff,
-  Monitor,
   RotateCcw,
   Send,
   Square,
@@ -19,7 +18,7 @@ import { setCursorModel, type CursorModelOption } from '../lib/auth'
 import { useVoiceSession } from '../voice/useVoiceSession'
 import type { VoiceAgentMode, VoicePhase } from '../voice/state'
 import type { Event, Job } from '../types/api'
-import { runtimeLabel, statusLabel } from '../lib/uiCopy'
+import { statusLabel } from '../lib/uiCopy'
 
 const MODE_LABELS: Record<VoiceAgentMode, string> = {
   ask: 'Спросить',
@@ -38,7 +37,7 @@ const phaseLabels: Record<VoicePhase, string> = {
   listening: 'Слушаю',
   transcribing: 'Разбираю',
   confirming: 'Подтверди',
-  planning: 'В эфире',
+  planning: 'Думаю',
   speaking: 'Отвечаю',
   error: 'Сбой',
 }
@@ -99,9 +98,9 @@ export function VoiceConsole({
   }, [cursorModelKey])
 
   const active = ['listening', 'transcribing', 'planning', 'speaking'].includes(state.phase)
-  const canStart = ['idle', 'error'].includes(state.phase)
-  const showComposer = ['idle', 'error'].includes(state.phase)
-  const showModeSwitch = ['idle', 'error', 'confirming'].includes(state.phase)
+  const canStart = ['idle', 'error', 'planning', 'speaking'].includes(state.phase)
+  const showComposer = ['idle', 'error', 'planning', 'speaking'].includes(state.phase)
+  const showModeSwitch = ['idle', 'error', 'confirming', 'planning', 'speaking'].includes(state.phase)
 
   useEffect(() => {
     if (reducedMotion || state.phase === 'listening') return undefined
@@ -119,7 +118,7 @@ export function VoiceConsole({
   const jobCaption = useMemo(() => {
     if (!activeJob) return null
     const eventBit = latestEvent?.summary ? ` · ${latestEvent.summary}` : ''
-    return `${runtimeLabel(activeJob.runtime)} · ${statusLabel(activeJob.status)}${eventBit}`
+    return `${statusLabel(activeJob.status)}${eventBit}`
   }, [activeJob, latestEvent])
 
   const handleOrb = () => {
@@ -219,27 +218,19 @@ export function VoiceConsole({
       {modeToolbar}
 
       <div className={`voice-stage phase-${state.phase} ${active ? 'is-active' : ''}`}>
-        {!reducedMotion && (
-          <div className="particles" aria-hidden="true">
-            {Array.from({ length: 12 }, (_, index) => <i key={index} />)}
-          </div>
-        )}
         <div className="voice-stage-top">
           <div className="voice-stage-top-left">
             {activeJob && (
               <div className="job-chip" role="status">
-                {activeJob.runtime === 'windows' ? <Monitor size={12} /> : <Cloud size={12} />}
+                <Cloud size={12} />
                 <span>{jobChipTitle(activeJob.title)}</span>
               </div>
             )}
+            {state.queuedHint && (
+              <div className="job-chip" role="status">{state.queuedHint}</div>
+            )}
           </div>
           <div className="voice-stage-top-right">
-            {(state.phase === 'planning' || state.speakingKind === 'milestone') && (
-              <div className="air-chip" role="status">
-                <span className="air-pulse" aria-hidden="true" />
-                Эфир
-              </div>
-            )}
             <div className="connection-chip">
               <span className={state.connected ? 'online-dot' : 'offline-dot'} />
               {state.connected
@@ -259,55 +250,39 @@ export function VoiceConsole({
           onClick={handleOrb}
           style={{ '--orb-energy': String(displayEnergy) } as CSSProperties}
         >
-          {!reducedMotion && (
-            <>
-              <span className="orb-radar" aria-hidden="true">
-                <i /><i /><i />
-              </span>
-              <span className="orb-scan" aria-hidden="true" />
-              <span className="orb-ticks" aria-hidden="true">
-                {Array.from({ length: 24 }, (_, index) => <i key={index} />)}
-              </span>
-            </>
-          )}
           <span className="orb-halo" aria-hidden="true" />
           <span className="orb-core">
             {state.phase === 'listening' ? <Square size={28} fill="currentColor" /> : <Mic size={32} />}
           </span>
         </button>
 
-        <div className="spectrum" aria-hidden="true">
-          {(state.phase === 'listening' ? voice.spectrum : Array.from({ length: 24 }, (_, i) =>
-            Math.max(0.08, displayEnergy * (0.45 + 0.55 * Math.abs(Math.sin((i + 1) * 0.55 + displayEnergy * 4)))),
-          )).map((value, index) => (
-            <motion.i
-              key={index}
-              animate={{ scaleY: reducedMotion ? 0.3 : Math.max(0.12, value) }}
-              transition={{ type: 'spring', stiffness: 440, damping: 32 }}
-            />
-          ))}
-        </div>
+        {(state.phase === 'listening' || state.phase === 'speaking') && (
+          <div className="spectrum" aria-hidden="true">
+            {(state.phase === 'listening' ? voice.spectrum : Array.from({ length: 16 }, (_, i) =>
+              Math.max(0.08, displayEnergy * (0.45 + 0.55 * Math.abs(Math.sin((i + 1) * 0.55 + displayEnergy * 4)))),
+            )).map((value, index) => (
+              <motion.i
+                key={index}
+                animate={{ scaleY: reducedMotion ? 0.3 : Math.max(0.12, value) }}
+                transition={{ type: 'spring', stiffness: 440, damping: 32 }}
+              />
+            ))}
+          </div>
+        )}
 
         <AnimatePresence mode="wait">
           <motion.div
             key={`${state.phase}-${jobCaption ?? ''}`}
             className="voice-status"
-            initial={reducedMotion ? false : { opacity: 0, y: 8, filter: 'blur(5px)' }}
-            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-            exit={reducedMotion ? undefined : { opacity: 0, y: -6 }}
+            initial={reducedMotion ? false : { opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reducedMotion ? undefined : { opacity: 0, y: -4 }}
           >
             <strong>{phaseLabels[state.phase]}</strong>
             <p aria-live="polite">{state.caption}</p>
             {jobCaption && <small className="job-status-caption">{jobCaption}</small>}
           </motion.div>
         </AnimatePresence>
-
-        {state.phase === 'listening' && (
-          <div className="privacy-chip" role="status">
-            <span className="privacy-pulse" />
-            Микрофон открыт · канал защищён
-          </div>
-        )}
       </div>
 
       {showComposer && (
@@ -350,7 +325,7 @@ export function VoiceConsole({
       {(state.phase === 'planning' || state.speakingKind === 'milestone') && (
         <div className="plan-safety" role="status">
           <Check size={17} />
-          Агент в работе. Устные вехи и эфир задачи — ниже.
+          Можно отправить ещё задачу — она встанет в очередь.
         </div>
       )}
 

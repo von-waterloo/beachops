@@ -94,8 +94,14 @@ class RepoUpdateRequest(ApiModel):
     makeActive: bool | None = None
 
 
+class AgentCreateRequest(ApiModel):
+    label: str | None = Field(default=None, max_length=64)
+    makeActive: bool = True
+
+
 class AgentUpdateRequest(ApiModel):
-    runtime: str | None = Field(default=None, pattern="^(cloud|windows)$")
+    label: str | None = Field(default=None, max_length=64)
+    runtime: str | None = Field(default=None, pattern="^(cloud)$")
     localPath: str | None = Field(default=None, max_length=500)
     preferredWorkerId: str | None = Field(default=None, max_length=64)
     makeActive: bool | None = None

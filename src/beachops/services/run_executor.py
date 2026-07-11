@@ -297,6 +297,7 @@ async def _run_job(
     *,
     images: tuple[SDKImage, ...] | None = None,
     job_id=None,
+    channel: str | None = None,
 ) -> RunOutcome | None:
     from uuid import UUID
 
@@ -420,6 +421,7 @@ async def _run_job(
         actor_id=user_id,
         run_context=run_ctx,
         role=app.settings.role_for(user_id),
+        channel=channel,
     )
 
     cursor_model = resolve_cursor_model(model_key)
@@ -443,6 +445,7 @@ async def _run_job(
                 images=images,
                 api_key=api_key,
                 self_improve=await _self_improve_flag(app, repo.github_url),
+                channel=channel,
             )
         except RunCancelled:
             final_mode = await app.users.get_mode(user_id)

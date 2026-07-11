@@ -49,7 +49,6 @@ import {
 } from '../lib/capabilities'
 import {
   matchesRuntimeFilter,
-  RUNTIME_FILTER_LABELS,
   type RuntimeFilter,
 } from '../lib/runtimeFilter'
 import {
@@ -62,24 +61,27 @@ import {
   statusTone,
 } from '../lib/uiCopy'
 
-export type TabId = 'voice' | 'active' | 'history' | 'approvals' | 'repositories'
+export type TabId = 'work' | 'voice' | 'history' | 'approvals' | 'repositories'
 
 type Decision = 'approve' | 'reject' | 'revision'
 
 interface Props {
-  tab: Exclude<TabId, 'voice'> | 'overview'
+  tab: Exclude<TabId, 'voice' | 'work'> | 'active' | 'overview'
   data: DashboardSnapshot
   loading: boolean
   error: string | null
   runtimeFilter?: RuntimeFilter
   focusedJobId?: string | null
-  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: TabId) => void
-  onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
+  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: string) => void
+  onSelectJob?: (jobId: string, runtime?: string | null) => void
   onRefresh: () => void
   onDecision: (approvalId: string, decision: Decision, revision?: string) => Promise<void>
   onAddRepository?: (input: { url: string; branch?: string }) => Promise<void>
   onUpdateRepository?: (repoId: string, input: { branch?: string; makeActive?: boolean }) => Promise<void>
   onSetSelfImprove?: (input: { enabled: boolean; repoUrl?: string | null }) => Promise<void>
+  onCreateAgent?: () => Promise<void>
+  onUpdateAgent?: (slotId: string, input: { label?: string; makeActive?: boolean }) => Promise<void>
+  onDeleteAgent?: (slotId: string) => Promise<void>
 }
 
 function Empty({ icon, title, copy }: { icon: React.ReactNode; title: string; copy: string }) {
@@ -365,25 +367,10 @@ function RuntimeFilterBar({
   value: RuntimeFilter
   onChange?: (filter: RuntimeFilter) => void
 }) {
-  if (!onChange) return null
-  return (
-    <div className="runtime-filter-bar" role="toolbar" aria-label="Фильтр Cloud / Windows">
-      {(['all', 'cloud', 'windows'] as const).map((filter) => (
-        <button
-          key={filter}
-          type="button"
-          className={value === filter ? 'selected' : ''}
-          aria-pressed={value === filter}
-          onClick={() => {
-            feedback('select')
-            onChange(filter)
-          }}
-        >
-          {RUNTIME_FILTER_LABELS[filter]}
-        </button>
-      ))}
-    </div>
-  )
+  // Cloud-only product: filter UI removed.
+  void value
+  void onChange
+  return null
 }
 
 function AgentCard({
@@ -395,7 +382,7 @@ function AgentCard({
   selected?: boolean
   onSelect?: () => void
 }) {
-  const windows = job.runtime === 'windows'
+  const windows = false
   const interactive = Boolean(onSelect)
   const openCursor = (event: React.MouseEvent) => {
     event.stopPropagation()
@@ -456,16 +443,33 @@ function AgentCard({
   )
 }
 
-function SlotCard({ slot }: { slot: AgentSlot }) {
-  const windows = slot.runtime === 'windows'
+function SlotCard({
+  slot,
+  onActivate,
+  onDelete,
+}: {
+  slot: AgentSlot
+  onActivate?: () => void
+  onDelete?: () => void
+}) {
   return (
     <motion.article
-      className={`agent-card runtime-${windows ? 'windows' : 'cloud'}${slot.active ? ' is-selected' : ''}`}
+      className={`agent-card runtime-cloud${slot.active ? ' is-selected' : ''}${onActivate ? ' is-clickable' : ''}`}
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
+      onClick={onActivate}
+      role={onActivate ? 'button' : undefined}
+      tabIndex={onActivate ? 0 : undefined}
+      onKeyDown={(event) => {
+        if (!onActivate) return
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onActivate()
+        }
+      }}
     >
       <div className="agent-mark">
-        {windows ? <Monitor size={18} /> : <Cloud size={18} />}
+        <Cloud size={18} />
       </div>
       <div className="agent-body">
         <div className="card-topline">
@@ -473,10 +477,22 @@ function SlotCard({ slot }: { slot: AgentSlot }) {
             <Radio size={12} />
             {slot.active ? 'Активен' : 'Слот'}
           </span>
+          {onDelete && (
+            <button
+              type="button"
+              className="ghost-link"
+              onClick={(event) => {
+                event.stopPropagation()
+                onDelete()
+              }}
+            >
+              Удалить
+            </button>
+          )}
         </div>
         <h2>{slot.label}</h2>
         <p>
-          {runtimeLabel(slot.runtime)}
+          Cloud
           {slot.repository ? ` · ${slot.repository}` : ''}
         </p>
         {slot.cursorUrl ? (
@@ -485,10 +501,13 @@ function SlotCard({ slot }: { slot: AgentSlot }) {
             href={slot.cursorUrl}
             target="_blank"
             rel="noreferrer"
-            onClick={() => feedback('tap')}
+            onClick={(event) => {
+              event.stopPropagation()
+              feedback('tap')
+            }}
           >
             <ExternalLink size={14} />
-            Открыть чат в Cursor
+            Открыть в Cursor
           </a>
         ) : (
           <p className="muted-hint">Чат появится после первого cloud-run</p>
@@ -843,7 +862,7 @@ function HistoryPanel({
   events: Event[]
   runtimeFilter: RuntimeFilter
   focusedJobId?: string | null
-  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: TabId) => void
+  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: string) => void
   onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
 }) {
   const jobsById = new Map(jobs.map((job) => [job.id, job]))
@@ -958,7 +977,7 @@ function Overview({
   act: (approvalId: string, decision: Decision, revision?: string) => void
   runtimeFilter: RuntimeFilter
   focusedJobId?: string | null
-  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: TabId) => void
+  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: string) => void
   onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
   onSetSelfImprove?: (input: { enabled: boolean; repoUrl?: string | null }) => Promise<void>
 }) {
@@ -1142,11 +1161,12 @@ function Overview({
   )
 }
 
-const PANEL_TITLES: Record<Exclude<TabId, 'voice'>, string> = {
+const PANEL_TITLES: Record<string, string> = {
   active: 'Активные задачи',
   history: 'Лента',
-  approvals: 'Пульт',
+  approvals: 'Апрувы',
   repositories: 'Репозитории',
+  overview: 'Обзор',
 }
 
 export function DashboardPanels({
@@ -1163,6 +1183,9 @@ export function DashboardPanels({
   onAddRepository,
   onUpdateRepository,
   onSetSelfImprove,
+  onCreateAgent,
+  onUpdateAgent,
+  onDeleteAgent,
 }: Props) {
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
   const [repoUrl, setRepoUrl] = useState('')
@@ -1238,9 +1261,7 @@ export function DashboardPanels({
     connectRepo(repoUrl.trim(), repoBranch.trim() || data.defaultBranch || 'dev')
   }
 
-  const filteredActive = data.jobs
-    .filter((job) => isActiveJobStatus(job.status))
-    .filter((job) => matchesRuntimeFilter(job.runtime, runtimeFilter))
+  const filteredActive = data.jobs.filter((job) => isActiveJobStatus(job.status))
 
   if (loading && tab !== 'overview') {
     return (
@@ -1313,13 +1334,7 @@ export function DashboardPanels({
             <Empty
               icon={<Clock3 />}
               title="Тихий горизонт"
-              copy={
-                runtimeFilter === 'windows'
-                  ? 'Нет активных Windows-задач.'
-                  : runtimeFilter === 'cloud'
-                    ? 'Нет активных Cloud-задач.'
-                    : 'Сейчас нет активных задач.'
-              }
+              copy="Сейчас нет активных задач."
             />
           )}
         </>
@@ -1437,12 +1452,43 @@ export function DashboardPanels({
           {repoError && <div className="inline-error" role="alert">{repoError}</div>}
 
           {(data.agents?.length ?? 0) > 0 && (
-            <Section eyebrow="Чаты" title="Cloud-агенты">
+            <Section eyebrow="Агенты" title="Cloud-агенты">
               <div className="agent-grid">
                 {data.agents.map((slot) => (
-                  <SlotCard key={slot.id} slot={slot} />
+                  <SlotCard
+                    key={slot.id}
+                    slot={slot}
+                    onActivate={
+                      onUpdateAgent && !slot.active
+                        ? () => {
+                            feedback('select')
+                            void onUpdateAgent(slot.id, { makeActive: true })
+                          }
+                        : undefined
+                    }
+                    onDelete={
+                      onDeleteAgent && (data.agents?.length ?? 0) > 1
+                        ? () => {
+                            if (!window.confirm(`Удалить «${slot.label}»?`)) return
+                            void onDeleteAgent(slot.id)
+                          }
+                        : undefined
+                    }
+                  />
                 ))}
               </div>
+              {onCreateAgent && (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => {
+                    feedback('tap')
+                    void onCreateAgent()
+                  }}
+                >
+                  <Plus size={16} /> Новый агент
+                </button>
+              )}
             </Section>
           )}
 

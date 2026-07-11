@@ -2,11 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   Activity,
+  Bot,
   Clock3,
-  Cloud,
   GitBranch,
-  LayoutDashboard,
-  Monitor,
+  Mic,
   Sparkles,
   Volume2,
   VolumeX,
@@ -14,29 +13,22 @@ import {
 import { AuthScreen } from './components/AuthScreen'
 import { VoiceConsole } from './components/VoiceConsole'
 import { DashboardPanels, type TabId } from './components/DashboardPanels'
-import { ControlRoomHero } from './components/ControlRoomHero'
-import { AgentControlPanel, JobChatPanel } from './components/AgentControlPanel'
+import { AgentControlPanel } from './components/AgentControlPanel'
+import { JobChatPanel } from './components/JobChatPanel'
 import { useAuth } from './hooks/useAuth'
 import { useDashboard } from './hooks/useDashboard'
 import { useJobStream } from './hooks/useJobStream'
 import type { AuthenticatedUser } from './lib/auth'
 import { roleLabel } from './lib/uiCopy'
-import {
-  initializeTelegram,
-  telegramTheme,
-} from './lib/telegram'
+import { initializeTelegram } from './lib/telegram'
 import { feedback, isSoundMuted, setSoundMuted } from './lib/feedback'
-import {
-  matchesRuntimeFilter,
-  type RuntimeFilter,
-} from './lib/runtimeFilter'
 import { isActiveJobStatus } from './types/api'
 
-const tabs: Array<{ id: TabId; label: string; icon: typeof LayoutDashboard }> = [
-  { id: 'voice', label: 'Голос', icon: LayoutDashboard },
-  { id: 'active', label: 'Актив', icon: Activity },
+const tabs: Array<{ id: TabId; label: string; icon: typeof Bot }> = [
+  { id: 'work', label: 'Работа', icon: Bot },
+  { id: 'voice', label: 'Голос', icon: Mic },
   { id: 'history', label: 'Лента', icon: Clock3 },
-  { id: 'approvals', label: 'Пульт', icon: Sparkles },
+  { id: 'approvals', label: 'Апрувы', icon: Sparkles },
   { id: 'repositories', label: 'Репо', icon: GitBranch },
 ]
 
@@ -45,7 +37,7 @@ export default function App() {
 
   useEffect(() => {
     initializeTelegram()
-    document.documentElement.dataset.theme = telegramTheme()
+    document.documentElement.dataset.theme = 'dark'
   }, [])
 
   if (!auth.user) {
@@ -69,21 +61,18 @@ interface ControlRoomProps {
   error: string | null
 }
 
-function ControlRoom({
-  user,
-  error,
-}: ControlRoomProps) {
+function ControlRoom({ user, error }: ControlRoomProps) {
   const [tab, setTab] = useState<TabId>(() => {
     const params = new URLSearchParams(window.location.search)
-    return params.get('tab') === 'repos' || params.get('tab') === 'repositories'
-      ? 'repositories'
-      : 'voice'
+    if (params.get('tab') === 'repos' || params.get('tab') === 'repositories') {
+      return 'repositories'
+    }
+    if (params.get('tab') === 'voice') return 'voice'
+    return 'work'
   })
-  const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>('all')
   const [focusedJobId, setFocusedJobId] = useState<string | null>(null)
   const [cursorModelKey, setCursorModelKey] = useState(user.cursorModelKey ?? '')
   const dashboard = useDashboard()
-  const [now, setNow] = useState(() => Date.now())
   const [soundMuted, setSoundMutedState] = useState(() => isSoundMuted())
 
   useEffect(() => {
@@ -115,17 +104,13 @@ function ControlRoom({
   )
 
   const activeJob = useMemo(() => {
-    const scoped = activeJobs.filter((job) =>
-      matchesRuntimeFilter(job.runtime, runtimeFilter),
-    )
-    const pool = scoped.length ? scoped : activeJobs
     if (focusedJobId) {
-      const focused = pool.find((job) => job.id === focusedJobId)
-        ?? activeJobs.find((job) => job.id === focusedJobId)
+      const focused = activeJobs.find((job) => job.id === focusedJobId)
+        ?? dashboard.data.jobs.find((job) => job.id === focusedJobId)
       if (focused) return focused
     }
-    return pool[0] ?? null
-  }, [activeJobs, focusedJobId, runtimeFilter])
+    return activeJobs[0] ?? null
+  }, [activeJobs, dashboard.data.jobs, focusedJobId])
 
   const stream = useJobStream(activeJob?.id ?? null, Boolean(activeJob), {
     onTick: () => {
@@ -139,33 +124,19 @@ function ControlRoom({
     if (!stillThere) setFocusedJobId(null)
   }, [dashboard.data.jobs, focusedJobId])
 
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000)
-    return () => window.clearInterval(timer)
-  }, [])
-
   const selectTab = (next: TabId) => {
     setTab(next)
     feedback('select')
   }
 
-  const selectFilter = (filter: RuntimeFilter, tabHint: TabId = 'active') => {
-    setRuntimeFilter(filter)
-    setFocusedJobId(null)
-    setTab(tabHint)
-    feedback('select')
-  }
-
-  const selectJob = (jobId: string, runtime: string | null | undefined) => {
+  const selectJob = (jobId: string) => {
     setFocusedJobId(jobId)
-    setRuntimeFilter(runtime === 'windows' ? 'windows' : 'cloud')
-    setTab('voice')
+    setTab('work')
     feedback('select')
   }
 
-  const running = dashboard.data.queue?.running ?? dashboard.data.queue?.active ?? 0
   const pending = dashboard.data.queue?.pending ?? dashboard.data.queue?.queued ?? 0
-  const workersOnline = dashboard.data.workers?.length ?? 0
+  const running = dashboard.data.queue?.running ?? dashboard.data.queue?.active ?? 0
 
   return (
     <div className="app-shell control-room">
@@ -175,18 +146,12 @@ function ControlRoom({
           <span>BeachOps</span>
         </a>
         <div className="top-meta">
-          {activeJob && (
-            <div className="live-badge" title="Идёт стрим задачи">
-              <span className="live-pulse" />
-              Эфир
-            </div>
-          )}
           <button
             className="auth-icon-button"
             type="button"
             onClick={toggleSound}
-            title={soundMuted ? 'Включить звук и вибрацию' : 'Выключить звук и вибрацию'}
-            aria-label={soundMuted ? 'Включить звук и вибрацию' : 'Выключить звук и вибрацию'}
+            title={soundMuted ? 'Включить звук' : 'Выключить звук'}
+            aria-label={soundMuted ? 'Включить звук' : 'Выключить звук'}
             aria-pressed={!soundMuted}
           >
             {soundMuted ? <VolumeX size={17} /> : <Volume2 size={17} />}
@@ -200,15 +165,6 @@ function ControlRoom({
 
       {error && <div className="auth-inline-error">{error}</div>}
 
-      <ControlRoomHero
-        running={running}
-        pending={pending}
-        workersOnline={workersOnline}
-        cloudJobs={activeJobs.filter((job) => job.runtime !== 'windows').length}
-        runtimeFilter={runtimeFilter}
-        onSelectFilter={selectFilter}
-      />
-
       <main id="main">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -218,28 +174,18 @@ function ControlRoom({
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
           >
-            {tab === 'voice' ? (
+            {tab === 'work' ? (
               <>
-                <VoiceConsole
-                  activeJob={activeJob}
-                  latestEvent={stream.latestEvent}
-                  cursorModelKey={cursorModelKey || user.cursorModelKey}
-                  models={user.models ?? []}
-                  onModelChange={setCursorModelKey}
-                  onJobStarted={(jobId) => {
-                    setFocusedJobId(jobId)
-                    setTab('voice')
-                    void dashboard.refresh()
-                  }}
-                />
                 <AgentControlPanel
                   slots={dashboard.data.agents}
-                  workers={dashboard.data.workers}
                   role={dashboard.data.role}
+                  queuedCount={pending}
                   onUpdateAgent={(slotId, input) => dashboard.updateAgent(slotId, input)}
+                  onCreateAgent={() => dashboard.createAgent()}
+                  onDeleteAgent={(slotId) => dashboard.deleteAgent(slotId)}
                   onSubmitPrompt={(input) => dashboard.submitPrompt(input)}
-                  onJobDispatched={(jobId, runtime) => {
-                    selectJob(jobId, runtime)
+                  onJobDispatched={(jobId) => {
+                    selectJob(jobId)
                     void dashboard.refresh()
                   }}
                 />
@@ -247,36 +193,43 @@ function ControlRoom({
                   jobId={focusedJobId ?? activeJob?.id ?? null}
                   enabled={Boolean(focusedJobId ?? activeJob)}
                 />
-                <DashboardPanels
-                  tab="overview"
-                  data={dashboard.data}
-                  loading={dashboard.loading}
-                  error={dashboard.error ?? stream.error}
-                  runtimeFilter={runtimeFilter}
-                  focusedJobId={focusedJobId}
-                  onRuntimeFilterChange={selectFilter}
-                  onSelectJob={selectJob}
-                  onRefresh={() => void dashboard.refresh()}
-                  onDecision={(approvalId, decision, revision) =>
-                    dashboard.decideApproval(approvalId, decision, revision)
-                  }
-                  onAddRepository={(input) => dashboard.addRepository(input)}
-                  onUpdateRepository={(repoId, input) =>
-                    dashboard.updateRepository(repoId, input)
-                  }
-                  onSetSelfImprove={(input) => dashboard.setSelfImprove(input)}
-                />
+                {activeJobs.length > 0 && (
+                  <section className="queue-compact" aria-label="Очередь">
+                    <p className="eyebrow">Сейчас</p>
+                    <ul>
+                      {activeJobs.slice(0, 5).map((job) => (
+                        <li key={job.id}>
+                          <button type="button" onClick={() => selectJob(job.id)}>
+                            <Activity size={14} />
+                            <span>{job.title.slice(0, 48) || job.status}</span>
+                            <small>{job.status}</small>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
               </>
+            ) : tab === 'voice' ? (
+              <VoiceConsole
+                activeJob={activeJob}
+                latestEvent={stream.latestEvent}
+                cursorModelKey={cursorModelKey || user.cursorModelKey}
+                models={user.models ?? []}
+                onModelChange={setCursorModelKey}
+                onJobStarted={(jobId) => {
+                  setFocusedJobId(jobId)
+                  void dashboard.refresh()
+                }}
+              />
             ) : (
               <DashboardPanels
                 tab={tab}
                 data={dashboard.data}
                 loading={dashboard.loading}
                 error={dashboard.error}
-                runtimeFilter={runtimeFilter}
                 focusedJobId={focusedJobId}
-                onRuntimeFilterChange={selectFilter}
-                onSelectJob={selectJob}
+                onSelectJob={(jobId) => selectJob(jobId)}
                 onRefresh={() => void dashboard.refresh()}
                 onDecision={(approvalId, decision, revision) =>
                   dashboard.decideApproval(approvalId, decision, revision)
@@ -286,43 +239,14 @@ function ControlRoom({
                   dashboard.updateRepository(repoId, input)
                 }
                 onSetSelfImprove={(input) => dashboard.setSelfImprove(input)}
+                onCreateAgent={() => dashboard.createAgent()}
+                onUpdateAgent={(slotId, input) => dashboard.updateAgent(slotId, input)}
+                onDeleteAgent={(slotId) => dashboard.deleteAgent(slotId)}
               />
             )}
           </motion.div>
         </AnimatePresence>
       </main>
-
-      <section className="worker-strip" aria-label="Плоскости исполнения">
-        <button
-          type="button"
-          className={`worker-chip ${runtimeFilter === 'cloud' ? 'selected' : ''}`}
-          aria-pressed={runtimeFilter === 'cloud'}
-          onClick={() => selectFilter('cloud', 'active')}
-        >
-          <Cloud size={14} />
-          Cloud · в эфире
-        </button>
-        <button
-          type="button"
-          className={`worker-chip ${workersOnline ? 'online' : ''} ${runtimeFilter === 'windows' ? 'selected' : ''}`}
-          aria-pressed={runtimeFilter === 'windows'}
-          onClick={() => selectFilter('windows', 'active')}
-        >
-          <Monitor size={14} />
-          Windows · {workersOnline ? `${workersOnline} онлайн` : 'офлайн'}
-        </button>
-        <button
-          type="button"
-          className={`worker-chip ${runtimeFilter === 'all' ? 'selected' : ''}`}
-          aria-pressed={runtimeFilter === 'all'}
-          onClick={() => selectFilter('all', 'active')}
-        >
-          Все
-        </button>
-        <time className="worker-chip muted">
-          {new Date(now).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-        </time>
-      </section>
 
       <nav className="tab-bar" aria-label="Основная навигация">
         {tabs.map((item) => {
@@ -341,7 +265,7 @@ function ControlRoom({
                 {item.id === 'approvals' && dashboard.data.approvals.length > 0 && (
                   <i>{Math.min(9, dashboard.data.approvals.length)}</i>
                 )}
-                {item.id === 'active' && running > 0 && (
+                {item.id === 'work' && running > 0 && (
                   <i>{Math.min(9, running)}</i>
                 )}
               </span>

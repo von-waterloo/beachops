@@ -43,6 +43,7 @@ async def dispatch_prompt(
     approved_plan_job_id: UUID | None = None,
     display_summary: str | None = None,
     images: Sequence[Mapping[str, str]] | None = None,
+    channel: str | None = None,
 ) -> DispatchResult:
     kind = _job_kind(mode)
     repo = run_context.repo
@@ -112,7 +113,8 @@ async def dispatch_prompt(
         "slot_id": run_context.slot.id,
         "repo_id": repo.id,
         "runtime": runtime.value,
-        "local_path": run_context.slot.local_path,
+        "local_path": None,
+        "channel": (channel or "").strip().lower() or None,
         "approved_plan_job_id": (
             str(approved_plan_job_id) if approved_plan_job_id else None
         ),

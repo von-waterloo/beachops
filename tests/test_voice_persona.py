@@ -29,58 +29,46 @@ def test_spoken_briefing_respects_max_chars_at_sentence() -> None:
     assert spoken.endswith(".")
 
 
-def test_spartan_instructions_are_laconic() -> None:
+def test_spartan_instructions_are_conversational() -> None:
     lower = SPARTAN_TTS_INSTRUCTIONS.lower()
-    assert "laconic" in lower or "spartan" in lower or "calm" in lower
-    assert "cheerfulness" in lower or "filler" in lower
+    assert "beach" in lower or "coworker" in lower or "conversational" in lower
     assert "war-room" not in lower and "war room" not in lower
 
 
 def test_stt_prompt_biases_beachops_terms() -> None:
     assert "BeachOps" in BEACHOPS_STT_PROMPT
     assert "Cursor" in BEACHOPS_STT_PROMPT
+    assert "Windows" not in BEACHOPS_STT_PROMPT
     assert "Keywords:" in BEACHOPS_STT_PROMPT
 
 
-def test_spoken_ack_mentions_runtime_and_room() -> None:
-    assert spoken_ack(runtime="cloud") == "Взял. Cloud."
-    assert "Windows" in spoken_ack(runtime="windows")
-    assert "очереди" in spoken_ack(runtime="cloud", room="В очереди ещё 1.")
+def test_spoken_ack_is_human_without_metrics() -> None:
+    assert spoken_ack() == "Ок, беру."
+    assert spoken_ack(runtime="cloud", room="В очереди ещё 1.") == "Ок, беру."
+    assert "Windows" not in spoken_ack(runtime="windows")
+    assert "Cloud" not in spoken_ack(runtime="cloud")
 
 
-def test_milestone_line_status_whitelist() -> None:
-    assert milestone_line(status="running", previous_status="queued") == "Агент в работе."
+def test_milestone_line_only_approval() -> None:
+    assert milestone_line(status="running", previous_status="queued") is None
     assert milestone_line(
         status="awaiting_approval", previous_status="running"
-    ) == "Ждёт вашего approve."
-    assert milestone_line(status="queued", previous_status=None) is None
-    assert milestone_line(status="succeeded", previous_status="running") is None
-    assert milestone_line(status="running", previous_status="running") is None
-
-
-def test_milestone_line_filters_noisy_progress() -> None:
-    assert milestone_line(progress_text="thinking about the schema…") is None
-    assert milestone_line(progress_text="Agent started on cloud") == "Агент на связи."
-    assert milestone_line(progress_text="Writing file src/app.py") == "Правит код."
+    ) == "План готов — глянь и скажи, делать или нет."
+    assert milestone_line(progress_text="Agent started on cloud") is None
+    assert milestone_line(progress_text="Writing file src/app.py") is None
 
 
 def test_milestone_gate_interval_and_max() -> None:
     gate = MilestoneGate(min_interval_sec=15, max_per_job=2)
-    assert gate.allow(0.0, "Агент в работе.")
-    gate.mark(0.0, "Агент в работе.")
-    assert not gate.allow(5.0, "Строю план.")
-    assert gate.allow(16.0, "Строю план.")
-    gate.mark(16.0, "Строю план.")
-    assert not gate.allow(40.0, "Нужен review.")  # max reached
-    # Ack-style mark without counting
-    gate2 = MilestoneGate(min_interval_sec=10, max_per_job=1)
-    gate2.mark(0.0, "Взял.", count=False)
-    assert gate2.count == 0
-    assert not gate2.allow(5.0, "Агент в работе.")
-    assert gate2.allow(11.0, "Агент в работе.")
+    assert gate.allow(0.0, "line a")
+    gate.mark(0.0, "line a")
+    assert not gate.allow(5.0, "line b")
+    assert gate.allow(16.0, "line b")
+    gate.mark(16.0, "line b")
+    assert not gate.allow(40.0, "line c")
 
 
-def test_format_spoken_room_caps_bits() -> None:
+def test_format_spoken_room_silent() -> None:
     spoken = format_spoken_room(
         ControlRoomCounts(
             running=3,
@@ -90,9 +78,7 @@ def test_format_spoken_room_caps_bits() -> None:
             workers_online=2,
         )
     )
-    assert "очереди" in spoken
-    assert "approve" in spoken
-    assert spoken.count(".") <= 3
+    assert spoken == ""
 
 
 def test_realtime_session_includes_stt_prompt() -> None:

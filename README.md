@@ -24,7 +24,7 @@ Full docs live in [docs/README.md](./docs/README.md).
 Cursor is great at the keyboard. BeachOps is for when you’re *not* at the keyboard:
 
 - **Ask** — read the repo, answer in Telegram (no writes)
-- **Plan** — investigate, produce a plan, then usually roll straight into do
+- **Plan** — investigate, produce a plan; owner approves, then do (unless `AUTO_APPROVE_PLANS=true`)
 - **Do** — commit and push on your base branch (`dev` by default); `main`/`master` stay PR-only
 
 Plus: multiple named agent sessions, semantic memory, a real job queue, owner approvals when you want them, and a Mini App for voice and the dashboard.
@@ -37,7 +37,7 @@ Plus: multiple named agent sessions, semantic memory, a real job queue, owner ap
 
 - Telegram bot + HTTPS Mini App (dashboard, voice, repos, queue)
 - Cursor **Cloud Agents** via `cursor-sdk` (`create` / `resume`, streaming back into one Telegram message)
-- Up to 8 named **agent slots** per user — switch, rename, delete (Telegram today; Mini App next)
+- Up to 8 named **agent slots** per user — switch, rename, delete in Telegram and Mini App (**Работа**)
 - Durable jobs (Postgres + Redis/ARQ), cancel, reconciler if Telegram UI lags
 - GitHub repos: open mode or allowlist; soft pin via OAuth in the Mini App
 - Memory: every finished run is indexed; ask/plan recall top-k
@@ -105,7 +105,7 @@ In full Compose, the one-shot `migrate` service runs `alembic upgrade head` befo
 
 1. `/start`
 2. Pin a repo: `/repo add https://github.com/you/repo` or Mini App → Repos (any HTTPS GitHub URL; base branch defaults to `dev`)
-3. `/ask` to chat, `/plan` / `/task` for plan→do, `/do` to write on the base branch
+3. `/ask` to chat, `/plan` / `/task` for plan → approve → do, `/do` to write on the base branch
 4. Send text, voice, or a screenshot
 
 No active repo → no prompt. That’s intentional.
@@ -175,10 +175,10 @@ See [CONFIGURATION.md](./docs/CONFIGURATION.md) and `.env.example`. Short versio
 
 ## Roadmap (from the product call)
 
-1. **Cloud-only product surface** — drop Windows runtime / local worker from the product (and the docs people actually read).
-2. **Agent hygiene in the Mini App** — rename & delete slots where you already manage everything else.
-3. **Self-improve + deploy** — keep `dev` → CI → prod sharp; that’s the loop BeachOps is for.
-4. **Honest UX copy** — BeachOps sessions, not “your open Cursor tab.”
-5. **Polish the control room** — voice, queue, timeline: all still in scope, just without the dual-runtime fog.
+1. ~~**Cloud-only product surface**~~ — **done**: Cursor Cloud only; Windows worker out of UX/docs.
+2. ~~**Agent hygiene in the Mini App**~~ — **done**: rename, delete, create on **Работа**.
+3. **Self-improve + deploy** — keep `dev` → CI → prod sharp; that's the loop BeachOps is for.
+4. **Honest UX copy** — BeachOps sessions, not "your open Cursor tab." *(current)*
+5. **Polish the control room** — voice, queue, timeline without dual-runtime fog. *(current)*
 
-PRs and issues welcome once the cloud path is the only story we tell.
+PRs and issues welcome.

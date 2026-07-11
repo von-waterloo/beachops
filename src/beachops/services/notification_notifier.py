@@ -70,6 +70,11 @@ class NotificationNotifier:
             except BadRequest as exc:
                 if "message is not modified" in str(exc).lower():
                     return
-                logger.warning("edit failed, falling back to send: %s", exc)
+                # Never duplicate a finished run message with a fallback send.
+                logger.warning(
+                    "edit failed; skipping send fallback to avoid duplicate: %s",
+                    exc,
+                )
+                return
 
         await self._bot.send_message(chat_id=int(chat_id), text=text[:4096])

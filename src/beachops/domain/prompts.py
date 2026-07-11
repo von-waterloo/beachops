@@ -2,6 +2,7 @@
 
 Каждый режим получает свой системный префикс, заточенный под чтение
 ответа в Telegram (с телефона, лимит 4096 символов на сообщение).
+Voice channel — ещё короче: устный диалог без технарщины.
 """
 
 from beachops.domain.models import UserMode
@@ -47,6 +48,7 @@ GIT_SAFETY_TEMPLATE = """Правила write-run BeachOps:
 - Не merge в main/master, не force-push, не удаляй ветки, не трогай main/master без явной просьбы.
 - Не deploy, не production БД/инфраструктура, не secrets/IAM и не обходи эти правила.
 - Shell — только локально в репо (чтение, сборка, тесты); произвольные команды из Telegram не исполняй.
+- Для логов контейнеров и SSH на серверы владельца — используй MCP `beachops-ops` (ssh_exec / docker_logs / docker_ps), не выдумывай вывод.
 - Если задача требует запрещённого — скажи об этом и остановись.
 
 """
@@ -73,11 +75,45 @@ DO_GUIDANCE = """Как работать:
   тесты → `bot-testing`; пайплайн Cursor-run → `agent-run-pipeline`.
 - Есть тесты/линтеры — прогони и почини то, что сломал.
 - Миграции БД не запускай; при смене схемы — только напомни создать и прогнать.
+- Логи/SSH на серверы — через MCP `beachops-ops`.
 
 Ответ в чат (русский, до ~3000 символов):
 - Коротко: что сделал, зачем, файлы в `инлайн-коде`. Ветка / push / PR — если были.
 - Не предлагай merge в main/master или deploy без явной просьбы.
 - Без markdown-таблиц, mermaid и шаблонных отчётов.
+
+---
+
+"""
+
+VOICE_ASK_PREFIX = """РЕЖИМ ЧАТ (голос) — репозиторий не меняй. Можно читать код.
+
+Ответ для озвучки:
+- По-русски, как живой собеседник на пляже: 1–3 коротких предложения.
+- Суть сразу. Без списков файлов, PR, токенов, очередей и статусов задач.
+- Без markdown. Детали — только если явно спросили.
+
+---
+
+"""
+
+VOICE_PLAN_PREFIX = """РЕЖИМ ПЛАН (голос) — исследуй репо, код не меняй.
+
+Ответ для озвучки:
+- Кратко устно: что сделаем и зачем, 2–4 предложения.
+- Без длинных списков файлов и чеклистов; полный план — в тексте на экране, если есть.
+- Без markdown и технарщины про очередь/воркеров.
+
+---
+
+"""
+
+VOICE_DO_GUIDANCE = """Как работать (голос):
+- Режим действия: делай сразу. Scope = запрос.
+- Логи/SSH — MCP `beachops-ops` при необходимости.
+
+Ответ для озвучки:
+- 1–3 предложения: что сделал. Без отчётов, списков файлов и токенов.
 
 ---
 
@@ -106,21 +142,25 @@ def build_prompt(
     memory_block: str | None = None,
     situation_block: str | None = None,
     self_improve: bool = False,
+    channel: str | None = None,
 ) -> str:
     body = text.strip()
     if memory_block:
         body = f"{MEMORY_PREFIX.format(block=memory_block)}{body}"
     if situation_block:
         body = f"{SITUATION_PREFIX.format(block=situation_block.strip())}{body}"
+    voice = (channel or "").strip().lower() == "voice"
     if mode == UserMode.ASK:
-        return f"{ASK_SYSTEM_PREFIX}{body}"
+        prefix = VOICE_ASK_PREFIX if voice else ASK_SYSTEM_PREFIX
+        return f"{prefix}{body}"
     if mode == UserMode.PLAN:
-        prefix = PLAN_SYSTEM_PREFIX
+        prefix = VOICE_PLAN_PREFIX if voice else PLAN_SYSTEM_PREFIX
         if self_improve:
             prefix = f"{SELF_IMPROVE_SAFETY}{prefix}"
         return f"{prefix}{body}"
     if mode == UserMode.DO:
-        prefix = f"{git_safety_prefix(default_branch=default_branch)}{DO_GUIDANCE}"
+        guidance = VOICE_DO_GUIDANCE if voice else DO_GUIDANCE
+        prefix = f"{git_safety_prefix(default_branch=default_branch)}{guidance}"
         if self_improve:
             prefix = f"{SELF_IMPROVE_SAFETY}{prefix}"
         return f"{prefix}{body}"

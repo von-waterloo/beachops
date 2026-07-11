@@ -106,15 +106,13 @@ def test_simulate_voice_plan_call_and_write_recording() -> None:
     job_id = str(job.id)
 
     situation = (
-        "Ситуация BeachOps (control room — учитывай при ответе):\n"
-        "- Очередь: активно 1, ждёт 0, блок/approve 0\n"
-        "- Активный слот: «Метрика» · cloud · репо `beachops` · ветка `dev`\n"
-        "- Windows-воркеры: нет онлайн\n"
-        "- Модель Cursor: composer-2"
+        "Контекст BeachOps:\n"
+        "- Слот «Метрика» · репо `beachops` · ветка `dev`\n"
+        "- Модель: composer-2"
     )
     user_utterance = "Что сейчас в очереди и какой runtime у активного агента?"
     prompt = with_situation(user_utterance, situation)
-    assert "Ситуация BeachOps" in prompt
+    assert "Контекст BeachOps" in prompt
     assert user_utterance in prompt
 
     # --- Session A: voice mic → plan ---
@@ -167,22 +165,22 @@ def test_simulate_voice_plan_call_and_write_recording() -> None:
     client.apply({"type": "audio.ended"})
 
     # --- Session B: composer ask (live chat) ---
-    client.note("Пользователь", "[composer/ask] Кратко: есть ли Windows-воркеры?")
+    client.note("Пользователь", "[composer/ask] Кратко: что с репо?")
     ask_prompt = with_situation(
-        "Кратко: есть ли Windows-воркеры?",
-        situation.replace("активно 1", "активно 0"),
+        "Кратко: что с репо?",
+        situation,
     )
-    assert "Windows-воркеры" in ask_prompt
+    assert "beachops" in ask_prompt
     ask_job_id = str(uuid4())
     client.apply({"type": "plan.started", "jobId": ask_job_id, "mode": "ask"})
     client.apply(
         {
             "type": "job.progress",
-            "text": "Онлайн Windows-воркеров нет. Cloud доступен.",
+            "text": "Репо на месте, слот активен.",
         }
     )
     ask_brief = to_spoken_briefing(
-        "Онлайн Windows-воркеров нет. Cloud доступен.",
+        "Репо на месте, слот активен.",
         max_chars=200,
     )
     client.apply({"type": "audio.started", "caption": ask_brief})

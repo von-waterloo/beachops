@@ -1,4 +1,4 @@
-"""Tests for control-room situation brief injection."""
+"""Tests for situation brief injection."""
 
 from __future__ import annotations
 
@@ -24,30 +24,16 @@ def test_with_situation_empty_prompt_returns_brief() -> None:
     assert with_situation("", "brief only") == "brief only"
 
 
-def test_format_spoken_room_empty_when_quiet() -> None:
+def test_format_spoken_room_always_silent() -> None:
     assert (
         format_spoken_room(
             ControlRoomCounts(
-                running=0,
-                queued=0,
-                blocked=0,
-                pending_approvals=0,
-                workers_online=0,
+                running=3,
+                queued=2,
+                blocked=2,
+                pending_approvals=1,
+                workers_online=1,
             )
         )
         == ""
     )
-
-
-def test_format_spoken_room_prefers_approve_over_blocked() -> None:
-    spoken = format_spoken_room(
-        ControlRoomCounts(
-            running=1,
-            queued=0,
-            blocked=2,
-            pending_approvals=1,
-            workers_online=0,
-        )
-    )
-    assert "approve" in spoken
-    assert "блоке" not in spoken

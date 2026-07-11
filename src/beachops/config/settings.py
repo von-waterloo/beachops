@@ -121,16 +121,27 @@ class Settings(BaseSettings):
     voice_max_session_sec: int = Field(
         default=300, alias="VOICE_MAX_SESSION_SEC", ge=30, le=900
     )
-    # Mid-run spoken milestones in Mini App voice (ack + status TTS).
-    voice_milestone_tts: bool = Field(default=True, alias="VOICE_MILESTONE_TTS")
+    # Mid-run spoken milestones in Mini App voice (off = conversational final only).
+    voice_milestone_tts: bool = Field(default=False, alias="VOICE_MILESTONE_TTS")
     voice_milestone_min_interval_sec: int = Field(
         default=15, alias="VOICE_MILESTONE_MIN_INTERVAL_SEC", ge=5, le=120
     )
     voice_milestone_max_per_job: int = Field(
         default=4, alias="VOICE_MILESTONE_MAX_PER_JOB", ge=0, le=20
     )
-    # After /plan finishes, immediately enqueue DO (no owner Approve buttons).
-    auto_approve_plans: bool = Field(default=True, alias="AUTO_APPROVE_PLANS")
+    # After /plan finishes, wait for owner Approve (then enqueue DO).
+    auto_approve_plans: bool = Field(default=False, alias="AUTO_APPROVE_PLANS")
+    # HTTP MCP for cloud agents (SSH / docker logs on owner servers).
+    mcp_enabled: bool = Field(default=False, alias="MCP_ENABLED")
+    mcp_public_url: str = Field(default="", alias="MCP_PUBLIC_URL")
+    mcp_bearer_token: str = Field(default="", alias="MCP_BEARER_TOKEN")
+    # Comma-separated host aliases: name=user@host:port (keys via OPS_SSH_KEY_PATH).
+    ops_ssh_hosts: str = Field(default="", alias="OPS_SSH_HOSTS")
+    ops_ssh_key_path: str = Field(default="", alias="OPS_SSH_KEY_PATH")
+    ops_ssh_timeout_sec: int = Field(default=30, alias="OPS_SSH_TIMEOUT_SEC", ge=5, le=120)
+    ops_ssh_max_output_chars: int = Field(
+        default=12_000, alias="OPS_SSH_MAX_OUTPUT_CHARS", ge=500, le=100_000
+    )
     # Telegram + Mini App voice: confirm transcript before dispatch.
     voice_require_confirm: bool = Field(default=False, alias="VOICE_REQUIRE_CONFIRM")
     callback_token_ttl_sec: int = Field(

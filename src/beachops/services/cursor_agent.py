@@ -15,7 +15,6 @@ from cursor_sdk import (
     CloudAgentOptions,
     CloudRepository,
     CursorAgentError,
-    LocalAgentOptions,
     ModelSelection,
     SDKImage,
     SendOptions,
@@ -54,10 +53,30 @@ class CursorAgentService:
         api_key: str,
         model: str,
         workspace: Path,
+        mcp_enabled: bool = False,
+        mcp_public_url: str = "",
+        mcp_bearer_token: str = "",
     ) -> None:
         self._api_key = api_key
         self._model = model
         self._workspace = workspace
+        self._mcp_enabled = mcp_enabled
+        self._mcp_public_url = (mcp_public_url or "").strip()
+        self._mcp_bearer_token = (mcp_bearer_token or "").strip()
+
+    def _mcp_servers(self) -> dict | None:
+        if not self._mcp_enabled or not self._mcp_public_url or not self._mcp_bearer_token:
+            return None
+        try:
+            from cursor_sdk import HttpMcpServerConfig
+        except ImportError:
+            return None
+        return {
+            "beachops-ops": HttpMcpServerConfig(
+                url=self._mcp_public_url,
+                headers={"Authorization": f"Bearer {self._mcp_bearer_token}"},
+            )
+        }
 
     async def run_prompt(
         self,
@@ -75,6 +94,7 @@ class CursorAgentService:
         runtime: str | AgentRuntime | None = None,
         local_path: str | None = None,
         self_improve: bool = False,
+        channel: str | None = None,
     ) -> tuple[RunOutcome, str | None]:
         cursor_mode = "agent" if mode in (UserMode.ASK, UserMode.DO) else "plan"
         # DO on a non-protected base (usually `dev`) works on that branch.
@@ -83,6 +103,8 @@ class CursorAgentService:
         work_on_current_branch = mode == UserMode.DO and not protected_base
         auto_create_pr = mode == UserMode.DO and protected_base
         resolved_runtime = parse_runtime(runtime)
+        if resolved_runtime == AgentRuntime.WINDOWS:
+            resolved_runtime = AgentRuntime.CLOUD
         full_prompt = build_prompt(
             prompt,
             mode,
@@ -90,15 +112,12 @@ class CursorAgentService:
             memory_block=memory_block,
             situation_block=situation_block,
             self_improve=self_improve,
+            channel=channel,
         )
 
         state = StreamState()
         new_agent_id: str | None = None
-        bridge_workspace = (
-            local_path
-            if resolved_runtime == AgentRuntime.WINDOWS and local_path
-            else str(self._workspace)
-        )
+        bridge_workspace = str(self._workspace)
 
         try:
             async with await AsyncClient.launch_bridge(workspace=bridge_workspace) as client:
@@ -112,7 +131,7 @@ class CursorAgentService:
                     work_on_current_branch=work_on_current_branch,
                     api_key=api_key or self._api_key,
                     runtime=resolved_runtime,
-                    local_path=local_path,
+                    local_path=None,
                 ) as agent:
                     send_options = SendOptions(mode=cursor_mode, model=model)
                     payload: str | UserMessage = (
@@ -347,35 +366,28 @@ class CursorAgentService:
         local_path: str | None = None,
     ):
         if runtime == AgentRuntime.WINDOWS:
-            if not local_path:
-                raise CursorAgentError(
-                    "local_path is required for Windows runtime",
-                    code="missing_local_path",
+            runtime = AgentRuntime.CLOUD
+        mcp_servers = self._mcp_servers()
+        cloud = CloudAgentOptions(
+            repos=[
+                CloudRepository(
+                    url=repo.github_url,
+                    starting_ref=repo.default_branch,
                 )
-            options = AgentOptions(
-                api_key=api_key,
-                model=model,
-                local=LocalAgentOptions(cwd=local_path),
-                mode=cursor_mode,
-            )
-        else:
-            cloud = CloudAgentOptions(
-                repos=[
-                    CloudRepository(
-                        url=repo.github_url,
-                        starting_ref=repo.default_branch,
-                    )
-                ],
-                auto_create_pr=auto_create_pr,
-                work_on_current_branch=work_on_current_branch,
-                skip_reviewer_request=True,
-            )
-            options = AgentOptions(
-                api_key=api_key,
-                model=model,
-                cloud=cloud,
-                mode=cursor_mode,
-            )
+            ],
+            auto_create_pr=auto_create_pr,
+            work_on_current_branch=work_on_current_branch,
+            skip_reviewer_request=True,
+        )
+        options_kwargs: dict[str, Any] = {
+            "api_key": api_key,
+            "model": model,
+            "cloud": cloud,
+            "mode": cursor_mode,
+        }
+        if mcp_servers:
+            options_kwargs["mcp_servers"] = mcp_servers
+        options = AgentOptions(**options_kwargs)
         if cursor_agent_id:
             return await client.agents.resume(cursor_agent_id, options)
         return await client.agents.create(options)

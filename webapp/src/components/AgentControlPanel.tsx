@@ -1,21 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import {
-  CheckCircle2,
-  Cloud,
+  Bot,
   ImagePlus,
   Loader2,
-  MessageSquare,
-  Monitor,
+  Plus,
   Send,
-  Wifi,
-  WifiOff,
+  Trash2,
   X,
 } from 'lucide-react'
-import type { AgentSlot, WorkerNode } from '../types/api'
-import { useJobTranscript } from '../hooks/useJobTranscript'
+import type { AgentSlot } from '../types/api'
 import { feedback } from '../lib/feedback'
-import { eventTypeLabel, relativeTimeRu, statusLabel } from '../lib/uiCopy'
 
 type PromptMode = 'ask' | 'plan' | 'do'
 
@@ -37,9 +32,7 @@ interface PromptAttachment {
 }
 
 interface UpdateAgentInput {
-  runtime?: string
-  localPath?: string | null
-  preferredWorkerId?: string | null
+  label?: string
   makeActive?: boolean
 }
 
@@ -58,11 +51,13 @@ interface SubmitPromptResult {
 
 interface AgentControlPanelProps {
   slots: AgentSlot[]
-  workers: WorkerNode[]
   role: string
+  queuedCount?: number
   onUpdateAgent: (slotId: string, input: UpdateAgentInput) => Promise<void>
+  onCreateAgent?: () => Promise<void>
+  onDeleteAgent?: (slotId: string) => Promise<void>
   onSubmitPrompt: (input: SubmitPromptInput) => Promise<SubmitPromptResult>
-  onJobDispatched?: (jobId: string, runtime: string | null | undefined) => void
+  onJobDispatched?: (jobId: string) => void
 }
 
 function canUseMode(role: string, mode: PromptMode): boolean {
@@ -99,55 +94,34 @@ async function fileToAttachment(file: File): Promise<PromptAttachment> {
   }
 }
 
-type RuntimeFlash = {
-  tone: 'ok' | 'warn'
-  title: string
-  detail: string
-}
-
-function workerHostnames(workers: WorkerNode[]): string {
-  return workers.map((worker) => worker.hostname).filter(Boolean).join(', ')
-}
-
 export function AgentControlPanel({
   slots,
-  workers,
   role,
+  queuedCount = 0,
   onUpdateAgent,
+  onCreateAgent,
+  onDeleteAgent,
   onSubmitPrompt,
   onJobDispatched,
 }: AgentControlPanelProps) {
   const activeSlot = slots.find((slot) => slot.active) ?? slots[0] ?? null
-  const [localPath, setLocalPath] = useState(activeSlot?.localPath ?? '')
   const [prompt, setPrompt] = useState('')
   const [attachments, setAttachments] = useState<PromptAttachment[]>([])
   const [mode, setMode] = useState<PromptMode>('ask')
-  const [runtimeBusy, setRuntimeBusy] = useState(false)
   const [promptBusy, setPromptBusy] = useState(false)
-  const [runtimeError, setRuntimeError] = useState<string | null>(null)
+  const [slotBusy, setSlotBusy] = useState(false)
   const [promptError, setPromptError] = useState<string | null>(null)
-  const [flash, setFlash] = useState<RuntimeFlash | null>(null)
-  const [pathSaved, setPathSaved] = useState(false)
-  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pathSavedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [renameValue, setRenameValue] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const reducedMotion = useReducedMotion()
 
   useEffect(() => {
-    setLocalPath(activeSlot?.localPath ?? '')
-    setRuntimeError(null)
-  }, [activeSlot?.id, activeSlot?.localPath])
+    setRenameValue(activeSlot?.label ?? '')
+  }, [activeSlot?.id, activeSlot?.label])
 
   useEffect(() => {
     if (!canUseMode(role, mode)) setMode('ask')
   }, [role, mode])
-
-  useEffect(() => {
-    return () => {
-      if (flashTimer.current) clearTimeout(flashTimer.current)
-      if (pathSavedTimer.current) clearTimeout(pathSavedTimer.current)
-    }
-  }, [])
 
   const addFiles = async (files: FileList | File[]) => {
     const list = Array.from(files)
@@ -169,127 +143,39 @@ export function AgentControlPanel({
     }
   }
 
-  const removeAttachment = (id: string) => {
-    setAttachments((prev) => prev.filter((item) => item.id !== id))
-    feedback('select')
-  }
-
-  if (!activeSlot) return null
-
-  const isWindows = activeSlot.runtime === 'windows'
-  const pathDirty = (localPath.trim() || '') !== (activeSlot.localPath ?? '')
-  const canPlan = canUseMode(role, 'plan')
-  const canDo = canUseMode(role, 'do')
-  // Dashboard already returns only heartbeat-live workers.
-  const workersLive = workers.length > 0
-  const hostLabel = workerHostnames(workers)
-  const savedPath = (activeSlot.localPath ?? '').trim()
-  const effectivePath = savedPath || localPath.trim()
-
-  const showFlash = (next: RuntimeFlash) => {
-    setFlash(next)
-    if (flashTimer.current) clearTimeout(flashTimer.current)
-    flashTimer.current = setTimeout(() => setFlash(null), 4200)
-  }
-
-  const markPathSaved = () => {
-    setPathSaved(true)
-    if (pathSavedTimer.current) clearTimeout(pathSavedTimer.current)
-    pathSavedTimer.current = setTimeout(() => setPathSaved(false), 2200)
-  }
-
-  const windowsReadyFlash = (path: string): RuntimeFlash => {
-    if (!workersLive) {
-      return {
-        tone: 'warn',
-        title: 'Windows выбран, воркер офлайн',
-        detail: 'Путь сохранён. Запустите Windows-воркер — иначе задача не подхватится.',
-      }
-    }
-    return {
-      tone: 'ok',
-      title: 'Windows подключён',
-      detail: `${hostLabel || 'воркер'} · ${path}`,
-    }
-  }
-
-  const switchRuntime = (runtime: 'cloud' | 'windows') => {
-    if (runtime === activeSlot.runtime || runtimeBusy) return
-    if (runtime === 'windows' && !localPath.trim()) {
-      setRuntimeError('Укажите путь к репозиторию на Windows-машине')
-      showFlash({
-        tone: 'warn',
-        title: 'Сначала укажите путь',
-        detail: 'Без локального пути Windows-агент не знает, в какой папке работать.',
-      })
-      feedback('warning')
-      return
-    }
-    setRuntimeBusy(true)
-    setRuntimeError(null)
-    feedback('tap')
-    void onUpdateAgent(activeSlot.id, {
-      runtime,
-      localPath: runtime === 'windows' ? localPath.trim() : undefined,
-    })
-      .then(() => {
-        feedback('success')
-        if (runtime === 'windows') {
-          showFlash(windowsReadyFlash(localPath.trim()))
-        } else {
-          showFlash({
-            tone: 'ok',
-            title: 'Cloud активен',
-            detail: 'Следующие задачи уйдут в облако Cursor.',
-          })
-        }
-      })
-      .catch((err: unknown) => {
-        feedback('error')
-        setRuntimeError(err instanceof Error ? err.message : 'Не удалось переключить режим')
-      })
-      .finally(() => setRuntimeBusy(false))
-  }
-
-  const savePath = () => {
-    if (!pathDirty || runtimeBusy) return
-    setRuntimeBusy(true)
-    setRuntimeError(null)
-    feedback('tap')
-    const nextPath = localPath.trim()
-    void onUpdateAgent(activeSlot.id, { localPath: nextPath })
-      .then(() => {
-        feedback('success')
-        markPathSaved()
-        if (isWindows || nextPath) {
-          showFlash(
-            isWindows
-              ? windowsReadyFlash(nextPath)
-              : {
-                  tone: 'ok',
-                  title: 'Путь сохранён',
-                  detail: nextPath
-                    ? `${nextPath} — переключите на Windows, чтобы слать туда задачи.`
-                    : 'Путь очищен.',
-                },
-          )
-        }
-      })
-      .catch((err: unknown) => {
-        feedback('error')
-        setRuntimeError(err instanceof Error ? err.message : 'Не удалось сохранить путь')
-      })
-      .finally(() => setRuntimeBusy(false))
+  if (!activeSlot) {
+    return (
+      <motion.section
+        className="agent-control"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <header className="agent-control-header">
+          <p className="eyebrow">Агенты</p>
+          <h2>Нет слотов</h2>
+          <p className="muted-hint">Создай первого cloud-агента.</p>
+        </header>
+        {onCreateAgent && (
+          <button
+            type="button"
+            className="primary-button"
+            disabled={slotBusy}
+            onClick={() => {
+              setSlotBusy(true)
+              void onCreateAgent().finally(() => setSlotBusy(false))
+            }}
+          >
+            <Plus size={16} /> Новый агент
+          </button>
+        )}
+      </motion.section>
+    )
   }
 
   const send = () => {
     if ((!prompt.trim() && attachments.length === 0) || promptBusy) return
     if (!canUseMode(role, mode)) {
       setPromptError('Этот режим недоступен для вашей роли')
-      return
-    }
-    if (isWindows && !activeSlot.localPath && !localPath.trim()) {
-      setPromptError('Для Windows нужен путь к репозиторию')
       return
     }
     setPromptBusy(true)
@@ -313,7 +199,7 @@ export function AgentControlPanel({
         feedback('success')
         setPrompt('')
         setAttachments([])
-        onJobDispatched?.(result.job.id, activeSlot.runtime)
+        onJobDispatched?.(result.job.id)
       })
       .catch((err: unknown) => {
         feedback('error')
@@ -330,135 +216,95 @@ export function AgentControlPanel({
       transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
     >
       <header className="agent-control-header">
-        <p className="eyebrow">Управление</p>
+        <p className="eyebrow">Работа</p>
         <h2>{activeSlot.label}</h2>
         <p className="muted-hint">
-          Агент видит очередь и approve. Можно прикрепить скрины багов.
+          Cloud Cursor · ask / plan / do
+          {queuedCount > 0 ? ` · в очереди ${queuedCount}` : ''}
         </p>
       </header>
 
-      <div className="runtime-toggle" role="toolbar" aria-label="Режим исполнения">
-        <button
-          type="button"
-          className={!isWindows ? 'selected' : ''}
-          aria-pressed={!isWindows}
-          disabled={runtimeBusy}
-          onClick={() => switchRuntime('cloud')}
-        >
-          <Cloud size={15} aria-hidden="true" /> Cloud
-        </button>
-        <button
-          type="button"
-          className={isWindows ? 'selected' : ''}
-          aria-pressed={isWindows}
-          disabled={runtimeBusy}
-          onClick={() => switchRuntime('windows')}
-        >
-          <Monitor size={15} aria-hidden="true" /> Windows
-        </button>
-      </div>
-
-      <div
-        className={`runtime-status ${isWindows ? (workersLive && effectivePath ? 'is-ready' : 'is-warn') : 'is-cloud'}`}
-        role="status"
-        aria-live="polite"
-      >
-        <span className="runtime-status-icon" aria-hidden="true">
-          {isWindows ? (
-            workersLive ? <Wifi size={16} /> : <WifiOff size={16} />
-          ) : (
-            <Cloud size={16} />
-          )}
-        </span>
-        <div className="runtime-status-copy">
-          {isWindows ? (
-            <>
-              <strong>
-                {workersLive && effectivePath
-                  ? 'Windows готов'
-                  : !effectivePath
-                    ? 'Windows: нужен путь'
-                    : 'Windows: воркер офлайн'}
-              </strong>
-              <span>
-                {effectivePath
-                  ? `${hostLabel || 'воркер'} · ${effectivePath}`
-                  : 'Укажите папку на ПК и нажмите Сохранить, затем Windows.'}
-                {!workersLive && effectivePath ? ' Запустите воркер, иначе задача не уйдёт.' : ''}
-              </span>
-            </>
-          ) : (
-            <>
-              <strong>Cloud активен</strong>
-              <span>
-                {workersLive
-                  ? `Windows-воркер онлайн (${hostLabel}) — можно переключить.`
-                  : 'Задачи идут в облако Cursor.'}
-              </span>
-            </>
-          )}
-        </div>
-      </div>
-
-      <label className="agent-path-field">
-        <span>Путь к репозиторию (Windows)</span>
-        <div className="agent-path-row">
-          <input
-            value={localPath}
-            onChange={(event) => setLocalPath(event.target.value)}
-            placeholder="C:\\Work\\repo"
-            autoComplete="off"
-            disabled={runtimeBusy}
-          />
+      <div className="agent-switcher" role="listbox" aria-label="Агенты">
+        {slots.map((slot) => (
+          <button
+            key={slot.id}
+            type="button"
+            role="option"
+            aria-selected={slot.id === activeSlot.id}
+            className={slot.id === activeSlot.id ? 'selected' : ''}
+            disabled={slotBusy}
+            onClick={() => {
+              if (slot.id === activeSlot.id) return
+              setSlotBusy(true)
+              feedback('select')
+              void onUpdateAgent(slot.id, { makeActive: true })
+                .finally(() => setSlotBusy(false))
+            }}
+          >
+            <Bot size={14} aria-hidden="true" />
+            <span>{slot.label}</span>
+          </button>
+        ))}
+        {onCreateAgent && (
           <button
             type="button"
-            className={pathSaved && !pathDirty ? 'is-saved' : ''}
-            disabled={!pathDirty || runtimeBusy}
-            onClick={savePath}
+            className="ghost"
+            disabled={slotBusy}
+            onClick={() => {
+              setSlotBusy(true)
+              feedback('tap')
+              void onCreateAgent().finally(() => setSlotBusy(false))
+            }}
+            aria-label="Новый агент"
           >
-            {runtimeBusy ? (
-              <Loader2 size={15} className="spin-icon" aria-hidden="true" />
-            ) : pathSaved ? (
-              <>
-                <CheckCircle2 size={15} aria-hidden="true" /> Сохранено
-              </>
-            ) : (
-              'Сохранить'
-            )}
+            <Plus size={14} />
           </button>
-        </div>
-      </label>
-
-      <AnimatePresence initial={false}>
-        {flash && (
-          <motion.div
-            key={`${flash.title}-${flash.detail}`}
-            className={`runtime-flash tone-${flash.tone}`}
-            role="status"
-            aria-live="polite"
-            initial={reducedMotion ? false : { opacity: 0, y: -6, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={reducedMotion ? undefined : { opacity: 0, y: -4 }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-          >
-            {flash.tone === 'ok' ? (
-              <CheckCircle2 size={16} aria-hidden="true" />
-            ) : (
-              <WifiOff size={16} aria-hidden="true" />
-            )}
-            <div>
-              <strong>{flash.title}</strong>
-              <span>{flash.detail}</span>
-            </div>
-          </motion.div>
         )}
-      </AnimatePresence>
+      </div>
 
-      {runtimeError && <div className="inline-error" role="alert">{runtimeError}</div>}
+      <div className="agent-rename-row">
+        <input
+          value={renameValue}
+          onChange={(event) => setRenameValue(event.target.value)}
+          maxLength={64}
+          aria-label="Имя агента"
+          disabled={slotBusy}
+        />
+        <button
+          type="button"
+          disabled={
+            slotBusy
+            || !renameValue.trim()
+            || renameValue.trim() === activeSlot.label
+          }
+          onClick={() => {
+            setSlotBusy(true)
+            void onUpdateAgent(activeSlot.id, { label: renameValue.trim() })
+              .finally(() => setSlotBusy(false))
+          }}
+        >
+          Переименовать
+        </button>
+        {onDeleteAgent && slots.length > 1 && (
+          <button
+            type="button"
+            className="danger-ghost"
+            disabled={slotBusy}
+            aria-label="Удалить агента"
+            onClick={() => {
+              if (!window.confirm(`Удалить агента «${activeSlot.label}»?`)) return
+              setSlotBusy(true)
+              void onDeleteAgent(activeSlot.id).finally(() => setSlotBusy(false))
+            }}
+          >
+            <Trash2 size={15} />
+          </button>
+        )}
+      </div>
 
-      <div className="prompt-mode-row" role="toolbar" aria-label="Режим запроса">
+      <div className="composer-mode-row" role="toolbar" aria-label="Режим">
         {(['ask', 'plan', 'do'] as const).map((item) => {
-          const allowed = item === 'ask' ? true : item === 'plan' ? canPlan : canDo
+          const allowed = canUseMode(role, item)
           return (
             <button
               key={item}
@@ -466,8 +312,10 @@ export function AgentControlPanel({
               className={mode === item ? 'selected' : ''}
               aria-pressed={mode === item}
               disabled={!allowed}
-              title={!allowed ? 'Нужна роль оператора или владельца' : undefined}
-              onClick={() => setMode(item)}
+              onClick={() => {
+                feedback('select')
+                setMode(item)
+              }}
             >
               {MODE_LABELS[item]}
             </button>
@@ -475,50 +323,52 @@ export function AgentControlPanel({
         })}
       </div>
 
-      <form
-        className="prompt-form"
-        onSubmit={(event) => {
-          event.preventDefault()
-          send()
-        }}
-      >
-        <label htmlFor="agent-prompt">Запрос агенту</label>
-        {attachments.length > 0 && (
-          <div className="prompt-attachments" aria-label="Вложения">
-            {attachments.map((item) => (
-              <div className="prompt-attachment" key={item.id}>
-                <img src={item.previewUrl} alt="" />
-                <button
-                  type="button"
-                  className="prompt-attachment-remove"
-                  aria-label="Убрать картинку"
-                  onClick={() => removeAttachment(item.id)}
-                  disabled={promptBusy}
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+      <div className="composer-card">
+        <label htmlFor="agent-prompt">Задача</label>
         <textarea
           id="agent-prompt"
           value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
-          onPaste={(event) => {
-            const files = Array.from(event.clipboardData?.files ?? []).filter((file) =>
-              file.type.startsWith('image/'),
-            )
-            if (!files.length) return
-            event.preventDefault()
-            void addFiles(files)
-          }}
-          placeholder="Опишите задачу или вставьте скрин (Ctrl+V)…"
-          rows={3}
+          rows={4}
           maxLength={8000}
+          placeholder={
+            mode === 'ask'
+              ? 'Вопрос по коду…'
+              : mode === 'plan'
+                ? 'Что спланировать…'
+                : 'Что сделать в репо…'
+          }
+          onChange={(event) => setPrompt(event.target.value)}
           disabled={promptBusy}
         />
-        <div className="prompt-form-actions">
+
+        <AnimatePresence initial={false}>
+          {attachments.length > 0 && (
+            <motion.div
+              className="attachment-row"
+              initial={reducedMotion ? false : { opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={reducedMotion ? undefined : { opacity: 0, height: 0 }}
+            >
+              {attachments.map((item) => (
+                <div key={item.id} className="attachment-thumb">
+                  <img src={item.previewUrl} alt="" />
+                  <button
+                    type="button"
+                    aria-label="Убрать"
+                    onClick={() => {
+                      setAttachments((prev) => prev.filter((x) => x.id !== item.id))
+                      feedback('select')
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className="composer-actions">
           <input
             ref={fileInputRef}
             type="file"
@@ -532,92 +382,28 @@ export function AgentControlPanel({
           />
           <button
             type="button"
-            className="prompt-attach-btn"
+            className="ghost-button"
             disabled={promptBusy || attachments.length >= MAX_ATTACHMENTS}
-            onClick={() => {
-              feedback('tap')
-              fileInputRef.current?.click()
-            }}
+            onClick={() => fileInputRef.current?.click()}
           >
-            <ImagePlus size={16} aria-hidden="true" />
-            Скрин
+            <ImagePlus size={16} /> Скрин
           </button>
           <button
-            type="submit"
+            type="button"
+            className="primary-button composer-send"
             disabled={promptBusy || (!prompt.trim() && attachments.length === 0)}
+            onClick={send}
           >
-            {promptBusy ? <Loader2 size={16} className="spin-icon" aria-hidden="true" /> : <Send size={16} aria-hidden="true" />}
-            {MODE_LABELS[mode]}
+            {promptBusy ? (
+              <Loader2 size={16} className="spin-icon" aria-hidden="true" />
+            ) : (
+              <Send size={16} aria-hidden="true" />
+            )}
+            Отправить
           </button>
         </div>
-      </form>
-      {promptError && <div className="inline-error" role="alert">{promptError}</div>}
-    </motion.section>
-  )
-}
-
-interface JobChatPanelProps {
-  jobId: string | null
-  enabled?: boolean
-}
-
-export function JobChatPanel({ jobId, enabled = true }: JobChatPanelProps) {
-  const reducedMotion = useReducedMotion()
-  const { snapshot, error } = useJobTranscript(jobId, enabled)
-  const scrollerRef = useRef<HTMLDivElement | null>(null)
-
-  const events = snapshot?.events.filter((event) => event.text) ?? []
-
-  useEffect(() => {
-    const node = scrollerRef.current
-    if (!node) return
-    node.scrollTop = node.scrollHeight
-  }, [events.length, snapshot?.latestText])
-
-  if (!jobId) return null
-
-  const terminal = ['succeeded', 'completed', 'accepted', 'failed', 'cancelled', 'rejected', 'blocked']
-    .includes(snapshot?.status ?? '')
-
-  return (
-    <motion.section
-      className="job-chat"
-      initial={reducedMotion ? false : { opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-      aria-live="polite"
-    >
-      <header className="job-chat-header">
-        <p className="eyebrow">
-          <MessageSquare size={13} aria-hidden="true" /> Эфир задачи
-        </p>
-        {snapshot && (
-          <span className={`status-pill status-${snapshot.status}`}>
-            {statusLabel(snapshot.status)}
-          </span>
-        )}
-      </header>
-      {error && <div className="inline-error" role="alert">{error}</div>}
-      {events.length ? (
-        <div className="job-chat-log" ref={scrollerRef}>
-          {events.map((event) => (
-            <article className="job-chat-message" key={event.id}>
-              <p>{event.text}</p>
-              <small>
-                {eventTypeLabel(event.eventType)}
-                {' · '}
-                {relativeTimeRu(event.createdAt)}
-              </small>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <p className="muted-hint">
-          {terminal
-            ? 'Транскрипт пуст — агент завершил без текстовых событий.'
-            : 'Транскрипт появится, когда агент начнёт отвечать.'}
-        </p>
-      )}
+        {promptError && <div className="inline-error" role="alert">{promptError}</div>}
+      </div>
     </motion.section>
   )
 }

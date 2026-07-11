@@ -1,7 +1,7 @@
-"""Control-room situation brief for Cursor / voice orchestrator awareness.
+"""Situation brief for Cursor prompts.
 
-Injected into ask/plan/do prompts so the agent knows queue, active
-jobs, approvals, workers, and the active slot — not only the latest utterance.
+Injected into ask/plan/do so the agent knows active slot / repo.
+Voice channel gets a minimal brief without queue/worker chatter.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ async def collect_control_room_counts(
     actor_id: int,
     role: Role | None = None,
 ) -> ControlRoomCounts:
-    """Fresh queue / approve / worker counts for prompts and spoken TTS."""
+    """Fresh queue / approve counts for dashboard (not spoken aloud)."""
     resolved_role = role or app.settings.role_for(actor_id)
     jobs = (
         await app.jobs.list_all_internal(limit=40)
@@ -72,30 +72,19 @@ async def collect_control_room_counts(
         if resolved_role == Role.OWNER
         else []
     )
-    workers = await app.worker_nodes.list_online()
     return ControlRoomCounts(
         running=running,
         queued=queued,
         blocked=blocked,
         pending_approvals=len(approvals),
-        workers_online=len(workers),
+        workers_online=0,
     )
 
 
 def format_spoken_room(counts: ControlRoomCounts) -> str:
-    """2–3 laconic facts for mid/final TTS (not a full prompt brief)."""
-    bits: list[str] = []
-    if counts.queued:
-        bits.append(f"В очереди ещё {counts.queued}.")
-    if counts.pending_approvals:
-        bits.append(f"Ждёт approve: {counts.pending_approvals}.")
-    elif counts.blocked:
-        bits.append(f"На блоке: {counts.blocked}.")
-    if counts.running > 1:
-        bits.append(f"Активных {counts.running}.")
-    if counts.workers_online:
-        bits.append(f"Воркеры онлайн: {counts.workers_online}.")
-    return " ".join(bits[:3])
+    """Spoken room bits disabled — voice stays conversational."""
+    del counts
+    return ""
 
 
 async def build_spoken_room_bits(
@@ -104,9 +93,9 @@ async def build_spoken_room_bits(
     actor_id: int,
     role: Role | None = None,
 ) -> str:
-    """Rebuild control-room spoken bits right before TTS."""
-    counts = await collect_control_room_counts(app, actor_id=actor_id, role=role)
-    return format_spoken_room(counts)
+    """No-op for TTS; kept for call-site compatibility."""
+    del app, actor_id, role
+    return ""
 
 
 async def build_situation_brief(
@@ -115,8 +104,25 @@ async def build_situation_brief(
     actor_id: int,
     run_context: RunContext | None = None,
     role: Role | None = None,
+    channel: str | None = None,
 ) -> str:
-    """Compact Russian status block for prompt injection (Telegram-friendly)."""
+    """Compact Russian status block for prompt injection."""
+    voice = (channel or "").strip().lower() == "voice"
+    model_key = await app.users.get_cursor_model_key(
+        actor_id, default=app.settings.cursor_model
+    )
+
+    if voice:
+        lines: list[str] = ["Контекст BeachOps:"]
+        if run_context is not None:
+            slot = run_context.slot
+            repo = run_context.repo
+            lines.append(
+                f"- Слот «{slot.label}» · репо `{repo.alias}` · ветка `{repo.default_branch}`"
+            )
+        lines.append(f"- Модель: {model_key}")
+        return "\n".join(lines)
+
     resolved_role = role or app.settings.role_for(actor_id)
     jobs = (
         await app.jobs.list_all_internal(limit=40)
@@ -147,31 +153,21 @@ async def build_situation_brief(
         if resolved_role == Role.OWNER
         else []
     )
-    workers = await app.worker_nodes.list_online()
 
-    lines: list[str] = [
-        "Ситуация BeachOps (control room — учитывай при ответе):",
+    lines = [
+        "Ситуация BeachOps:",
         f"- Очередь: активно {running}, ждёт {queued}, блок/approve {blocked}",
     ]
 
     if run_context is not None:
         slot = run_context.slot
         repo = run_context.repo
-        runtime = slot.runtime or "cloud"
         lines.append(
-            f"- Активный слот: «{slot.label}» · {runtime}"
+            f"- Активный слот: «{slot.label}»"
             f" · репо `{repo.alias}` · ветка `{repo.default_branch}`"
         )
-        if runtime == "windows" and slot.local_path:
-            lines.append(f"- Windows path: `{slot.local_path}`")
         if slot.cursor_agent_id:
             lines.append(f"- Cursor agent: `{slot.cursor_agent_id}`")
-
-    if workers:
-        hostnames = ", ".join(node["hostname"] for node in workers[:5])
-        lines.append(f"- Windows-воркеры онлайн: {hostnames}")
-    else:
-        lines.append("- Windows-воркеры: нет онлайн")
 
     if approvals:
         lines.append(f"- Ждёт owner approve: {len(approvals)}")
@@ -182,27 +178,10 @@ async def build_situation_brief(
         lines.append("- Живые задачи:")
         for job in active[:5]:
             title = (job.summary or job.kind.value)[:80]
-            runtime = job.runtime or "cloud"
-            lines.append(
-                f"  · {str(job.id)[:8]} · {job.status.value} · {runtime} · {title}"
-            )
+            lines.append(f"  · {str(job.id)[:8]} · {job.status.value} · {title}")
 
-    model_key = await app.users.get_cursor_model_key(
-        actor_id, default=app.settings.cursor_model
-    )
     lines.append(f"- Модель Cursor: {model_key}")
     return "\n".join(lines)
-
-
-def with_situation(prompt: str, situation: str | None) -> str:
-    """Prepend situation brief to a user prompt when present."""
-    body = (prompt or "").strip()
-    brief = (situation or "").strip()
-    if not brief:
-        return body
-    if not body:
-        return brief
-    return f"{brief}\n\n---\n\nЗапрос пользователя:\n{body}"
 
 
 def with_situation(prompt: str, situation: str | None) -> str:

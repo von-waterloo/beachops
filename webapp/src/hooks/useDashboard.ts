@@ -142,6 +142,7 @@ export function useDashboard(pollMs = 15_000) {
   const updateAgent = useCallback(async (
     slotId: string,
     input: {
+      label?: string
       runtime?: string
       localPath?: string | null
       preferredWorkerId?: string | null
@@ -151,26 +152,34 @@ export function useDashboard(pollMs = 15_000) {
     const updated = await apiFetch<AgentSlot>(`/api/agents/${slotId}`, {
       method: 'PATCH',
       body: JSON.stringify({
-        runtime: input.runtime,
-        localPath: input.localPath,
-        preferredWorkerId: input.preferredWorkerId,
+        label: input.label,
+        runtime: input.runtime === 'cloud' ? 'cloud' : undefined,
         makeActive: input.makeActive,
       }),
     })
-    // Invalidate in-flight polls, then apply PATCH so the toggle cannot snap
-    // back to the pre-mutation Cloud snapshot when a slow /api/dashboard lands.
     refreshEpoch.current += 1
     setData((prev) => ({
       ...prev,
       agents: mergeAgentSlot(prev.agents, slotId, updated, input.makeActive),
     }))
     await refresh()
-    // Belt-and-suspenders: a fresh dashboard must still reflect this PATCH
-    // (guards against a rare cache miss that rebuilt from a torn read).
     setData((prev) => ({
       ...prev,
       agents: mergeAgentSlot(prev.agents, slotId, updated, input.makeActive),
     }))
+  }, [refresh])
+
+  const createAgent = useCallback(async (label?: string) => {
+    await apiFetch<AgentSlot>('/api/agents', {
+      method: 'POST',
+      body: JSON.stringify({ label, makeActive: true }),
+    })
+    await refresh()
+  }, [refresh])
+
+  const deleteAgent = useCallback(async (slotId: string) => {
+    await apiFetch(`/api/agents/${slotId}`, { method: 'DELETE' })
+    await refresh()
   }, [refresh])
 
   const submitPrompt = useCallback(async (input: {
@@ -248,6 +257,8 @@ export function useDashboard(pollMs = 15_000) {
     addRepository,
     updateRepository,
     updateAgent,
+    createAgent,
+    deleteAgent,
     submitPrompt,
     setSelfImprove,
   }

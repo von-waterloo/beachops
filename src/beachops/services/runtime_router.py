@@ -1,4 +1,4 @@
-"""Choose cloud vs Windows execution runtime for a job/slot."""
+"""Choose execution runtime for a job/slot (cloud-only product surface)."""
 
 from __future__ import annotations
 
@@ -16,21 +16,9 @@ def choose_runtime(
     job_runtime: str | None = None,
     default: object | None = "cloud",
 ) -> AgentRuntime:
-    """Resolve runtime with precedence: explicit job → payload → slot → default."""
-    if job_runtime not in (None, ""):
-        return parse_runtime(job_runtime)
-
-    if job_payload:
-        payload_runtime = job_payload.get("runtime")
-        if payload_runtime not in (None, ""):
-            return parse_runtime(payload_runtime)
-
-    if slot is not None:
-        slot_runtime = getattr(slot, "runtime", None)
-        if slot_runtime not in (None, ""):
-            return parse_runtime(slot_runtime)
-
-    return parse_runtime(default)
+    """Always cloud — Windows runtime is removed from the product surface."""
+    del slot, job_payload, job_runtime, default
+    return AgentRuntime.CLOUD
 
 
 def resolve_runtime(
@@ -39,9 +27,6 @@ def resolve_runtime(
     payload_runtime: object | None = None,
     default: object | None = "cloud",
 ) -> AgentRuntime:
-    """Prefer explicit job payload, then slot preference, then settings default."""
-    if payload_runtime not in (None, ""):
-        return parse_runtime(payload_runtime)
-    if slot_runtime not in (None, ""):
-        return parse_runtime(slot_runtime)
-    return parse_runtime(default)
+    """Cloud-only; ignore legacy windows preferences."""
+    del slot_runtime, payload_runtime, default
+    return AgentRuntime.CLOUD
