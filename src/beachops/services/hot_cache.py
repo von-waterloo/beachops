@@ -51,8 +51,11 @@ class HotCache:
     def _dashboard_key(self, scope: str, generation: int) -> str:
         return f"{_DASHBOARD_PREFIX}{generation}:{scope}"
 
-    async def get_dashboard(self, scope: str) -> dict[str, Any] | None:
-        generation = await self.dashboard_generation()
+    async def get_dashboard(
+        self, scope: str, *, generation: int | None = None
+    ) -> dict[str, Any] | None:
+        if generation is None:
+            generation = await self.dashboard_generation()
         raw = await self._redis.get(self._dashboard_key(scope, generation))
         if raw is None:
             return None
@@ -62,8 +65,18 @@ class HotCache:
             return None
         return payload if isinstance(payload, dict) else None
 
-    async def set_dashboard(self, scope: str, payload: dict[str, Any]) -> None:
-        generation = await self.dashboard_generation()
+    async def set_dashboard(
+        self, scope: str, payload: dict[str, Any], *, generation: int | None = None
+    ) -> None:
+        """Cache under a fixed generation.
+
+        Callers must pass the generation captured at the start of the dashboard
+        build. Re-reading the current generation here would let a slow build
+        that started before ``bump_dashboard_generation`` poison the new key
+        with a stale snapshot (e.g. Cloud after a Windows switch).
+        """
+        if generation is None:
+            generation = await self.dashboard_generation()
         await self._redis.set(
             self._dashboard_key(scope, generation),
             json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode(

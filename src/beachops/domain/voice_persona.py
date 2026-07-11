@@ -19,6 +19,14 @@ Measured pace, firm and calm. Status first, then the next move.
 Never whisper. Never sound apologetic or theatrical.
 """.strip()
 
+# Bias realtime / Audio STT toward BeachOps domain terms (short keyword list).
+BEACHOPS_STT_PROMPT = (
+    "Keywords: BeachOps, control room, Cursor, composer, agent, slot, runtime, "
+    "cloud, Windows, worker, queue, plan, ask, do, approve, reject, revision, "
+    "PR, pull request, branch, commit, deploy, rollback, migrate, postgres, "
+    "redis, Mini App, Telegram, webhook, polling, job, blocked, awaiting approval."
+)
+
 _CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
 _MD_HEADING_RE = re.compile(r"(?m)^#{1,6}\s+")

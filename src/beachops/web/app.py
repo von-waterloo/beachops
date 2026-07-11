@@ -191,7 +191,12 @@ def create_app() -> FastAPI:
             if role == Role.OWNER
             else f"actor:{principal.user_id}"
         )
-        cached = await context.hot_cache.get_dashboard(cache_scope)
+        # Pin generation for the whole build so a concurrent bump cannot make
+        # this request write a stale snapshot into the new cache key.
+        cache_generation = await context.hot_cache.dashboard_generation()
+        cached = await context.hot_cache.get_dashboard(
+            cache_scope, generation=cache_generation
+        )
         if cached is not None:
             return cached
 
@@ -239,7 +244,9 @@ def create_app() -> FastAPI:
             "queue": _queue_stats(jobs),
             "selfImprove": self_improve,
         }
-        await context.hot_cache.set_dashboard(cache_scope, snapshot)
+        await context.hot_cache.set_dashboard(
+            cache_scope, snapshot, generation=cache_generation
+        )
         return snapshot
 
     @app.post("/api/repos")
@@ -716,6 +723,9 @@ def create_app() -> FastAPI:
             api_key=context.settings.openai_api_key,
             model=context.settings.voice_realtime_model,
             input_transcribe_model=context.settings.voice_input_transcribe_model,
+            transcription_prompt=(
+                context.settings.voice_input_transcribe_prompt or None
+            ),
             limits=VoiceGatewayLimits(
                 max_session_bytes=24_000
                 * 2

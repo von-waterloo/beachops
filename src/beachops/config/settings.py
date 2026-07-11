@@ -99,6 +99,10 @@ class Settings(BaseSettings):
         default="gpt-4o-transcribe",
         alias="VOICE_INPUT_TRANSCRIBE_MODEL",
     )
+    # Empty = built-in BeachOps keyword bias (domain/voice_persona.py).
+    voice_input_transcribe_prompt: str = Field(
+        default="", alias="VOICE_INPUT_TRANSCRIBE_PROMPT"
+    )
     # Pin Dec 2025 TTS snapshot (alias gpt-4o-mini-tts → same; pin for stability).
     voice_tts_model: str = Field(
         default="gpt-4o-mini-tts-2025-12-15", alias="VOICE_TTS_MODEL"

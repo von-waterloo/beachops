@@ -143,6 +143,7 @@ class AppContext:
             transcription=TranscriptionService(
                 api_key=settings.openai_api_key,
                 model=settings.transcribe_model,
+                prompt=settings.voice_input_transcribe_prompt or None,
             ),
             speech=SpeechService(
                 api_key=settings.openai_api_key,

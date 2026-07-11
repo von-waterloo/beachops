@@ -57,6 +57,20 @@ async def test_dashboard_cache_invalidates_on_generation_bump() -> None:
     assert await cache.get_dashboard("owner:1") is None
 
 
+@pytest.mark.asyncio
+async def test_dashboard_set_uses_pinned_generation_not_current() -> None:
+    """Slow build started at gen N must not poison gen N+1 after a bump."""
+    cache = HotCache(FakeRedis())  # type: ignore[arg-type]
+    gen0 = await cache.dashboard_generation()
+    await cache.bump_dashboard_generation()
+    await cache.set_dashboard("owner:1", {"runtime": "cloud"}, generation=gen0)
+    assert await cache.get_dashboard("owner:1") is None
+    await cache.set_dashboard(
+        "owner:1", {"runtime": "windows"}, generation=await cache.dashboard_generation()
+    )
+    assert (await cache.get_dashboard("owner:1")) == {"runtime": "windows"}
+
+
 def test_embedding_pack_roundtrip() -> None:
     vector = [0.1, -0.25, 1.5]
     assert _unpack_embedding(_pack_embedding(vector)) == pytest.approx(vector)

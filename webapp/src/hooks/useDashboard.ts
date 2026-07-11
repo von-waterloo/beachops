@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from '../lib/api'
-import { isActiveJobStatus, type DashboardSnapshot } from '../types/api'
+import { isActiveJobStatus, type AgentSlot, type DashboardSnapshot } from '../types/api'
 
 const emptySnapshot: DashboardSnapshot = {
   jobs: [],
@@ -124,7 +124,7 @@ export function useDashboard(pollMs = 15_000) {
       makeActive?: boolean
     },
   ) => {
-    await apiFetch(`/api/agents/${slotId}`, {
+    const updated = await apiFetch<AgentSlot>(`/api/agents/${slotId}`, {
       method: 'PATCH',
       body: JSON.stringify({
         runtime: input.runtime,
@@ -133,7 +133,22 @@ export function useDashboard(pollMs = 15_000) {
         makeActive: input.makeActive,
       }),
     })
-    await refresh()
+    // Apply PATCH result immediately so a stale dashboard cache / failed
+    // refresh cannot leave the toggle stuck on the previous runtime.
+    setData((prev) => ({
+      ...prev,
+      agents: prev.agents.map((slot) => {
+        if (slot.id !== slotId) {
+          return input.makeActive ? { ...slot, active: false } : slot
+        }
+        return { ...slot, ...updated, active: input.makeActive ? true : updated.active ?? slot.active }
+      }),
+    }))
+    try {
+      await refresh()
+    } catch {
+      // Mutation already succeeded; keep optimistic slot state.
+    }
   }, [refresh])
 
   const submitPrompt = useCallback(async (input: {

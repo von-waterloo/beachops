@@ -15,6 +15,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from openai import AsyncOpenAI
 
 from beachops.services.logging_config import bind_log_context
+from beachops.domain.voice_persona import BEACHOPS_STT_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -35,24 +36,35 @@ class RealtimeVoiceGateway:
         model: str = "gpt-realtime",
         input_transcribe_model: str = "gpt-4o-transcribe",
         language: str = "ru",
+        transcription_prompt: str | None = None,
         limits: VoiceGatewayLimits | None = None,
     ) -> None:
         self._client = AsyncOpenAI(api_key=api_key)
         self._model = model
         self._input_transcribe_model = input_transcribe_model
         self._language = language
+        prompt = (transcription_prompt if transcription_prompt is not None else BEACHOPS_STT_PROMPT).strip()
+        self._transcription_prompt = prompt
         self._limits = limits or VoiceGatewayLimits()
 
     def _session_update_payload(self) -> dict:
+        # gpt-realtime requires session.type=realtime. type=transcription is only
+        # for gpt-realtime-whisper connect models (not available on this key).
         transcription: dict = {
             "model": self._input_transcribe_model,
             "language": self._language,
         }
-        # delay is only valid for gpt-realtime-whisper streaming STT.
-        if "whisper" in self._input_transcribe_model:
+        # prompt steers vocabulary for gpt-4o(-mini)-transcribe; not for whisper-1 /
+        # gpt-realtime-whisper GA sessions.
+        if self._transcription_prompt and "whisper" not in self._input_transcribe_model:
+            transcription["prompt"] = self._transcription_prompt
+        if (
+            "whisper" in self._input_transcribe_model
+            and self._input_transcribe_model != "whisper-1"
+        ):
             transcription["delay"] = "minimal"
         return {
-            "type": "transcription",
+            "type": "realtime",
             "audio": {
                 "input": {
                     "format": {"type": "audio/pcm", "rate": 24000},

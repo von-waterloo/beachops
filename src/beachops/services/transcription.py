@@ -8,21 +8,33 @@ from pathlib import Path
 
 from openai import AsyncOpenAI
 
+from beachops.domain.voice_persona import BEACHOPS_STT_PROMPT
+
 logger = logging.getLogger(__name__)
 
 
 class TranscriptionService:
-    def __init__(self, api_key: str, model: str) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        *,
+        prompt: str | None = None,
+    ) -> None:
         self._client = AsyncOpenAI(api_key=api_key)
         self._model = model
+        self._prompt = (prompt if prompt is not None else BEACHOPS_STT_PROMPT).strip()
 
     async def transcribe_bytes(self, audio: bytes, filename: str = "voice.ogg") -> str:
         buffer = BytesIO(audio)
         buffer.name = filename
-        response = await self._client.audio.transcriptions.create(
-            model=self._model,
-            file=buffer,
-        )
+        create_kwargs: dict = {
+            "model": self._model,
+            "file": buffer,
+        }
+        if self._prompt:
+            create_kwargs["prompt"] = self._prompt
+        response = await self._client.audio.transcriptions.create(**create_kwargs)
         text = (response.text or "").strip()
         if text:
             logger.info(
