@@ -1,7 +1,7 @@
 # Prod deploy on self-hosted runner host-185 (185.244.49.94).
 #
 # Triggers:
-#   1) Auto: push to main -> wait for green CI -> deploy that SHA
+#   1) Auto: push to main or dev -> wait for green CI -> deploy that SHA
 #   2) Manual / bot: workflow_dispatch with input sha (rollback etc.)
 #
 # Secrets: ENV_PROD_BEACHOPS (preferred) or ENV_PROD = full prod .env
@@ -11,7 +11,7 @@ name: Deploy prod
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
     inputs:
       sha:
@@ -47,7 +47,7 @@ jobs:
             REASON="dispatch"
           else
             RAW="${{ github.sha }}"
-            REASON="auto-main"
+            REASON="auto-${{ github.ref_name }}"
           fi
           RAW="$(printf '%s' "$RAW" | tr -d '[:space:]')"
           if [ "${#RAW}" -lt 7 ]; then

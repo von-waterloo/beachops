@@ -227,7 +227,8 @@ approve, воркеры, активный слот/runtime/репо — аген
 1. Откройте вкладку **Пульт** → блок **Самосовершенствование** → **Включить**.
 2. Цель — активный репозиторий BeachOps (или `SELF_IMPROVE_REPO_URL` на сервере, если задан).
 3. Пока режим выключен, агент не получает safety-префикс «править сам control plane».
-4. Деплой по-прежнему только через owner approve / Actions. Откат: `/rollback` в боте.
+4. Выкат: push агента в **`dev`** (или `main`) → зелёный CI → auto-deploy на прод.
+   Прямой push в `main` агенту запрещён; база self-improve — `dev`. Откат: `/rollback`.
 
 Опционально в `.env`: `SELF_IMPROVE_REPO_URL`, `SELF_IMPROVE_BRANCHES=dev` (дефолтная цель и ветки).
 

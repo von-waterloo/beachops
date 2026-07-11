@@ -11,7 +11,7 @@
 | [Руководство пользователя](./USER_GUIDE.md) | операторы бота | команды, режимы, сценарии в Telegram |
 | [Разработка](./DEVELOPMENT.md) | разработчики | локальный запуск, структура кода, тесты |
 | [Эксплуатация](./OPERATIONS.md) | DevOps | Docker, деплой, бэкапы, миграции |
-| [Self-deploy / CI](./SELF_DEPLOY.md) | DevOps / owner | main → CI → auto-deploy host-185; bot rollback via workflow_dispatch |
+| [Self-deploy / CI](./SELF_DEPLOY.md) | DevOps / owner | main/dev → CI → auto-deploy host-185; bot rollback via workflow_dispatch |
 | [Конфигурация](./CONFIGURATION.md) | все | переменные окружения, права доступа |
 | [Threat model](./THREAT_MODEL.md) | security/ops | trust boundaries, controls, incident response |
 

@@ -4,7 +4,7 @@
 Для своей копии достаточно Docker Compose из [OPERATIONS.md](./OPERATIONS.md) /
 корневого README; этот файл не обязателен.
 
-Кратко: приватный репозиторий → CI на GitHub-hosted → **auto-deploy на `main`**
+Кратко: приватный репозиторий → CI на GitHub-hosted → **auto-deploy с `main` или `dev`**
 после зелёного CI на self-hosted runner **host-185**. Бот не хранит SSH-ключ
 и не ходит на сервер напрямую; rollback/ручной деплой — через тот же Actions
 `workflow_dispatch`.
@@ -13,10 +13,12 @@
 
 | Событие | Что происходит |
 |---------|----------------|
-| Push / merge в **`main`** | Deploy prod ждёт зелёный CI, затем выкат на host-185 |
-| Push в `dev` | только CI (без деплоя) |
+| Push / merge в **`main`** или **`dev`** | Deploy prod ждёт зелёный CI, затем выкат на host-185 |
 | Telegram `/rollback` или API | бот → `workflow_dispatch` с SHA → тот же Deploy prod |
 | Actions UI → Run workflow | ручной `workflow_dispatch` с SHA |
+
+Self-improve / `/do` на базе `dev`: агент пушит в `dev` → CI → тот же прод.
+Прямой push агента в `main`/`master` по-прежнему запрещён policy.
 
 Короткий SHA в dispatch раскрывается в полный (иначе `actions/checkout` ищет ветку).
 

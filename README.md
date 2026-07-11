@@ -80,7 +80,7 @@ python -m beachops
 
 ## Maintainer's own production reference (not required for your deployment)
 
-Прод автора (185.244.49.94, runner host-185): **push в main → CI → Deploy prod**.
+Прод автора (185.244.49.94, runner host-185): **push в `main` или `dev` → CI → Deploy prod**.
 Rollback — Telegram /rollback или Actions workflow_dispatch. Legacy с Windows:
 
 `powershell

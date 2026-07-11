@@ -62,10 +62,10 @@ named volumes. Приложение и Python package полностью наз�
 
 ### CI / self-hosted deploy (предпочтительно)
 
-См. [SELF_DEPLOY.md](./SELF_DEPLOY.md): push в **main** → CI → auto-deploy на
-runner [self-hosted, host-185]. Rollback и ручной деплой — workflow_dispatch
-(бот /rollback или Actions UI). Secret: ENV_PROD_BEACHOPS или ENV_PROD.
-Бот не использует SSH для выката.
+См. [SELF_DEPLOY.md](./SELF_DEPLOY.md): push в **main** или **dev** → CI →
+auto-deploy на runner [self-hosted, host-185]. Rollback и ручной деплой —
+workflow_dispatch (бот /rollback или Actions UI). Secret: ENV_PROD_BEACHOPS
+или ENV_PROD. Бот не использует SSH для выката.
 
 
 ### Деплой с Windows (legacy)
