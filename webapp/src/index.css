@@ -346,37 +346,42 @@ main {
 .connection-chip,
 .job-chip {
   position: absolute;
+  z-index: 2;
   gap: 6px;
-  padding: 5px 8px;
+  padding: 5px 10px;
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--muted);
   background: rgba(0, 0, 0, 0.11);
   font-size: 0.63rem;
   font-weight: 680;
+  line-height: 1.2;
+  box-sizing: border-box;
 }
 
 .connection-chip {
   top: 16px;
   right: 16px;
+  max-width: 42%;
+  justify-content: center;
 }
 
 .job-chip {
   top: 16px;
   left: 16px;
-  max-width: min(58vw, 220px);
-  overflow: hidden;
+  max-width: calc(100% - 132px);
   color: var(--cyan);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.job-status-caption {
-  display: block;
-  margin-top: 8px;
-  color: color-mix(in srgb, var(--cyan) 80%, var(--muted));
-  font-size: 0.64rem;
-  letter-spacing: 0.02em;
+.job-chip > svg {
+  flex-shrink: 0;
+}
+
+.job-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .online-dot,
@@ -399,11 +404,12 @@ main {
   --orb-energy: 0.08;
   width: 142px;
   height: 142px;
-  margin-bottom: 24px;
+  margin: 28px 0 20px;
   padding: 0;
   position: relative;
   display: grid;
   place-items: center;
+  flex-shrink: 0;
   border: 0;
   border-radius: 50%;
   color: #082119;
@@ -577,10 +583,12 @@ main {
 .spectrum {
   height: 35px;
   width: min(255px, 74vw);
+  margin: 0 auto;
   display: flex;
   gap: 4px;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .spectrum i {
@@ -593,24 +601,46 @@ main {
 }
 
 .voice-status {
+  width: 100%;
   min-height: 59px;
   margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
   text-align: center;
+  box-sizing: border-box;
+  padding-inline: 12px;
 }
 
 .voice-status strong {
+  display: block;
+  width: 100%;
   font-size: 0.88rem;
   letter-spacing: 0.01em;
+  text-align: center;
 }
 
 .voice-status p {
+  width: 100%;
   max-width: 290px;
-  margin-top: 6px;
+  margin: 6px auto 0;
   overflow: hidden;
   color: var(--muted);
   font-size: 0.76rem;
   line-height: 1.45;
+  text-align: center;
   text-overflow: ellipsis;
+}
+
+.job-status-caption {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  color: color-mix(in srgb, var(--cyan) 80%, var(--muted));
+  font-size: 0.64rem;
+  letter-spacing: 0.02em;
+  text-align: center;
 }
 
 .privacy-chip {
@@ -2241,6 +2271,126 @@ button.worker-chip:hover {
   cursor: not-allowed;
 }
 
+.runtime-status {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-high);
+}
+
+.runtime-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+}
+
+.runtime-status-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.runtime-status-copy strong {
+  font-size: var(--font-md);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.runtime-status-copy span {
+  color: var(--muted);
+  font-size: var(--font-sm);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.runtime-status.is-ready {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.runtime-status.is-ready .runtime-status-icon {
+  color: var(--accent-ink);
+  background: var(--accent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+  animation: runtime-pulse 1.8s var(--ease-out) infinite;
+}
+
+.runtime-status.is-ready .runtime-status-copy strong {
+  color: color-mix(in srgb, var(--accent) 70%, var(--ink));
+}
+
+.runtime-status.is-warn {
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--line));
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+}
+
+.runtime-status.is-warn .runtime-status-icon {
+  color: color-mix(in srgb, var(--warning) 80%, var(--ink));
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+}
+
+.runtime-status.is-cloud .runtime-status-icon {
+  color: var(--cyan);
+  background: color-mix(in srgb, var(--cyan) 14%, transparent);
+}
+
+.runtime-flash {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+}
+
+.runtime-flash strong {
+  display: block;
+  font-size: var(--font-md);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.runtime-flash span {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--font-sm);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.runtime-flash.tone-ok {
+  color: color-mix(in srgb, var(--accent) 55%, var(--ink));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+}
+
+.runtime-flash.tone-warn {
+  color: color-mix(in srgb, var(--warning) 55%, var(--ink));
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--line));
+  background: color-mix(in srgb, var(--warning) 12%, var(--surface));
+}
+
+@keyframes runtime-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+  55% {
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+}
+
 .agent-path-field,
 .prompt-form {
   display: grid;
@@ -2300,6 +2450,11 @@ button.worker-chip:hover {
 .prompt-form button[type="submit"]:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.agent-path-row button.is-saved:disabled {
+  opacity: 1;
+  cursor: default;
 }
 
 .job-chat-header {
@@ -2376,6 +2531,10 @@ button.worker-chip:hover {
   }
 
   .spin-icon {
+    animation: none;
+  }
+
+  .runtime-status.is-ready .runtime-status-icon {
     animation: none;
   }
 }

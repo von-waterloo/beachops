@@ -434,6 +434,7 @@ def create_app() -> FastAPI:
             mode=mode,
             run_context=run_context,
             idempotency_key=key,
+            display_summary=body.prompt,
         )
         await context.hot_cache.bump_dashboard_generation()
         return {
@@ -756,6 +757,7 @@ def create_app() -> FastAPI:
                 mode=mode,
                 run_context=run_context,
                 idempotency_key=f"voice:{principal.user_id}:{uuid4()}",
+                display_summary=transcript,
             )
             if not dispatched.enqueued:
                 logger.warning(

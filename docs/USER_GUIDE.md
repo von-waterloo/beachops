@@ -124,7 +124,8 @@ Windows-агенты: слот с `runtime=windows` + worker на ПК
 
 В чате: голос транскрибируется и проходит обычную безопасную plan-first схему.
 В Mini App: realtime transcript, текстовый composer (**Спросить** / **План**),
-панель управления агентом (Cloud/Windows, путь, ask/plan/do), **эфир задачи**
+панель управления агентом (Cloud/Windows, путь, статус «Windows готов» / офлайн,
+ask/plan/do), **эфир задачи**
 (живой транскрипт `run.progress`), animated waveform/orb, Cloud/Windows agent cards
 со ссылкой «Открыть в Cursor», вкладка **Репо**, live queue, вкладка **Пульт**,
 timeline и worker health.

@@ -89,12 +89,14 @@ class Settings(BaseSettings):
     web_auth_challenge_ttl_sec: int = Field(
         default=300, alias="WEB_AUTH_CHALLENGE_TTL_SEC", ge=60, le=900
     )
+    # WebSocket connect model for Realtime API (not nested STT).
+    # gpt-realtime-whisper connects but rejects session.update on many keys.
     voice_realtime_model: str = Field(
-        default="gpt-realtime-whisper", alias="VOICE_REALTIME_MODEL"
+        default="gpt-realtime", alias="VOICE_REALTIME_MODEL"
     )
-    # Nested STT inside Realtime transcription session (Dec 2025 snapshot).
+    # Nested audio.input.transcription.model inside the realtime session.
     voice_input_transcribe_model: str = Field(
-        default="gpt-4o-mini-transcribe-2025-12-15",
+        default="gpt-4o-transcribe",
         alias="VOICE_INPUT_TRANSCRIBE_MODEL",
     )
     # Pin Dec 2025 TTS snapshot (alias gpt-4o-mini-tts → same; pin for stability).

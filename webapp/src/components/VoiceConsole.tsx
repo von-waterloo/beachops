@@ -41,6 +41,20 @@ const phaseEnergy: Record<VoicePhase, number> = {
   error: 0.2,
 }
 
+function jobChipTitle(title: string): string {
+  const raw = title.trim()
+  if (raw.startsWith('Ситуация BeachOps')) {
+    const marker = 'Запрос пользователя:\n'
+    const idx = raw.indexOf(marker)
+    if (idx >= 0) {
+      const userBit = raw.slice(idx + marker.length).trim()
+      if (userBit) return userBit.slice(0, 42)
+    }
+    return 'Задача'
+  }
+  return raw.slice(0, 42)
+}
+
 interface Props {
   activeJob?: Job | null
   latestEvent?: Event | null
@@ -185,7 +199,7 @@ export function VoiceConsole({
         {activeJob && (
           <div className="job-chip" role="status">
             {activeJob.runtime === 'windows' ? <Monitor size={12} /> : <Cloud size={12} />}
-            <span>{activeJob.title.slice(0, 42)}</span>
+            <span>{jobChipTitle(activeJob.title)}</span>
           </div>
         )}
 

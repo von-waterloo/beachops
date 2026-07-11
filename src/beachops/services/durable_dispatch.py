@@ -39,13 +39,17 @@ async def dispatch_prompt(
     run_context: RunContext,
     idempotency_key: str | None = None,
     approved_plan_job_id: UUID | None = None,
+    display_summary: str | None = None,
 ) -> DispatchResult:
     kind = _job_kind(mode)
     repo = run_context.repo
     write = kind == JobKind.CHANGE
-    safe_summary = redact_text(prompt).strip()
+    # Secret scan the full prompt (may include situation brief).
+    redacted_prompt = redact_text(prompt).strip()
+    # UI/job chip title: prefer the raw user utterance over injected brief.
+    safe_summary = redact_text((display_summary or prompt)).strip()
 
-    if safe_summary != prompt.strip():
+    if redacted_prompt != prompt.strip():
         job = await app.jobs.create(
             actor_id,
             kind=kind,

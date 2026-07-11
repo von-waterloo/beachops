@@ -32,8 +32,8 @@ class RealtimeVoiceGateway:
         self,
         *,
         api_key: str,
-        model: str = "gpt-realtime-whisper",
-        input_transcribe_model: str = "gpt-4o-mini-transcribe-2025-12-15",
+        model: str = "gpt-realtime",
+        input_transcribe_model: str = "gpt-4o-transcribe",
         language: str = "ru",
         limits: VoiceGatewayLimits | None = None,
     ) -> None:
@@ -42,6 +42,26 @@ class RealtimeVoiceGateway:
         self._input_transcribe_model = input_transcribe_model
         self._language = language
         self._limits = limits or VoiceGatewayLimits()
+
+    def _session_update_payload(self) -> dict:
+        transcription: dict = {
+            "model": self._input_transcribe_model,
+            "language": self._language,
+        }
+        # delay is only valid for gpt-realtime-whisper streaming STT.
+        if "whisper" in self._input_transcribe_model:
+            transcription["delay"] = "minimal"
+        return {
+            "type": "transcription",
+            "audio": {
+                "input": {
+                    "format": {"type": "audio/pcm", "rate": 24000},
+                    "noise_reduction": {"type": "near_field"},
+                    "transcription": transcription,
+                    "turn_detection": None,
+                }
+            },
+        }
 
     async def run(
         self,
@@ -69,23 +89,7 @@ class RealtimeVoiceGateway:
                 "Voice provider connected",
                 extra={"action": "voice_provider_ready"},
             )
-            await connection.session.update(
-                session={
-                    "type": "transcription",
-                    "audio": {
-                        "input": {
-                            "format": {"type": "audio/pcm", "rate": 24000},
-                            "noise_reduction": {"type": "near_field"},
-                            "transcription": {
-                                "model": self._input_transcribe_model,
-                                "delay": "minimal",
-                                "language": self._language,
-                            },
-                            "turn_detection": None,
-                        }
-                    },
-                }
-            )
+            await connection.session.update(session=self._session_update_payload())
             events_task = asyncio.create_task(
                 self._forward_provider_events(connection, websocket)
             )

@@ -71,8 +71,8 @@ Docker compose переопределяет `DATABASE_URL` на `@postgres:5432`
 |------------|--------------|----------|
 | `TRANSCRIBE_MODEL` | `gpt-4o-mini-transcribe-2025-12-15` | STT для голосовых Telegram |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | векторы памяти (1536 dim) |
-| `VOICE_REALTIME_MODEL` | `gpt-realtime-whisper` | Realtime-сессия Mini App |
-| `VOICE_INPUT_TRANSCRIBE_MODEL` | `gpt-4o-mini-transcribe-2025-12-15` | STT внутри Realtime-сессии |
+| `VOICE_REALTIME_MODEL` | `gpt-realtime` | WebSocket connect Realtime API |
+| `VOICE_INPUT_TRANSCRIBE_MODEL` | `gpt-4o-transcribe` | nested STT в realtime-сессии Mini App |
 | `VOICE_TTS_MODEL` | `gpt-4o-mini-tts-2025-12-15` | голосовой ответ (steerable TTS) |
 | `VOICE_TTS_VOICE` | `cedar` | голос; `cedar`/`marin` — лучшее качество OpenAI |
 | `VOICE_TTS_INSTRUCTIONS` | laconic (в коде) | стиль подачи; пусто = встроенный TOV |

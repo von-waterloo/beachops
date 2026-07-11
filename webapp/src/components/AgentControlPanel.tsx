@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { motion, useReducedMotion } from 'motion/react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import {
+  CheckCircle2,
   Cloud,
   Loader2,
   MessageSquare,
   Monitor,
   Send,
+  Wifi,
+  WifiOff,
 } from 'lucide-react'
 import type { AgentSlot, WorkerNode } from '../types/api'
 import { useJobTranscript } from '../hooks/useJobTranscript'
@@ -54,6 +57,16 @@ function canUseMode(role: string, mode: PromptMode): boolean {
   return normalized === 'owner' || normalized === 'operator' || normalized === 'admin'
 }
 
+type RuntimeFlash = {
+  tone: 'ok' | 'warn'
+  title: string
+  detail: string
+}
+
+function workerHostnames(workers: WorkerNode[]): string {
+  return workers.map((worker) => worker.hostname).filter(Boolean).join(', ')
+}
+
 export function AgentControlPanel({
   slots,
   workers,
@@ -70,6 +83,11 @@ export function AgentControlPanel({
   const [promptBusy, setPromptBusy] = useState(false)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
   const [promptError, setPromptError] = useState<string | null>(null)
+  const [flash, setFlash] = useState<RuntimeFlash | null>(null)
+  const [pathSaved, setPathSaved] = useState(false)
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pathSavedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reducedMotion = useReducedMotion()
 
   useEffect(() => {
     setLocalPath(activeSlot?.localPath ?? '')
@@ -80,17 +98,62 @@ export function AgentControlPanel({
     if (!canUseMode(role, mode)) setMode('ask')
   }, [role, mode])
 
+  useEffect(() => {
+    return () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current)
+      if (pathSavedTimer.current) clearTimeout(pathSavedTimer.current)
+    }
+  }, [])
+
   if (!activeSlot) return null
 
   const isWindows = activeSlot.runtime === 'windows'
   const pathDirty = (localPath.trim() || '') !== (activeSlot.localPath ?? '')
   const canPlan = canUseMode(role, 'plan')
   const canDo = canUseMode(role, 'do')
+  // Dashboard already returns only heartbeat-live workers.
+  const workersLive = workers.length > 0
+  const hostLabel = workerHostnames(workers)
+  const savedPath = (activeSlot.localPath ?? '').trim()
+  const effectivePath = savedPath || localPath.trim()
+
+  const showFlash = (next: RuntimeFlash) => {
+    setFlash(next)
+    if (flashTimer.current) clearTimeout(flashTimer.current)
+    flashTimer.current = setTimeout(() => setFlash(null), 4200)
+  }
+
+  const markPathSaved = () => {
+    setPathSaved(true)
+    if (pathSavedTimer.current) clearTimeout(pathSavedTimer.current)
+    pathSavedTimer.current = setTimeout(() => setPathSaved(false), 2200)
+  }
+
+  const windowsReadyFlash = (path: string): RuntimeFlash => {
+    if (!workersLive) {
+      return {
+        tone: 'warn',
+        title: 'Windows выбран, воркер офлайн',
+        detail: 'Путь сохранён. Запустите Windows-воркер — иначе задача не подхватится.',
+      }
+    }
+    return {
+      tone: 'ok',
+      title: 'Windows подключён',
+      detail: `${hostLabel || 'воркер'} · ${path}`,
+    }
+  }
 
   const switchRuntime = (runtime: 'cloud' | 'windows') => {
     if (runtime === activeSlot.runtime || runtimeBusy) return
     if (runtime === 'windows' && !localPath.trim()) {
       setRuntimeError('Укажите путь к репозиторию на Windows-машине')
+      showFlash({
+        tone: 'warn',
+        title: 'Сначала укажите путь',
+        detail: 'Без локального пути Windows-агент не знает, в какой папке работать.',
+      })
+      feedback('warning')
       return
     }
     setRuntimeBusy(true)
@@ -100,7 +163,18 @@ export function AgentControlPanel({
       runtime,
       localPath: runtime === 'windows' ? localPath.trim() : undefined,
     })
-      .then(() => feedback('success'))
+      .then(() => {
+        feedback('success')
+        if (runtime === 'windows') {
+          showFlash(windowsReadyFlash(localPath.trim()))
+        } else {
+          showFlash({
+            tone: 'ok',
+            title: 'Cloud активен',
+            detail: 'Следующие задачи уйдут в облако Cursor.',
+          })
+        }
+      })
       .catch((err: unknown) => {
         feedback('error')
         setRuntimeError(err instanceof Error ? err.message : 'Не удалось переключить режим')
@@ -113,8 +187,25 @@ export function AgentControlPanel({
     setRuntimeBusy(true)
     setRuntimeError(null)
     feedback('tap')
-    void onUpdateAgent(activeSlot.id, { localPath: localPath.trim() })
-      .then(() => feedback('success'))
+    const nextPath = localPath.trim()
+    void onUpdateAgent(activeSlot.id, { localPath: nextPath })
+      .then(() => {
+        feedback('success')
+        markPathSaved()
+        if (isWindows || nextPath) {
+          showFlash(
+            isWindows
+              ? windowsReadyFlash(nextPath)
+              : {
+                  tone: 'ok',
+                  title: 'Путь сохранён',
+                  detail: nextPath
+                    ? `${nextPath} — переключите на Windows, чтобы слать туда задачи.`
+                    : 'Путь очищен.',
+                },
+          )
+        }
+      })
       .catch((err: unknown) => {
         feedback('error')
         setRuntimeError(err instanceof Error ? err.message : 'Не удалось сохранить путь')
@@ -189,6 +280,48 @@ export function AgentControlPanel({
         </button>
       </div>
 
+      <div
+        className={`runtime-status ${isWindows ? (workersLive && effectivePath ? 'is-ready' : 'is-warn') : 'is-cloud'}`}
+        role="status"
+        aria-live="polite"
+      >
+        <span className="runtime-status-icon" aria-hidden="true">
+          {isWindows ? (
+            workersLive ? <Wifi size={16} /> : <WifiOff size={16} />
+          ) : (
+            <Cloud size={16} />
+          )}
+        </span>
+        <div className="runtime-status-copy">
+          {isWindows ? (
+            <>
+              <strong>
+                {workersLive && effectivePath
+                  ? 'Windows готов'
+                  : !effectivePath
+                    ? 'Windows: нужен путь'
+                    : 'Windows: воркер офлайн'}
+              </strong>
+              <span>
+                {effectivePath
+                  ? `${hostLabel || 'воркер'} · ${effectivePath}`
+                  : 'Укажите папку на ПК и нажмите Сохранить, затем Windows.'}
+                {!workersLive && effectivePath ? ' Запустите воркер, иначе задача не уйдёт.' : ''}
+              </span>
+            </>
+          ) : (
+            <>
+              <strong>Cloud активен</strong>
+              <span>
+                {workersLive
+                  ? `Windows-воркер онлайн (${hostLabel}) — можно переключить.`
+                  : 'Задачи идут в облако Cursor.'}
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+
       <label className="agent-path-field">
         <span>Путь к репозиторию (Windows)</span>
         <div className="agent-path-row">
@@ -199,18 +332,50 @@ export function AgentControlPanel({
             autoComplete="off"
             disabled={runtimeBusy}
           />
-          <button type="button" disabled={!pathDirty || runtimeBusy} onClick={savePath}>
-            {runtimeBusy ? <Loader2 size={15} className="spin-icon" aria-hidden="true" /> : 'Сохранить'}
+          <button
+            type="button"
+            className={pathSaved && !pathDirty ? 'is-saved' : ''}
+            disabled={!pathDirty || runtimeBusy}
+            onClick={savePath}
+          >
+            {runtimeBusy ? (
+              <Loader2 size={15} className="spin-icon" aria-hidden="true" />
+            ) : pathSaved ? (
+              <>
+                <CheckCircle2 size={15} aria-hidden="true" /> Сохранено
+              </>
+            ) : (
+              'Сохранить'
+            )}
           </button>
         </div>
       </label>
-      {workers.length > 0 ? (
-        <p className="muted-hint">
-          Онлайн Windows-воркеры: {workers.map((worker) => worker.hostname).join(', ')}
-        </p>
-      ) : (
-        <p className="muted-hint">Windows-воркеры офлайн — Cloud работает как обычно.</p>
-      )}
+
+      <AnimatePresence initial={false}>
+        {flash && (
+          <motion.div
+            key={`${flash.title}-${flash.detail}`}
+            className={`runtime-flash tone-${flash.tone}`}
+            role="status"
+            aria-live="polite"
+            initial={reducedMotion ? false : { opacity: 0, y: -6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={reducedMotion ? undefined : { opacity: 0, y: -4 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+          >
+            {flash.tone === 'ok' ? (
+              <CheckCircle2 size={16} aria-hidden="true" />
+            ) : (
+              <WifiOff size={16} aria-hidden="true" />
+            )}
+            <div>
+              <strong>{flash.title}</strong>
+              <span>{flash.detail}</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {runtimeError && <div className="inline-error" role="alert">{runtimeError}</div>}
 
       <div className="prompt-mode-row" role="toolbar" aria-label="Режим запроса">
