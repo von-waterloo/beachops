@@ -52,7 +52,6 @@ from beachops.services.inline_keyboards import (
     CB_RETRY_LAST,
     CB_RETRY_PREFIX,
     CB_TOKEN_PREFIX,
-    CB_UNPANIC_PREFIX,
     CB_ROLLBACK_PREFIX,
     CB_VOICE_CANCEL_PREFIX,
     CB_VOICE_CONFIRM_PREFIX,
@@ -122,11 +121,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if data.startswith(CB_JOB_REVISION_PREFIX):
         await _handle_job_action(
             query, app, user.id, data[len(CB_JOB_REVISION_PREFIX) :], "revision"
-        )
-        return
-    if data.startswith(CB_UNPANIC_PREFIX):
-        await _handle_unpanic(
-            query, app, user.id, data[len(CB_UNPANIC_PREFIX) :]
         )
         return
     if data.startswith(CB_ROLLBACK_PREFIX):
@@ -329,13 +323,6 @@ async def _handle_job_action(
     if approval is None:
         await query.answer("Подтверждение не найдено.", show_alert=True)
         return
-    if (
-        action == "approve"
-        and approval_kind == ApprovalKind.PLAN_EXECUTION
-        and await app.system_state.is_panic_enabled()
-    ):
-        await query.answer("PANIC активен: write-действия отключены.", show_alert=True)
-        return
 
     if action == "approve":
         decision = ApprovalDecision.APPROVED
@@ -374,53 +361,6 @@ async def _handle_job_action(
         toast = "Отклонено"
 
     await query.answer(toast)
-    if query.message:
-        try:
-            await query.message.edit_reply_markup(reply_markup=None)
-        except BadRequest:
-            pass
-
-
-async def _handle_unpanic(
-    query,
-    app: AppContext,
-    user_id: int,
-    token: str,
-) -> None:
-    if app.settings.role_for(user_id) != Role.OWNER:
-        await query.answer("Только владелец может отключить PANIC.", show_alert=True)
-        return
-    job_id = await app.callback_tokens.consume_opaque(
-        token,
-        actor_id=user_id,
-        action="unpanic",
-    )
-    if job_id is None:
-        await query.answer("Подтверждение устарело.", show_alert=True)
-        return
-    await app.system_state.set_panic(
-        False,
-        actor_id=user_id,
-        actor_role=Role.OWNER,
-    )
-    job = await app.jobs.get(user_id, job_id)
-    if job is not None:
-        await app.jobs.transition(
-            user_id,
-            job_id,
-            from_statuses=[JobStatus.DRAFT],
-            to_status=JobStatus.ACCEPTED,
-            event_type="panic.disabled",
-        )
-    await app.audit.append(
-        actor_id=user_id,
-        job_id=job_id,
-        event_type="system.panic",
-        action="disable",
-        outcome="success",
-        details={},
-    )
-    await query.answer("Write-действия снова доступны.", show_alert=True)
     if query.message:
         try:
             await query.message.edit_reply_markup(reply_markup=None)

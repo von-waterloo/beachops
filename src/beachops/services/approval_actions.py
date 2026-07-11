@@ -20,8 +20,6 @@ async def approve_job(app: AppContext, job, kind: ApprovalKind) -> dict:
         )
         return {"status": "accepted", "job_id": job.id, "merged": False}
 
-    if await app.system_state.is_panic_enabled():
-        raise PermissionError("write actions are disabled by panic")
     app.repository_policy.require_allowed(
         job.repository_url or "",
         job.branch or "",

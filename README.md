@@ -124,7 +124,6 @@ python scripts/migrate_sqlite_to_postgres.py --sqlite .\data\bot.db
 | `/memory` | Last 10 entries; `/memory query` — semantic search |
 | `/cancel` | Cancel active run and clear queue |
 | `/jobs` `/approvals` | Durable jobs and owner decisions |
-| `/panic` `/unpanic` | Emergency stop and one-time owner re-enable |
 | `/rollback` | Owner: redeploy previous (or given) prod SHA |
 | `/dashboard` | Open the Telegram Mini App |
 

@@ -68,8 +68,6 @@ const EVENT_TYPE_RU: Record<string, string> = {
   'worker.finished': 'Воркер завершил',
   'worker.observation_done': 'Наблюдение',
   'approval.requested': 'Ждёт approve',
-  'panic.blocked': 'Panic',
-  'panic.cancelled': 'Отмена panic',
 }
 
 export function eventTypeLabel(eventType: string): string {

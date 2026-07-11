@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import {
   Captions,
@@ -189,25 +189,30 @@ export function VoiceConsole({
           </div>
         )}
 
-        <motion.button
+        <button
           type="button"
-          className="orb-button"
+          className={`orb-button phase-${state.phase}${active ? ' is-live' : ''}`}
           aria-label={state.phase === 'listening' ? 'Стоп' : 'Говорить'}
           aria-pressed={state.phase === 'listening'}
           onClick={handleOrb}
-          animate={{
-            scale: 1 + displayEnergy * (state.phase === 'listening' ? 0.12 : 0.06),
-          }}
-          transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+          style={{ '--orb-energy': String(displayEnergy) } as CSSProperties}
         >
-          <span
-            className="orb-halo"
-            style={{ transform: `scale(${1 + displayEnergy * 0.45})`, opacity: 0.55 + displayEnergy * 0.4 }}
-          />
+          {!reducedMotion && (
+            <>
+              <span className="orb-radar" aria-hidden="true">
+                <i /><i /><i />
+              </span>
+              <span className="orb-scan" aria-hidden="true" />
+              <span className="orb-ticks" aria-hidden="true">
+                {Array.from({ length: 24 }, (_, index) => <i key={index} />)}
+              </span>
+            </>
+          )}
+          <span className="orb-halo" aria-hidden="true" />
           <span className="orb-core">
             {state.phase === 'listening' ? <Square size={28} fill="currentColor" /> : <Mic size={32} />}
           </span>
-        </motion.button>
+        </button>
 
         <div className="spectrum" aria-hidden="true">
           {(state.phase === 'listening' ? voice.spectrum : Array.from({ length: 24 }, (_, i) =>
@@ -320,7 +325,7 @@ export function VoiceConsole({
               autoFocus
             />
             <p className="security-note">
-              Голос просит план. Approve и panic — только у владельца.
+              Голос просит план. Approve — только у владельца.
             </p>
             <div className="action-row">
               <button className="secondary-button" type="button" onClick={voice.cancel}>

@@ -113,6 +113,18 @@ export interface SelfImproveInfo {
   enabled: boolean
   repoUrl?: string | null
   branches: string[]
+  canToggle?: boolean
+  needsRepo?: boolean
+}
+
+export interface AllowedRepository {
+  url: string
+  branches: string[]
+}
+
+export interface RepositoryPolicyInfo {
+  openMode: boolean
+  repositories: AllowedRepository[]
 }
 
 export interface DashboardSnapshot {
@@ -122,9 +134,9 @@ export interface DashboardSnapshot {
   repositories: Repository[]
   agents: AgentSlot[]
   usage: Usage | null
-  panic: boolean
   role: string
   defaultBranch?: string
+  repositoryPolicy?: RepositoryPolicyInfo
   workers: WorkerNode[]
   queue: QueueSnapshot
   selfImprove?: SelfImproveInfo

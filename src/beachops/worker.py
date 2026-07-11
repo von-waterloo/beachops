@@ -13,7 +13,7 @@ from telegram import Bot
 from beachops.app_context import AppContext
 from beachops.config.settings import get_settings
 from beachops.domain.models import UserMode
-from beachops.domain.security import ApprovalKind, JobKind, JobStatus, Role
+from beachops.domain.security import ApprovalKind, JobStatus, Role
 from beachops.services.inline_keyboards import job_approval_keyboard
 from beachops.services.run_executor import _run_job
 from beachops.services.run_reconciler import RunReconciler
@@ -155,20 +155,6 @@ async def enqueue_milestone(
 
 
 async def _execute_locked(app: AppContext, bot: Bot, job) -> None:
-    if job.kind == JobKind.CHANGE and await app.system_state.is_panic_enabled():
-        await app.jobs.transition(
-            job.actor_id,
-            job.id,
-            from_statuses=[job.status],
-            to_status=JobStatus.BLOCKED,
-            event_type="panic.blocked",
-        )
-        await bot.send_message(
-            chat_id=job.actor_id,
-            text="BeachOps: write-задача остановлена аварийным режимом.",
-        )
-        return
-
     payload = app.payload_crypto.decrypt_json(job.payload_ciphertext or "")
     try:
         mode = UserMode(str(payload["mode"]))

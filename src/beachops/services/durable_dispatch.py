@@ -58,19 +58,6 @@ async def dispatch_prompt(
         )
         return DispatchResult(job, False, "secret-like input is not accepted")
 
-    if write and await app.system_state.is_panic_enabled():
-        job = await app.jobs.create(
-            actor_id,
-            kind=kind,
-            risk_level=RiskLevel.BLOCKED,
-            status=JobStatus.BLOCKED,
-            repository_url=repo.github_url,
-            branch=repo.default_branch,
-            summary=safe_summary[:300],
-            idempotency_key=idempotency_key,
-        )
-        return DispatchResult(job, False, "write actions are disabled by panic")
-
     try:
         app.repository_policy.require_allowed(
             repo.github_url,

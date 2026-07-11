@@ -49,8 +49,6 @@ def bot_commands(*, is_admin: bool, is_owner: bool = False) -> list[BotCommand]:
         commands.extend(
             [
                 BotCommand("approvals", "Подтверждения владельца"),
-                BotCommand("panic", "Аварийно остановить работу"),
-                BotCommand("unpanic", "Вернуть write-действия"),
                 BotCommand("rollback", "Откатить прод на предыдущий SHA"),
             ]
         )

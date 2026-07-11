@@ -7,7 +7,6 @@ import {
   GitBranch,
   LayoutDashboard,
   Monitor,
-  Siren,
   Sparkles,
   Volume2,
   VolumeX,
@@ -181,16 +180,6 @@ function ControlRoom({
 
       {error && <div className="auth-inline-error">{error}</div>}
 
-      {dashboard.data.panic && (
-        <div className="panic-banner" role="alert">
-          <Siren size={18} />
-          <div>
-            <strong>Panic включён</strong>
-            <span>Запись в репо заблокирована. Голос это не снимет.</span>
-          </div>
-        </div>
-      )}
-
       <ControlRoomHero
         running={running}
         pending={pending}
@@ -256,6 +245,7 @@ function ControlRoom({
                   onUpdateRepository={(repoId, input) =>
                     dashboard.updateRepository(repoId, input)
                   }
+                  onSetSelfImprove={(input) => dashboard.setSelfImprove(input)}
                 />
               </>
             ) : (
@@ -277,6 +267,7 @@ function ControlRoom({
                 onUpdateRepository={(repoId, input) =>
                   dashboard.updateRepository(repoId, input)
                 }
+                onSetSelfImprove={(input) => dashboard.setSelfImprove(input)}
               />
             )}
           </motion.div>

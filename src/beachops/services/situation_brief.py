@@ -1,6 +1,6 @@
 """Control-room situation brief for Cursor / voice orchestrator awareness.
 
-Injected into ask/plan/do prompts so the agent knows queue, panic, active
+Injected into ask/plan/do prompts so the agent knows queue, active
 jobs, approvals, workers, and the active slot — not only the latest utterance.
 """
 
@@ -33,7 +33,6 @@ async def build_situation_brief(
 ) -> str:
     """Compact Russian status block for prompt injection (Telegram-friendly)."""
     resolved_role = role or app.settings.role_for(actor_id)
-    panic = await app.system_state.is_panic_enabled()
     jobs = (
         await app.jobs.list_all_internal(limit=40)
         if resolved_role == Role.OWNER
@@ -67,7 +66,6 @@ async def build_situation_brief(
 
     lines: list[str] = [
         "Ситуация BeachOps (control room — учитывай при ответе):",
-        f"- Panic: {'включён, запись в репо запрещена' if panic else 'выкл'}",
         f"- Очередь: активно {running}, ждёт {queued}, блок/approve {blocked}",
     ]
 

@@ -206,9 +206,7 @@ class Settings(BaseSettings):
         return Path(str(value))
 
     def self_improve_repo_normalized(self) -> str | None:
-        """Canonical HTTPS URL of the self-improve repo, or None if disabled/unset."""
-        if not self.self_improve_enabled:
-            return None
+        """Canonical HTTPS URL of the self-improve fork, if configured in env."""
         raw = self.self_improve_repo_url.strip()
         if not raw:
             return None
@@ -258,9 +256,6 @@ class Settings(BaseSettings):
         return self.role_for(user_id) in {Role.OPERATOR, Role.OWNER}
 
     def can_approve(self, user_id: int) -> bool:
-        return self.role_for(user_id) == Role.OWNER
-
-    def can_panic(self, user_id: int) -> bool:
         return self.role_for(user_id) == Role.OWNER
 
     def can_use_mode(self, user_id: int, mode: UserMode) -> bool:

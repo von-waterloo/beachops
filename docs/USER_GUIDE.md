@@ -55,7 +55,6 @@
 | `/cancel` | Отменить run и очистить очередь |
 | `/jobs` | Durable очередь и статусы задач |
 | `/approvals` | Ожидающие owner decisions |
-| `/panic`, `/unpanic` | Аварийная остановка и одноразовое подтверждение возврата writes |
 | `/rollback` | Откат прода на предыдущий (или указанный) SHA — только owner, с кнопкой подтверждения |
 | `/dashboard` | Mini App: голос, агенты, репо, чаты Cursor, очередь |
 
@@ -81,6 +80,12 @@ Windows-агенты: слот с `runtime=windows` + worker на ПК
 
 При смене репо активный слот **переключается** на новый URL; Cursor-агент
 сбрасывается (новый диалог) — агент привязан к репозиторию.
+
+Если сервер в **строгом** режиме (`REPOSITORY_POLICY_JSON` с непустым списком),
+добавить можно только URL и ветки из allowlist. Сообщение об ошибке скажет,
+чего не хватает: репозиторий не в списке или ветка не разрешена. Пустой
+`{"repositories":[]}` — открытый режим (любой HTTPS GitHub URL; запись в
+`main`/`master` всё равно запрещена).
 
 ## Агенты (несколько сессий Cursor)
 
@@ -123,9 +128,9 @@ Windows-агенты: слот с `runtime=windows` + worker на ПК
 (живой транскрипт `run.progress`), animated waveform/orb, Cloud/Windows agent cards
 со ссылкой «Открыть в Cursor», вкладка **Репо**, live queue, вкладка **Пульт**,
 timeline и worker health.
-Каждый ask/plan/do (голос и текст) получает **situation brief**: panic, очередь,
+Каждый ask/plan/do (голос и текст) получает **situation brief**: очередь,
 approve, воркеры, активный слот/runtime/репо — агент-оркестратор видит control room.
-Голос не может approve/panic/unpanic.
+Голос не может approve.
 
 ### Вход в Mini App
 
@@ -191,26 +196,19 @@ approve, воркеры, активный слот/runtime/репо — аген
 
 - `viewer` — read-only.
 - `operator` — read/plan/request write, без approve.
-- `owner` — approve/reject/revision, panic/unpanic и `/rollback`.
+- `owner` — approve/reject/revision и `/rollback`.
 - Роль проверяется server-side для Telegram, callback, API и worker.
 
 ## Самосовершенствование BeachOps (opt-in)
 
-По умолчанию выключено — ваш доступ и чужие деплои не затрагиваются.
+По умолчанию выключено. Включение — в Mini App, не через `.env` на каждый раз:
 
-1. В `.env` своего инстанса:
-   - `SELF_IMPROVE_ENABLED=1`
-   - `SELF_IMPROVE_REPO_URL=https://github.com/<you>/beachops` (ваш форк)
-   - `SELF_IMPROVE_BRANCHES=dev`
-2. Перезапустите стек. Репозиторий попадёт в allowlist автоматически.
-3. `/repo add beachops https://github.com/<you>/beachops` (или alias) → `/plan` / `/task` /
-   `/do` как обычно (feature-branch + PR; `main`/`master` protected).
-4. В Cursor (аккаунт API-ключа бота) → Settings → GitHub: доступ к форку
-   `von-waterloo/beachops` (или вашему). Без этого Cloud Agent не увидит ветку `dev`.
-5. Деплой — как раньше (owner approve / Actions). Плохой релиз: `/rollback` или
-   `/rollback <sha>` → кнопка подтверждения.
+1. Откройте вкладку **Пульт** → блок **Самосовершенствование** → **Включить**.
+2. Цель — активный репозиторий BeachOps (или `SELF_IMPROVE_REPO_URL` на сервере, если задан).
+3. Пока режим выключен, агент не получает safety-префикс «править сам control plane».
+4. Деплой по-прежнему только через owner approve / Actions. Откат: `/rollback` в боте.
 
-Промпт self-improve явно запрещает ломать OWNER allowlist, auth/Passkey и коммитить секреты.
+Опционально в `.env`: `SELF_IMPROVE_REPO_URL`, `SELF_IMPROVE_BRANCHES=dev` (дефолтная цель и ветки).
 
 ## Типичные сценарии
 

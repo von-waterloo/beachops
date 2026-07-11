@@ -41,6 +41,12 @@ _PROGRESS_BUCKET_SEC = 3
 _RESULT_DOCUMENT_THRESHOLD = 3000
 
 
+async def _self_improve_flag(app: AppContext, repository_url: str) -> bool:
+    from beachops.services.self_improve import is_self_improve_active_for
+
+    return await is_self_improve_active_for(app, repository_url)
+
+
 async def _maybe_append_run_progress(
     app: AppContext,
     job_id,
@@ -127,9 +133,6 @@ async def validate_prompt_request(
 
         return no_repo_selected()
 
-    if mode == UserMode.DO and await app.system_state.is_panic_enabled():
-        return "PANIC активен: write-действия отключены владельцем."
-
     from beachops.services.repository_policy import RepositoryNotAllowedError
     from beachops.services.ui_copy import repo_not_allowed
 
@@ -139,8 +142,8 @@ async def validate_prompt_request(
             ctx.repo.default_branch,
             write=mode == UserMode.DO,
         )
-    except RepositoryNotAllowedError:
-        return repo_not_allowed()
+    except RepositoryNotAllowedError as exc:
+        return repo_not_allowed(str(exc))
 
     return None
 
@@ -439,7 +442,7 @@ async def _run_job(
                 situation_block=situation_block,
                 images=images,
                 api_key=api_key,
-                self_improve=app.settings.is_self_improve_repo(repo.github_url),
+                self_improve=await _self_improve_flag(app, repo.github_url),
             )
         except RunCancelled:
             final_mode = await app.users.get_mode(user_id)

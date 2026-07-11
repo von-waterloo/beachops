@@ -164,7 +164,7 @@ export function AgentControlPanel({
         <p className="eyebrow">Управление</p>
         <h2>{activeSlot.label}</h2>
         <p className="muted-hint">
-          Агент видит очередь, panic, approve и активный runtime — пишите как в чате.
+          Агент видит очередь, approve и активный runtime — пишите как в чате.
         </p>
       </header>
 

@@ -9,12 +9,12 @@ const emptySnapshot: DashboardSnapshot = {
   repositories: [],
   agents: [],
   usage: null,
-  panic: false,
   role: 'Operator',
   defaultBranch: 'dev',
   workers: [],
   queue: { pending: 0, running: 0, active: 0, queued: 0, blocked: 0, total: 0 },
-  selfImprove: { enabled: false, branches: ['dev'] },
+  repositoryPolicy: { openMode: true, repositories: [] },
+  selfImprove: { enabled: false, branches: ['dev'], canToggle: true, needsRepo: true },
 }
 
 function normalize(snapshot: Partial<DashboardSnapshot>): DashboardSnapshot {
@@ -30,15 +30,20 @@ function normalize(snapshot: Partial<DashboardSnapshot>): DashboardSnapshot {
     agents: snapshot.agents ?? [],
     workers: snapshot.workers ?? [],
     usage: snapshot.usage ?? null,
-    panic: Boolean(snapshot.panic),
     role: snapshot.role ?? 'Operator',
     defaultBranch: snapshot.defaultBranch ?? 'dev',
+    repositoryPolicy: {
+      openMode: snapshot.repositoryPolicy?.openMode ?? true,
+      repositories: snapshot.repositoryPolicy?.repositories ?? [],
+    },
     selfImprove: {
       enabled: Boolean(snapshot.selfImprove?.enabled),
       repoUrl: snapshot.selfImprove?.repoUrl ?? null,
       branches: snapshot.selfImprove?.branches?.length
         ? snapshot.selfImprove.branches
         : ['dev'],
+      canToggle: snapshot.selfImprove?.canToggle ?? true,
+      needsRepo: Boolean(snapshot.selfImprove?.needsRepo),
     },
     queue: {
       pending: queue?.pending ?? queue?.queued ?? 0,
@@ -153,6 +158,21 @@ export function useDashboard(pollMs = 15_000) {
     return result
   }, [refresh])
 
+  const setSelfImprove = useCallback(async (input: {
+    enabled: boolean
+    repoUrl?: string | null
+  }) => {
+    await apiFetch('/api/self-improve', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify({
+        enabled: input.enabled,
+        repoUrl: input.repoUrl || undefined,
+      }),
+    })
+    await refresh()
+  }, [refresh])
+
   const hasActive = data.jobs.some((job) => isActiveJobStatus(job.status))
     || (data.queue.running ?? 0) > 0
 
@@ -190,5 +210,6 @@ export function useDashboard(pollMs = 15_000) {
     updateRepository,
     updateAgent,
     submitPrompt,
+    setSelfImprove,
   }
 }

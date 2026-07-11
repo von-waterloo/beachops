@@ -6,7 +6,7 @@ from beachops.services.situation_brief import with_situation
 
 
 def test_with_situation_prepends_brief() -> None:
-    result = with_situation("Сделай фикс", "Ситуация:\n- Panic: выкл")
+    result = with_situation("Сделай фикс", "Ситуация:\n- Очередь: активно 0")
     assert result.startswith("Ситуация:")
     assert "Запрос пользователя:\nСделай фикс" in result
 

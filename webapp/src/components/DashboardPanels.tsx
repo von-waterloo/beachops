@@ -21,15 +21,20 @@ import {
   X,
   Zap,
 } from 'lucide-react'
-import type { AgentSlot, DashboardSnapshot, Event, Job, WorkerNode } from '../types/api'
+import type {
+  AgentSlot,
+  AllowedRepository,
+  DashboardSnapshot,
+  Event,
+  Job,
+  WorkerNode,
+} from '../types/api'
 import { isActiveJobStatus } from '../types/api'
 import { feedback } from '../lib/feedback'
 import {
-  MODE_CAPABILITIES,
-  OPS_CAPABILITIES,
-  OWNER_CAPABILITIES,
-  selfImproveCopy,
-  type CapabilityItem,
+  FLOW_TIPS,
+  PLACE_TIPS,
+  type TipItem,
 } from '../lib/capabilities'
 import {
   matchesRuntimeFilter,
@@ -61,6 +66,7 @@ interface Props {
   onDecision: (approvalId: string, decision: Decision, revision?: string) => Promise<void>
   onAddRepository?: (input: { url: string; branch?: string }) => Promise<void>
   onUpdateRepository?: (repoId: string, input: { branch?: string; makeActive?: boolean }) => Promise<void>
+  onSetSelfImprove?: (input: { enabled: boolean; repoUrl?: string | null }) => Promise<void>
 }
 
 function Empty({ icon, title, copy }: { icon: React.ReactNode; title: string; copy: string }) {
@@ -75,6 +81,111 @@ function Empty({ icon, title, copy }: { icon: React.ReactNode; title: string; co
       <h2>{title}</h2>
       <p>{copy}</p>
     </motion.div>
+  )
+}
+
+function shortGithubRepo(url: string): string {
+  return url
+    .replace(/^https:\/\/github\.com\//i, '')
+    .replace(/\.git$/i, '')
+}
+
+function preferredBranch(branches: string[], defaultBranch: string): string {
+  const preferred = [defaultBranch, 'dev', 'develop'].find((branch) => branches.includes(branch))
+  if (preferred) return preferred
+  const nonProtected = branches.find(
+    (branch) => !['main', 'master'].includes(branch.toLowerCase()),
+  )
+  return nonProtected ?? branches[0] ?? defaultBranch
+}
+
+function RepoPolicyBanner({
+  openMode,
+  allowedCount,
+}: {
+  openMode: boolean
+  allowedCount: number
+}) {
+  return (
+    <div className={`locked-notice soft repo-policy-banner${openMode ? '' : ' is-strict'}`}>
+      <GitBranch size={18} />
+      <div>
+        <strong>{openMode ? 'Открытый режим' : 'Только из списка сервера'}</strong>
+        <p>
+          {openMode
+            ? 'Вставьте любой HTTPS GitHub URL и базовую ветку. Запись в main/master запрещена — для работы берите dev или feature.'
+            : allowedCount
+              ? 'Сервер разрешает только репозитории ниже. Нажмите «Подключить» — URL и ветка подставятся сами.'
+              : 'Allowlist пуст и режим строгий — попросите владельца добавить URL в REPOSITORY_POLICY_JSON или открыть {"repositories":[]}.'}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function AllowedRepoList({
+  items,
+  connectedUrls,
+  defaultBranch,
+  busyUrl,
+  onConnect,
+  onFill,
+}: {
+  items: AllowedRepository[]
+  connectedUrls: Set<string>
+  defaultBranch: string
+  busyUrl: string | null
+  onConnect: (url: string, branch: string) => void
+  onFill: (url: string, branch: string) => void
+}) {
+  if (!items.length) return null
+  return (
+    <div className="allowed-repo-list" aria-label="Разрешённые репозитории">
+      {items.map((item) => {
+        const branch = preferredBranch(item.branches, defaultBranch)
+        const connected = connectedUrls.has(item.url.toLowerCase())
+        const busy = busyUrl === item.url
+        return (
+          <article className="allowed-repo-card" key={item.url}>
+            <div className="allowed-repo-copy">
+              <strong>{shortGithubRepo(item.url)}</strong>
+              <div className="allowed-branch-chips" role="list">
+                {item.branches.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    className={`branch-chip${name === branch ? ' is-preferred' : ''}`}
+                    role="listitem"
+                    onClick={() => {
+                      feedback('select')
+                      onFill(item.url, name)
+                    }}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {connected ? (
+              <span className="repo-state ready">Уже есть</span>
+            ) : (
+              <button
+                type="button"
+                className="allowed-connect-btn"
+                disabled={busy}
+                onClick={() => {
+                  feedback('tap')
+                  onConnect(item.url, branch)
+                }}
+              >
+                {busy ? <Loader2 size={16} className="spin-icon" /> : <Plus size={16} />}
+                Подключить
+              </button>
+            )}
+          </article>
+        )
+      })}
+    </div>
   )
 }
 
@@ -333,56 +444,113 @@ function ApprovalActions({
   )
 }
 
-function CapabilityCard({ item }: { item: CapabilityItem }) {
+function TipCard({ item }: { item: TipItem }) {
   return (
-    <article className="capability-card">
+    <article className="capability-card tip-card">
       <div className="card-topline">
         <strong>{item.title}</strong>
-        <code>{item.command}</code>
+        <span className="tip-hint">{item.hint}</span>
       </div>
       <p>{item.copy}</p>
     </article>
   )
 }
 
-function CapabilitiesMap({ data }: { data: DashboardSnapshot }) {
+function SelfImprovePanel({
+  data,
+  onSetSelfImprove,
+}: {
+  data: DashboardSnapshot
+  onSetSelfImprove?: (input: { enabled: boolean; repoUrl?: string | null }) => Promise<void>
+}) {
+  const info = data.selfImprove
+  const enabled = Boolean(info?.enabled)
   const isOwner = data.role.toLowerCase() === 'owner'
-  const selfImprove = selfImproveCopy(
-    Boolean(data.selfImprove?.enabled),
-    data.selfImprove?.branches ?? ['dev'],
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const activeRepo = data.repositories.find((repo) => repo.active)
+  const targetUrl = info?.repoUrl || activeRepo?.url || null
+
+  const toggle = () => {
+    if (!onSetSelfImprove || busy || !isOwner) return
+    setBusy(true)
+    setError(null)
+    feedback('tap')
+    void onSetSelfImprove({
+      enabled: !enabled,
+      repoUrl: targetUrl,
+    })
+      .then(() => feedback('success'))
+      .catch((err: unknown) => {
+        feedback('error')
+        setError(err instanceof Error ? err.message : 'Не удалось переключить')
+      })
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <Section eyebrow="BeachOps" title="Самосовершенствование">
+      <article className={`self-improve-card${enabled ? ' is-on' : ''}`}>
+        <div className="self-improve-copy">
+          <strong>{enabled ? 'Включено' : 'Выключено'}</strong>
+          <p>
+            {enabled
+              ? `Агент может улучшать сам BeachOps (${info?.branches?.join(', ') || 'dev'}). Деплой — только после вашего approve.`
+              : 'Когда выключено, задачи идут в обычные репо. Включите, чтобы править этот control plane.'}
+          </p>
+          {targetUrl ? (
+            <p className="muted-hint">Цель: {targetUrl.replace('https://github.com/', '')}</p>
+          ) : (
+            <p className="muted-hint">Сначала сделайте активным репо BeachOps во вкладке «Репо».</p>
+          )}
+        </div>
+        {isOwner ? (
+          <button
+            type="button"
+            className={`self-improve-toggle${enabled ? ' is-on' : ''}`}
+            aria-pressed={enabled}
+            disabled={busy || (!enabled && !targetUrl)}
+            onClick={toggle}
+          >
+            {busy ? <Loader2 size={16} className="spin-icon" /> : enabled ? 'Выключить' : 'Включить'}
+          </button>
+        ) : (
+          <span className="muted-hint">Только владелец</span>
+        )}
+      </article>
+      {error && <div className="inline-error" role="alert">{error}</div>}
+    </Section>
   )
+}
+
+function TipsMap({
+  data,
+  onSetSelfImprove,
+  showSelfImprove = true,
+}: {
+  data: DashboardSnapshot
+  onSetSelfImprove?: (input: { enabled: boolean; repoUrl?: string | null }) => Promise<void>
+  showSelfImprove?: boolean
+}) {
   return (
     <div className="capability-stack">
-      <Section eyebrow="Режимы" title="Как отдавать задачи">
+      <Section eyebrow="Быстрый старт" title="Как пользоваться">
         <div className="capability-grid">
-          {MODE_CAPABILITIES.map((item) => (
-            <CapabilityCard key={item.id} item={item} />
+          {FLOW_TIPS.map((item) => (
+            <TipCard key={item.id} item={item} />
           ))}
         </div>
       </Section>
-      <Section eyebrow="Операции" title="Агенты, репо, память">
+      <Section eyebrow="Где что" title="Экраны Mini App">
         <div className="capability-grid">
-          {OPS_CAPABILITIES.map((item) => (
-            <CapabilityCard key={item.id} item={item} />
+          {PLACE_TIPS.map((item) => (
+            <TipCard key={item.id} item={item} />
           ))}
         </div>
       </Section>
-      {isOwner ? (
-        <Section eyebrow="Владелец" title="Контроль и откат">
-          <div className="capability-grid">
-            {OWNER_CAPABILITIES.map((item) => (
-              <CapabilityCard key={item.id} item={item} />
-            ))}
-            <CapabilityCard item={selfImprove} />
-          </div>
-        </Section>
-      ) : (
-        <Section eyebrow="BeachOps" title="Self-improve">
-          <div className="capability-grid">
-            <CapabilityCard item={selfImprove} />
-          </div>
-        </Section>
-      )}
+      {showSelfImprove ? (
+        <SelfImprovePanel data={data} onSetSelfImprove={onSetSelfImprove} />
+      ) : null}
     </div>
   )
 }
@@ -478,6 +646,7 @@ function Overview({
   focusedJobId,
   onRuntimeFilterChange,
   onSelectJob,
+  onSetSelfImprove,
 }: {
   data: DashboardSnapshot
   liveEvents: Event[]
@@ -487,6 +656,7 @@ function Overview({
   focusedJobId?: string | null
   onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: TabId) => void
   onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
+  onSetSelfImprove?: (input: { enabled: boolean; repoUrl?: string | null }) => Promise<void>
 }) {
   const activeJobs = data.jobs
     .filter((job) => isActiveJobStatus(job.status))
@@ -629,7 +799,7 @@ function Overview({
         </Section>
       )}
 
-      <CapabilitiesMap data={data} />
+      <TipsMap data={data} onSetSelfImprove={onSetSelfImprove} />
 
       <Section eyebrow="Лента" title="События прогонов">
         <TimelineList events={timeline} />
@@ -683,13 +853,24 @@ export function DashboardPanels({
   onDecision,
   onAddRepository,
   onUpdateRepository,
+  onSetSelfImprove,
 }: Props) {
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
   const [repoUrl, setRepoUrl] = useState('')
   const [repoBranch, setRepoBranch] = useState(data.defaultBranch || 'dev')
   const [repoBusy, setRepoBusy] = useState(false)
+  const [quickBusyUrl, setQuickBusyUrl] = useState<string | null>(null)
   const [repoError, setRepoError] = useState<string | null>(null)
   const [editingBranch, setEditingBranch] = useState<Record<string, string>>({})
+
+  const policy = data.repositoryPolicy
+  const openMode = policy?.openMode ?? true
+  const allowedRepos = policy?.repositories ?? []
+  const connectedUrls = new Set(
+    data.repositories
+      .map((repo) => repo.url?.toLowerCase())
+      .filter((url): url is string => Boolean(url)),
+  )
 
   const act = (approvalId: string, decision: Decision, revision?: string) => {
     if (pendingIds.has(approvalId)) return
@@ -707,24 +888,45 @@ export function DashboardPanels({
       })
   }
 
-  const submitRepo = () => {
-    if (!onAddRepository || !repoUrl.trim() || repoBusy) return
-    setRepoBusy(true)
+  const fillRepoForm = (url: string, branch: string) => {
+    setRepoUrl(url)
+    setRepoBranch(branch)
     setRepoError(null)
-    feedback('tap')
+  }
+
+  const connectRepo = (
+    url: string,
+    branch: string,
+    options: { quick?: boolean } = {},
+  ) => {
+    if (!onAddRepository || repoBusy || quickBusyUrl) return
+    if (options.quick) setQuickBusyUrl(url)
+    else setRepoBusy(true)
+    setRepoError(null)
     void onAddRepository({
-      url: repoUrl.trim(),
-      branch: repoBranch.trim() || data.defaultBranch || 'dev',
+      url,
+      branch: branch.trim() || data.defaultBranch || 'dev',
     })
       .then(() => {
         setRepoUrl('')
+        setRepoBranch(data.defaultBranch || 'dev')
         feedback('success')
       })
       .catch((err: unknown) => {
         feedback('error')
         setRepoError(err instanceof Error ? err.message : 'Не удалось добавить репозиторий')
+        if (options.quick) fillRepoForm(url, branch)
       })
-      .finally(() => setRepoBusy(false))
+      .finally(() => {
+        setRepoBusy(false)
+        setQuickBusyUrl(null)
+      })
+  }
+
+  const submitRepo = () => {
+    if (!repoUrl.trim()) return
+    feedback('tap')
+    connectRepo(repoUrl.trim(), repoBranch.trim() || data.defaultBranch || 'dev')
   }
 
   const filteredActive = data.jobs
@@ -754,6 +956,7 @@ export function DashboardPanels({
           focusedJobId={focusedJobId}
           onRuntimeFilterChange={onRuntimeFilterChange}
           onSelectJob={onSelectJob}
+          onSetSelfImprove={onSetSelfImprove}
         />
       </section>
     )
@@ -820,13 +1023,14 @@ export function DashboardPanels({
 
       {tab === 'approvals' && (
         <>
+          <SelfImprovePanel data={data} onSetSelfImprove={onSetSelfImprove} />
           {data.approvals.length > 0 ? (
             <>
               <div className="locked-notice">
                 <LockKeyhole size={18} />
                 <div>
-                  <strong>Ждёт вашего approve</strong>
-                  <p>Появляется только после /plan или /task. Голос сам не одобрит.</p>
+                  <strong>Ждёт вашего решения</strong>
+                  <p>Планы из режима «План» и рискованные действия. Голос сам не одобрит.</p>
                 </div>
               </div>
               <ApprovalsList
@@ -840,20 +1044,32 @@ export function DashboardPanels({
             <div className="locked-notice soft">
               <Zap size={18} />
               <div>
-                <strong>Approve пуст — это нормально</strong>
+                <strong>Пока пусто — так и должно быть</strong>
                 <p>
-                  В /do решения не нужны. Сюда попадают только планы и высокий риск.
-                  Ниже — вся поверхность бота.
+                  Сюда попадают только планы и высокий риск. Режим «Сделать» идёт без этого шага.
                 </p>
               </div>
             </div>
           )}
-          <CapabilitiesMap data={data} />
+          <TipsMap data={data} showSelfImprove={false} />
         </>
       )}
 
       {tab === 'repositories' && (
         <>
+          <RepoPolicyBanner openMode={openMode} allowedCount={allowedRepos.length} />
+
+          {!openMode && (
+            <AllowedRepoList
+              items={allowedRepos}
+              connectedUrls={connectedUrls}
+              defaultBranch={data.defaultBranch || 'dev'}
+              busyUrl={quickBusyUrl}
+              onConnect={(url, branch) => connectRepo(url, branch, { quick: true })}
+              onFill={fillRepoForm}
+            />
+          )}
+
           <form
             className="repo-add-form"
             onSubmit={(event) => {
@@ -861,6 +1077,11 @@ export function DashboardPanels({
               submitRepo()
             }}
           >
+            <p className="repo-add-lead">
+              {openMode
+                ? '1. Вставьте URL → 2. Укажите ветку (обычно dev) → 3. Добавить'
+                : 'Или вставьте URL вручную — только из allowlist сервера'}
+            </p>
             <label>
               <span>GitHub URL</span>
               <input
@@ -878,7 +1099,15 @@ export function DashboardPanels({
                 onChange={(event) => setRepoBranch(event.target.value)}
                 placeholder={data.defaultBranch || 'dev'}
                 autoComplete="off"
+                list="repo-branch-suggestions"
               />
+              <datalist id="repo-branch-suggestions">
+                {[data.defaultBranch || 'dev', 'dev', 'develop', 'main']
+                  .filter((value, index, all) => value && all.indexOf(value) === index)
+                  .map((value) => (
+                    <option key={value} value={value} />
+                  ))}
+              </datalist>
             </label>
             <button type="submit" disabled={repoBusy || !repoUrl.trim()}>
               {repoBusy ? <Loader2 size={16} className="spin-icon" /> : <Plus size={16} />}
@@ -963,8 +1192,12 @@ export function DashboardPanels({
           ) : (
             <Empty
               icon={<GitBranch />}
-              title="Нет репозиториев"
-              copy="Добавьте GitHub URL и базовую ветку — дальше /do работает прямо на ней."
+              title="Подключите репозиторий"
+              copy={
+                openMode
+                  ? 'Без активного репо задачи некуда отправлять. Вставьте HTTPS GitHub URL выше и нажмите «Добавить».'
+                  : 'Выберите репо из списка разрешённых или вставьте URL из allowlist — после этого можно говорить агенту.'
+              }
             />
           )}
         </>

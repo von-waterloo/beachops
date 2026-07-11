@@ -14,11 +14,9 @@ from redis.asyncio import Redis
 _USER_READY_PREFIX = "beachops:cache:user_ready:"
 _DASHBOARD_PREFIX = "beachops:cache:dashboard:"
 _DASHBOARD_GEN_KEY = "beachops:cache:dash_gen"
-_PANIC_KEY = "beachops:cache:panic"
 
 USER_READY_TTL_SEC = 900
 DASHBOARD_TTL_SEC = 3
-PANIC_TTL_SEC = 3600
 
 
 class HotCache:
@@ -73,24 +71,3 @@ class HotCache:
             ),
             ex=DASHBOARD_TTL_SEC,
         )
-
-    async def get_panic(self) -> bool | None:
-        """Return cached panic flag, or None on miss."""
-        raw = await self._redis.get(_PANIC_KEY)
-        if raw is None:
-            return None
-        if isinstance(raw, bytes):
-            return raw == b"1"
-        return str(raw) == "1"
-
-    async def warm_panic(self, enabled: bool) -> None:
-        """Fill panic cache without invalidating dashboard snapshots."""
-        await self._redis.set(
-            _PANIC_KEY,
-            b"1" if enabled else b"0",
-            ex=PANIC_TTL_SEC,
-        )
-
-    async def set_panic(self, enabled: bool) -> None:
-        await self.warm_panic(enabled)
-        await self.bump_dashboard_generation()

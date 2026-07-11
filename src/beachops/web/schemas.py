@@ -55,10 +55,6 @@ class VoiceSpeakRequest(ApiModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
-class PanicRequest(ApiModel):
-    enabled: bool
-
-
 class WorkerRegisterRequest(ApiModel):
     id: str
     hostname: str = Field(min_length=1, max_length=200)
@@ -109,3 +105,8 @@ class PromptRequest(ApiModel):
     prompt: str = Field(min_length=1, max_length=8000)
     mode: str = Field(default="ask", pattern="^(ask|plan|do)$")
     slotId: str | None = Field(default=None, max_length=32)
+
+
+class SelfImproveRequest(ApiModel):
+    enabled: bool
+    repoUrl: str | None = Field(default=None, max_length=400)

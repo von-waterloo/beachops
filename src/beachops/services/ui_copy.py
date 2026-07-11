@@ -250,10 +250,14 @@ def repo_add_hint(default_branch: str) -> str:
     )
 
 
-def repo_not_allowed() -> str:
+def repo_not_allowed(reason: str | None = None) -> str:
+    detail = (reason or "").strip()
+    if detail:
+        return detail
     return (
-        "Репозиторий или ветка недоступны: нужен HTTPS GitHub URL, "
-        "а запись в main/master запрещена."
+        "Репозиторий или ветка не разрешены политикой "
+        "(REPOSITORY_POLICY_JSON). Проверьте URL и ветку в allowlist "
+        'или задайте {"repositories":[]} для открытого режима.'
     )
 
 

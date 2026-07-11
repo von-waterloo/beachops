@@ -61,31 +61,34 @@ class SystemStateRepository:
         if row is None:
             raise PermissionError("owner role required")
 
-    async def is_panic_enabled(self) -> bool:
-        if self._cache is not None:
-            cached = await self._cache.get_panic()
-            if cached is not None:
-                return cached
-        enabled = bool((await self.get("panic") or {}).get("enabled") is True)
-        if self._cache is not None:
-            await self._cache.warm_panic(enabled)
-        return enabled
+    async def is_self_improve_enabled(self) -> bool:
+        return bool((await self.get("self_improve") or {}).get("enabled") is True)
 
-    async def set_panic(
+    async def set_self_improve(
         self,
         enabled: bool,
         *,
         actor_id: int,
         actor_role: Role,
+        repo_url: str | None = None,
     ) -> None:
+        payload: dict[str, Any] = {"enabled": enabled}
+        if repo_url:
+            payload["repoUrl"] = repo_url
+        else:
+            current = await self.get("self_improve") or {}
+            if current.get("repoUrl"):
+                payload["repoUrl"] = current["repoUrl"]
         await self.set(
-            "panic",
-            {"enabled": enabled},
+            "self_improve",
+            payload,
             actor_id=actor_id,
             actor_role=actor_role,
         )
-        if self._cache is not None:
-            await self._cache.set_panic(enabled)
+
+    async def self_improve_repo_url(self) -> str | None:
+        raw = (await self.get("self_improve") or {}).get("repoUrl")
+        return str(raw).strip() if raw else None
 
 
 def _json_object(value: object) -> dict[str, Any]:

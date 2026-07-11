@@ -30,7 +30,6 @@ from beachops.domain.runtime import cursor_agent_url
 from beachops.domain.security import (
     ApprovalDecision,
     ApprovalKind,
-    JobKind,
     JobStatus,
     Role,
 )
@@ -51,10 +50,10 @@ from beachops.web.schemas import (
     AgentUpdateRequest,
     DecisionRequest,
     DeployDispatchRequest,
-    PanicRequest,
     PromptRequest,
     RepoCreateRequest,
     RepoUpdateRequest,
+    SelfImproveRequest,
 )
 from beachops.web.telegram_auth import (
     TelegramInitDataError,
@@ -144,7 +143,7 @@ def create_app() -> FastAPI:
         return {
             "userId": principal.user_id,
             "role": role.value if role else "none",
-            "writesEnabled": not await context.system_state.is_panic_enabled(),
+            "writesEnabled": True,
             "authMethod": principal.auth_method,
             "hasPasskey": await context.passkeys.has_any(principal.user_id),
             "cursorModelKey": model_key,
@@ -214,7 +213,9 @@ def create_app() -> FastAPI:
         total_tokens = sum(job.total_tokens or 0 for job in jobs)
         user_repos = await context.repos.list_repos(principal.user_id)
         slots = await context.agent_slots.list_slots(principal.user_id)
-        self_improve_url = context.settings.self_improve_repo_normalized()
+        from beachops.services.self_improve import resolve_self_improve_state
+
+        self_improve = await resolve_self_improve_state(context)
         snapshot = {
             "jobs": [_job_json(job) for job in jobs],
             "events": events,
@@ -228,19 +229,15 @@ def create_app() -> FastAPI:
                 "limitPercent": 0,
                 "totalTokens": total_tokens,
             },
-            "panic": await context.system_state.is_panic_enabled(),
             "role": role.value if role else "none",
             "defaultBranch": context.settings.default_branch,
+            "repositoryPolicy": context.repository_policy.to_public_dict(),
             "workers": [
                 _worker_json(node)
                 for node in await context.worker_nodes.list_online()
             ],
             "queue": _queue_stats(jobs),
-            "selfImprove": {
-                "enabled": bool(context.settings.self_improve_enabled and self_improve_url),
-                "repoUrl": self_improve_url,
-                "branches": list(context.settings.self_improve_branches),
-            },
+            "selfImprove": self_improve,
         }
         await context.hot_cache.set_dashboard(cache_scope, snapshot)
         return snapshot
@@ -514,12 +511,6 @@ def create_app() -> FastAPI:
         job = await context.jobs.get_internal(approval.job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="job not found")
-        if (
-            body.decision == "approve"
-            and approval.kind == ApprovalKind.PLAN_EXECUTION
-            and await context.system_state.is_panic_enabled()
-        ):
-            raise HTTPException(status_code=409, detail="write actions disabled by panic")
 
         if body.decision == "approve":
             decided = await context.approvals.decide(
@@ -563,9 +554,9 @@ def create_app() -> FastAPI:
         await context.hot_cache.bump_dashboard_generation()
         return result
 
-    @app.post("/api/panic")
-    async def panic(
-        body: PanicRequest,
+    @app.post("/api/self-improve")
+    async def set_self_improve(
+        body: SelfImproveRequest,
         request: Request,
         principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
@@ -574,24 +565,47 @@ def create_app() -> FastAPI:
         if context.settings.role_for(principal.user_id) != Role.OWNER:
             raise HTTPException(status_code=403, detail="owner role required")
         if not idempotency_key or not await context.idempotency.claim(
-            "panic", idempotency_key, ttl_sec=3600
+            "self_improve", idempotency_key, ttl_sec=60
         ):
-            raise HTTPException(status_code=409, detail="duplicate or missing idempotency key")
-        await context.system_state.set_panic(
+            raise HTTPException(
+                status_code=409, detail="duplicate or missing idempotency key"
+            )
+
+        from beachops.services.repository_policy import (
+            RepositoryPolicyError,
+            normalize_github_url,
+        )
+        from beachops.services.self_improve import resolve_self_improve_state
+
+        repo_url = body.repoUrl
+        if repo_url:
+            try:
+                repo_url = normalize_github_url(repo_url)
+            except RepositoryPolicyError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        elif body.enabled:
+            repo_url = context.settings.self_improve_repo_normalized()
+            if not repo_url:
+                active = await context.repos.get_active_repo(principal.user_id)
+                if active is not None:
+                    repo_url = active.github_url
+            if not repo_url:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Укажите GitHub URL форка BeachOps или сделайте "
+                        "его активным в «Репо»"
+                    ),
+                )
+
+        await context.system_state.set_self_improve(
             body.enabled,
             actor_id=principal.user_id,
             actor_role=Role.OWNER,
+            repo_url=repo_url,
         )
-        if body.enabled:
-            await _cancel_write_jobs(context)
-        await context.audit.append(
-            actor_id=principal.user_id,
-            event_type="system.panic",
-            action="enable" if body.enabled else "disable",
-            outcome="success",
-            details={},
-        )
-        return {"panic": body.enabled}
+        await context.hot_cache.bump_dashboard_generation()
+        return await resolve_self_improve_state(context)
 
     @app.post("/api/deploy/dispatch")
     async def deploy_dispatch(
@@ -1384,29 +1398,6 @@ def _approval_json(approval, *, job=None) -> dict:
         "repository": repo_url.rsplit("/", 1)[-1] if repo_url else None,
         "kind": kind_label,
     }
-
-
-async def _cancel_write_jobs(context: AppContext) -> None:
-    jobs = await context.jobs.list_by_status_internal(
-        [
-            JobStatus.QUEUED,
-            JobStatus.APPROVED,
-            JobStatus.RUNNING,
-            JobStatus.REVISION_REQUESTED,
-        ]
-    )
-    for job in jobs:
-        if job.kind != JobKind.CHANGE:
-            continue
-        if job.cursor_agent_id and job.cursor_run_id:
-            await context.cursor.cancel_run(job.cursor_agent_id, job.cursor_run_id)
-        await context.jobs.transition(
-            job.actor_id,
-            job.id,
-            from_statuses=[job.status],
-            to_status=JobStatus.CANCELLED,
-            event_type="panic.cancelled",
-        )
 
 
 async def _speak_job_result(

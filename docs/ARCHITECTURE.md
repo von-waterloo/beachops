@@ -7,7 +7,7 @@
 - **Windows local agents** — outbound worker на ПК (`beachops.windows_worker`) с `LocalAgentOptions(cwd=...)`.
 - **PostgreSQL 16 + pgvector** — пользователи, репозитории, сессии агентов, семантическая память.
 - **Redis + ARQ** — durable jobs, distributed actor locks, rate limits, replay protection,
-  short-lived hot cache (dashboard, auth bootstrap, panic write-through, embeddings).
+  short-lived hot cache (dashboard, auth bootstrap, embeddings).
 - **FastAPI + React Mini App** — dashboard, approvals, realtime voice, Windows worker.
 - **OpenAI API** — realtime STT, streaming TTS, эмбеддинги.
 - **Workspace volume** — локальная рабочая директория для cursor-sdk bridge (`WORKSPACE_PATH`).
@@ -112,7 +112,7 @@ GitHub URL). Непустой allowlist по-прежнему ограничив
 `job.progress` captions, пока ждёт финал.
 
 **Situation brief** (`services/situation_brief.py`): перед Cursor-run в промпт
-добавляется снимок control room (panic, очередь, approve, воркеры, слот/репо/модель),
+добавляется снимок control room (очередь, approve, воркеры, слот/репо/модель),
 чтобы оркестратор отвечал с полной осведомлённостью о происходящем.
 
 **Project skills** (`.cursor/skills/`, индекс `project-skills`): `add-bot-feature`, `telegram-ui`, `db-migrations`, `bot-testing`, `agent-run-pipeline`, `github-branches`, `deploy-prod`. В plan/do промптах агенту сказано читать нужный skill перед нетривиальной работой.
@@ -225,7 +225,7 @@ Daemon: Docker на Windows ПК (`scripts/install-windows-worker.ps1` →
 | `beachops_run_events`, `beachops_notification_outbox` | stream milestones + idempotent Telegram notifier |
 | `beachops_worker_nodes` | Windows worker registry / heartbeat |
 | `approvals`, `callback_tokens` | owner decisions, digest+TTL+single-use |
-| `audit_events`, `system_state` | append-only audit и panic lock |
+| `audit_events`, `system_state` | append-only audit и control-plane flags |
 
 Миграции: Alembic в `alembic/versions/` (в т.ч. `013_orchestration_events`). DDL **не** применяется кодом бота при локальном запуске; в Docker entrypoint выполняет `alembic upgrade head`.
 
@@ -238,7 +238,7 @@ Bot → beachops_jobs → ARQ runner → Cursor (cloud) / Windows worker
 ```
 
 Telegram stream edits — best-effort UI. Источник правды: Postgres. Cancel — Redis `CancelStore` (bot↔worker).
-Hot cache (`HotCache`): dashboard TTL ~3 с, auth bootstrap ~15 мин, panic write-through, embeddings по hash текста.
+Hot cache (`HotCache`): dashboard TTL ~3 с, auth bootstrap ~15 мин, embeddings по hash текста.
 
 ## Безопасность
 
@@ -247,7 +247,7 @@ Hot cache (`HotCache`): dashboard TTL ~3 с, auth bootstrap ~15 мин, panic wr
   запись в `main`/`master` блокируется всегда.
 - Payload AES-256-GCM; output redaction перед Telegram/DB/API/TTS.
 - Callback digest+TTL+atomic consume, Redis idempotency/rate limit.
-- `/panic` отменяет queued/active work и блокирует writes; `/unpanic` одноразовый owner flow.
+- Owner `/cancel` и `/rollback` для остановки работы и отката прода.
 
 ## Зависимости (ключевые)
 

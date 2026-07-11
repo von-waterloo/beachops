@@ -107,7 +107,6 @@ def test_simulate_voice_plan_call_and_write_recording() -> None:
 
     situation = (
         "Ситуация BeachOps (control room — учитывай при ответе):\n"
-        "- Panic: выкл\n"
         "- Очередь: активно 1, ждёт 0, блок/approve 0\n"
         "- Активный слот: «Метрика» · cloud · репо `beachops` · ветка `dev`\n"
         "- Windows-воркеры: нет онлайн\n"
@@ -132,7 +131,7 @@ def test_simulate_voice_plan_call_and_write_recording() -> None:
         _event(
             3,
             "run.progress",
-            {"assistantText": "Одна задача в planning, runtime cloud, panic выкл."},
+            {"assistantText": "Одна задача в planning, runtime cloud."},
         ),
         _event(
             4,
@@ -140,7 +139,7 @@ def test_simulate_voice_plan_call_and_write_recording() -> None:
             {
                 "finalText": (
                     "В очереди одна plan-задача на cloud. "
-                    "Активный слот «Метрика», репо beachops/dev. Panic выключен."
+                    "Активный слот «Метрика», репо beachops/dev."
                 )
             },
         ),

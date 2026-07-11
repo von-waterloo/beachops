@@ -16,7 +16,19 @@ from beachops.services.repository_policy import (
 )
 
 
-def test_self_improve_off_leaves_policy_unchanged() -> None:
+def test_self_improve_off_without_url_leaves_policy_unchanged() -> None:
+    settings = SimpleNamespace(
+        repository_policy_json='{"repositories":[]}',
+        self_improve_enabled=False,
+        self_improve_repo_url="",
+        self_improve_branches=["dev"],
+    )
+    policy = build_repository_policy(settings)
+    assert policy.policies == ()
+
+
+def test_self_improve_url_allowlisted_even_when_toggle_off() -> None:
+    """URL in env is allowlisted so Mini App can toggle without restart."""
     settings = SimpleNamespace(
         repository_policy_json='{"repositories":[]}',
         self_improve_enabled=False,
@@ -24,7 +36,7 @@ def test_self_improve_off_leaves_policy_unchanged() -> None:
         self_improve_branches=["dev"],
     )
     policy = build_repository_policy(settings)
-    assert policy.policies == ()
+    assert policy.is_allowed("https://github.com/acme/beachops", "dev")
 
 
 def test_self_improve_merges_fork_into_allowlist() -> None:

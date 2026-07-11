@@ -35,8 +35,7 @@
 - Redis rate limits/idempotency and one active run per actor;
 - output redaction before Telegram, memory, audit, API, GitHub diff and TTS;
 - append-only database audit trigger;
-- `/panic` cancels durable/active work and blocks new writes; `/unpanic`
-  requires a separate one-time owner callback.
+- `/cancel` stops active runs; owner `/rollback` for prod SHA recovery.
 
 ## Residual risks
 
@@ -53,9 +52,8 @@
 
 ## Incident response
 
-1. Owner runs `/panic`.
-2. Verify `system_state.panic.enabled=true`, ARQ queue and Cursor run cancellation.
-3. Rotate affected external key in its provider; update server `.env`.
-4. Review append-only `audit_events` and redacted container logs.
-5. Restore DB from the pre-deploy dump if schema/data integrity is affected.
-6. Use `/unpanic` only after root cause and policy are corrected.
+1. Owner runs `/cancel` for active actors and reviews `/jobs` / `/approvals`.
+2. Rotate affected external key in its provider; update server `.env`.
+3. Review append-only `audit_events` and redacted container logs.
+4. Restore DB from the pre-deploy dump if schema/data integrity is affected.
+5. Use `/rollback` only after root cause is understood and a safe SHA is chosen.

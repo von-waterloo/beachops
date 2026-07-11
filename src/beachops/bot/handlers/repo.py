@@ -52,8 +52,8 @@ async def repo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 parsed.default_branch,
                 write=False,
             )
-        except (RepositoryNotAllowedError, RepositoryPolicyError):
-            await update.message.reply_text(repo_not_allowed())
+        except (RepositoryNotAllowedError, RepositoryPolicyError) as exc:
+            await update.message.reply_text(repo_not_allowed(str(exc)))
             return
         make_active = len(await app.repos.list_repos(user.id)) == 0
         repo = await app.repos.add_repo(
