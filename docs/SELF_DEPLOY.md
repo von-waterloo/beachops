@@ -5,14 +5,28 @@
 корневого README; этот файл не обязателен. Обзор «свой деплой vs CI автора» —
 в [KNOWLEDGE_BASE.md](./KNOWLEDGE_BASE.md#свой-деплой).
 
-Кратко: приватный репозиторий → CI на GitHub-hosted → деплой только через
-`workflow_dispatch` на self-hosted runner **host-185**. Бот не хранит SSH-ключ
-и не ходит на сервер напрямую.
+Кратко: приватный репозиторий → CI на GitHub-hosted → **auto-deploy с `main` или `dev`**
+после зелёного CI на self-hosted runner **host-185**. Бот не хранит SSH-ключ
+и не ходит на сервер напрямую; rollback/ручной деплой — через тот же Actions
+`workflow_dispatch`.
+
+## Поток деплоя
+
+| Событие | Что происходит |
+|---------|----------------|
+| Push / merge в **`main`** или **`dev`** | Deploy prod ждёт зелёный CI, затем выкат на host-185 |
+| Telegram `/rollback` или API | бот → `workflow_dispatch` с SHA → тот же Deploy prod |
+| Actions UI → Run workflow | ручной `workflow_dispatch` с SHA |
+
+Self-improve / `/do` на базе `dev`: агент пушит в `dev` → CI → тот же прод.
+Прямой push агента в `main`/`master` по-прежнему запрещён policy.
+
+Короткий SHA в dispatch раскрывается в полный (иначе `actions/checkout` ищет ветку).
 
 ## Репозиторий
 
 - Целевой private repo: `von-waterloo/beachops` (`GITHUB_REPO`).
-- Ветки: рабочая `dev`, прод-линия `main` (см. skill `github-branches`).
+- Ветки: рабочая `dev`, прод-линия `main` (обе дают auto-deploy).
 - Секреты Actions (на стороне GitHub, не в контейнере бота):
   - `ENV_PROD_BEACHOPS` (предпочтительно) или `ENV_PROD` — полное содержимое прод-`.env`.
 
@@ -35,20 +49,12 @@
 2. webapp: `npm ci`, lint, test, build
 3. `docker compose config` (с dummy env для required vars)
 
-Деплой **не** стартует от push — только явный dispatch после owner-approve.
+После зелёного CI Deploy prod выкатывает тот же SHA на host-185.
 
-## Owner approval → workflow_dispatch
+## Бот → workflow_dispatch (rollback / owner approve)
 
-Планируемый поток:
-
-1. Оператор/агент готовит изменения; CI зелёный на PR/`dev`.
-2. Owner в Telegram одобряет deploy (approval kind `deploy`).
-3. Бот вызывает `beachops.services.deploy_trigger.trigger_prod_deploy` с
-   `GITHUB_TOKEN` (fine-grained / PAT с `actions:write` на этот repo) и SHA.
-4. GitHub ставит job на runner host-185; бот только ждёт/показывает статус Actions.
-
-Включение: `GITHUB_DEPLOY_DISPATCH=1` + `GITHUB_TOKEN` в прод-`.env`
-(уже на `von-waterloo/beachops`).
+Включение: `GITHUB_DEPLOY_DISPATCH=1` + `GITHUB_TOKEN` + `GITHUB_REPO` в прод-`.env`.
+Бот вызывает `trigger_prod_deploy` → Actions на host-185. SSH из контейнера бота нет.
 
 ## Secret ENV_PROD_BEACHOPS (Windows)
 
@@ -65,7 +71,7 @@ cmd /c "gh secret set ENV_PROD_BEACHOPS --repo von-waterloo/beachops < .env"
 
 - Нет PuTTY/SSH ключей и `plink`/`pscp`.
 - Нет записи в `/home/const/...` с бота.
-- Нет автоматического push в `main` и нет auto-deploy на каждый commit.
+- Нет автоматического push агента в `main`/`master` (policy).
 
 Legacy ручной деплой с Windows (`scripts/deploy-to-prod.ps1`) остаётся запасным
 каналом — см. [OPERATIONS.md](./OPERATIONS.md).

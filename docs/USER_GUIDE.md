@@ -199,18 +199,13 @@ Cloud/Windows agent cards со ссылкой «Открыть в Cursor», вк
 
 По умолчанию выключено — ваш доступ и чужие деплои не затрагиваются.
 
-1. В `.env` своего инстанса:
-   - `SELF_IMPROVE_ENABLED=1`
-   - `SELF_IMPROVE_REPO_URL=https://github.com/<you>/beachops` (или оставьте пустым —
-     тогда возьмётся `GITHUB_REPO`)
-   - `SELF_IMPROVE_BRANCHES=dev`
-2. Перезапустите стек. Репозиторий попадёт в allowlist автоматически.
-3. В Mini App → вкладка **Репо** (или баннер на главной): кнопка
-   **«Включить» / «Самосовершенствование»** — добавляет форк и делает его активным.
-   Дальше голос / `/plan` / `/do` / `/task` работают по BeachOps
-   (feature-branch + PR; `main`/`master` protected).
-4. Деплой — как раньше (owner approve / Actions). Плохой релиз: `/rollback` или
-   `/rollback <sha>` → кнопка подтверждения.
+1. Откройте вкладку **Пульт** → блок **Самосовершенствование** → **Включить**.
+2. Цель — активный репозиторий BeachOps (или `SELF_IMPROVE_REPO_URL` на сервере, если задан).
+3. Пока режим выключен, агент не получает safety-префикс «править сам control plane».
+4. Выкат: push агента в **`dev`** (или `main`) → зелёный CI → auto-deploy на прод.
+   Прямой push в `main` агенту запрещён; база self-improve — `dev`. Откат: `/rollback`.
+
+Опционально в `.env`: `SELF_IMPROVE_REPO_URL`, `SELF_IMPROVE_BRANCHES=dev`.
 
 Промпт self-improve явно запрещает ломать OWNER allowlist, auth/Passkey и коммитить секреты.
 

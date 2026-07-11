@@ -82,6 +82,8 @@ python -m beachops
 ## Maintainer's own production reference (not required for your deployment)
 
 Ниже — как **конкретный** прод автора (`185.244.49.94`, self-hosted runner `host-185`). Это не шаг для вашей копии.
+Прод автора: **push в `main` или `dev` → CI → Deploy prod**.
+Rollback — Telegram /rollback или Actions workflow_dispatch. Legacy с Windows:
 
 ```powershell
 .\scripts\deploy-to-prod.ps1
