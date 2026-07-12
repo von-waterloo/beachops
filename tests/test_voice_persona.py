@@ -7,7 +7,6 @@ from beachops.domain.voice_persona import (
     to_spoken_briefing,
 )
 from beachops.services.situation_brief import ControlRoomCounts, format_spoken_room
-from beachops.web.voice.gateway import RealtimeVoiceGateway
 
 
 def test_spoken_briefing_strips_code_and_urls() -> None:
@@ -79,22 +78,3 @@ def test_format_spoken_room_silent() -> None:
         )
     )
     assert spoken == ""
-
-
-def test_realtime_session_includes_stt_prompt() -> None:
-    gateway = RealtimeVoiceGateway(api_key="sk-test")
-    session = gateway._session_update_payload()
-    assert session["type"] == "realtime"
-    transcription = session["audio"]["input"]["transcription"]
-    assert transcription["model"] == "gpt-4o-transcribe"
-    assert transcription["prompt"] == BEACHOPS_STT_PROMPT
-    assert "delay" not in transcription
-
-
-def test_whisper_nested_model_skips_prompt() -> None:
-    gateway = RealtimeVoiceGateway(
-        api_key="sk-test",
-        input_transcribe_model="whisper-1",
-    )
-    transcription = gateway._session_update_payload()["audio"]["input"]["transcription"]
-    assert "prompt" not in transcription

@@ -1,10 +1,19 @@
+/** PCM16 mono source rate (OpenAI TTS streams at 24 kHz). */
 const PLAYBACK_RATE = 24_000
-/** ~100 ms of PCM16 mono @ 24 kHz — fewer tiny buffers on weak phones. */
-const COALESCE_BYTES_DEFAULT = 4_800
-/** ~200 ms coalesce on low-core devices. */
-const COALESCE_BYTES_LOW_POWER = 9_600
-/** Jitter buffer before first scheduled chunk (mobile WebViews stutter without it). */
-const SCHEDULE_LEAD_SEC = 0.07
+/** ~150 ms of PCM16 mono @ 24 kHz — fewer tiny buffers, smoother on weak phones. */
+const COALESCE_BYTES_DEFAULT = 7_200
+/** ~250 ms coalesce on low-core devices. */
+const COALESCE_BYTES_LOW_POWER = 12_000
+/** Prebuffer before first scheduled chunk — absorbs WebSocket jitter so weak
+ *  WebViews don't underrun on the first syllable. */
+const PREBUFFER_BYTES_DEFAULT = 9_600
+const PREBUFFER_BYTES_LOW_POWER = 16_800
+/** Jitter buffer lead before each scheduled chunk (mobile WebViews stutter
+ *  without it). Larger than before to hide main-thread GC pauses. */
+const SCHEDULE_LEAD_SEC = 0.12
+/** Lowpass cutoff for 24 kHz content — removes resampling aliasing and hiss
+ *  above the source Nyquist (~12 kHz). */
+const LOWPASS_HZ = 11_000
 
 function isLowPowerDevice(): boolean {
   return (navigator.hardwareConcurrency || 8) <= 4
@@ -17,33 +26,43 @@ function int16ToFloat(sample: number): number {
 export class PcmStreamPlayer {
   private context: AudioContext | null = null
   private gain: GainNode | null = null
+  private lowpass: BiquadFilterNode | null = null
   private scheduledUntil = 0
   private pending = new Uint8Array(0)
   private activeSources = new Set<AudioBufferSourceNode>()
   private readonly coalesceBytes: number
+  private readonly prebufferBytes: number
   private readonly onIdle: (() => void) | undefined
   /** Guards re-entrancy while drainPending awaits AudioContext.resume(). */
   private draining = false
   /** Set when flush() is requested during an in-flight drain. */
   private flushQueued = false
+  /** False until we have enough bytes to start; reset on stop(). */
+  private started = false
 
   constructor(onIdle?: () => void) {
     this.onIdle = onIdle
-    this.coalesceBytes = isLowPowerDevice()
-      ? COALESCE_BYTES_LOW_POWER
-      : COALESCE_BYTES_DEFAULT
+    const lowPower = isLowPowerDevice()
+    this.coalesceBytes = lowPower ? COALESCE_BYTES_LOW_POWER : COALESCE_BYTES_DEFAULT
+    this.prebufferBytes = lowPower ? PREBUFFER_BYTES_LOW_POWER : PREBUFFER_BYTES_DEFAULT
   }
 
   private async ensureContext(): Promise<AudioContext> {
     if (!this.context || this.context.state === 'closed') {
-      this.context = new AudioContext({
-        sampleRate: PLAYBACK_RATE,
-        latencyHint: 'playback',
-      })
+      // Use the device's native sample rate — forcing 24 kHz is unreliable on
+      // many mobile WebViews and produces hiss/double-resampling. Buffers are
+      // authored at PLAYBACK_RATE; the browser resamples to the output rate.
+      this.context = new AudioContext({ latencyHint: 'playback' })
+      this.lowpass = this.context.createBiquadFilter()
+      this.lowpass.type = 'lowpass'
+      this.lowpass.frequency.value = LOWPASS_HZ
+      this.lowpass.Q.value = 0.7
       this.gain = this.context.createGain()
       this.gain.gain.value = 0.9
+      this.lowpass.connect(this.gain)
       this.gain.connect(this.context.destination)
       this.scheduledUntil = 0
+      this.started = false
     }
     if (this.context.state === 'suspended') {
       await this.context.resume()
@@ -79,6 +98,7 @@ export class PcmStreamPlayer {
     this.scheduledUntil = 0
     this.draining = false
     this.flushQueued = false
+    this.started = false
   }
 
   /**
@@ -89,6 +109,9 @@ export class PcmStreamPlayer {
    * of `scheduledUntil` strictly ordered — concurrent enqueue() calls during
    * the await just append to `pending` and are picked up by the same loop
    * instead of launching racing schedulePcm() tasks.
+   *
+   * Before the first chunk we wait for `prebufferBytes` (or a flush) so that
+   * network jitter doesn't cause an immediate underrun on slow devices.
    */
   private async drainPending(flushAll: boolean): Promise<void> {
     if (this.draining) {
@@ -101,25 +124,33 @@ export class PcmStreamPlayer {
       // stop() may have closed the context while we were resuming.
       if (context.state === 'closed') return
       const gain = this.gain
-      if (!gain) return
+      const lowpass = this.lowpass
+      if (!gain || !lowpass) return
 
       while (true) {
         const wantFlush = flushAll || this.flushQueued
         const evenLength = this.pending.length - (this.pending.length % 2)
         if (evenLength < 2) break
 
+        // Hold off scheduling until we have a comfortable prebuffer (unless
+        // the stream ended — then play whatever we have).
+        if (!this.started && !wantFlush && evenLength < this.prebufferBytes) break
+
         const take = wantFlush
           ? evenLength
           : evenLength >= this.coalesceBytes
             ? this.coalesceBytes
-            : 0
+            : this.started
+              ? evenLength
+              : this.prebufferBytes
         if (take < 2) break
 
         const slice = this.pending.slice(0, take)
         this.pending = this.pending.slice(take)
+        this.started = true
         this.schedulePcmSync(
           context,
-          gain,
+          lowpass,
           slice.buffer.slice(slice.byteOffset, slice.byteOffset + slice.byteLength),
         )
       }
@@ -131,7 +162,7 @@ export class PcmStreamPlayer {
 
   private schedulePcmSync(
     context: AudioContext,
-    gain: GainNode,
+    lowpass: BiquadFilterNode,
     raw: ArrayBuffer,
   ): void {
     if (raw.byteLength < 2) return
@@ -145,7 +176,7 @@ export class PcmStreamPlayer {
 
     const source = context.createBufferSource()
     source.buffer = buffer
-    source.connect(gain)
+    source.connect(lowpass)
 
     const now = context.currentTime
     // Only re-anchor when the cursor is not strictly ahead of real time (first

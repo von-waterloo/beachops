@@ -1013,10 +1013,7 @@ def create_app() -> FastAPI:
         gateway = RealtimeVoiceGateway(
             api_key=context.settings.openai_api_key,
             model=context.settings.voice_realtime_model,
-            input_transcribe_model=context.settings.voice_input_transcribe_model,
-            transcription_prompt=(
-                context.settings.voice_input_transcribe_prompt or None
-            ),
+            transcription_model=context.settings.voice_input_transcribe_model,
             limits=VoiceGatewayLimits(
                 max_session_bytes=24_000
                 * 2

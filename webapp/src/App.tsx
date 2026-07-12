@@ -5,7 +5,6 @@ import {
   CircleHelp,
   Clock3,
   Cloud,
-  Fingerprint,
   GitBranch,
   LayoutDashboard,
   LogOut,
@@ -27,7 +26,6 @@ import type { AuthenticatedUser } from './lib/passkeys'
 import { isOnboardingDone } from './lib/onboarding'
 import { roleLabel } from './lib/uiCopy'
 import {
-  getTelegramInitData,
   initializeTelegram,
   telegramTheme,
 } from './lib/telegram'
@@ -60,9 +58,8 @@ export default function App() {
         checking={auth.checking}
         busy={auth.busy}
         error={auth.error}
-        supported={auth.supported}
         insideTelegram={auth.insideTelegram}
-        onLogin={() => void auth.login()}
+        onTelegramLogin={auth.loginWithTelegram}
         onRetry={() => void auth.refresh()}
       />
     )
@@ -73,7 +70,6 @@ export default function App() {
       user={auth.user}
       busy={auth.busy}
       error={auth.error}
-      onRegister={() => void auth.register()}
       onLogout={() => void auth.logout()}
     />
   )
@@ -83,7 +79,6 @@ interface ControlRoomProps {
   user: AuthenticatedUser
   busy: boolean
   error: string | null
-  onRegister: () => void
   onLogout: () => void
 }
 
@@ -91,7 +86,6 @@ function ControlRoom({
   user,
   busy,
   error,
-  onRegister,
   onLogout,
 }: ControlRoomProps) {
   const [tab, setTab] = useState<TabId>('voice')
@@ -209,22 +203,6 @@ function ControlRoom({
           >
             {soundMuted ? <VolumeX size={17} /> : <Volume2 size={17} />}
           </button>
-          {getTelegramInitData() && user.role === 'owner' && (
-            <button
-              className="auth-icon-button"
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                feedback('tap')
-                onRegister()
-              }}
-              title={user.hasPasskey ? 'Добавить ключ доступа' : 'Включить Face ID / Passkey'}
-              aria-label={user.hasPasskey ? 'Добавить ключ доступа' : 'Включить Face ID / Passkey'}
-            >
-              <Fingerprint size={18} />
-              {!user.hasPasskey && <i />}
-            </button>
-          )}
           {user.authMethod === 'passkey' && (
             <button
               className="auth-icon-button"
@@ -309,7 +287,9 @@ function ControlRoom({
                   }
                   onActivateSelfImprove={() => dashboard.activateSelfImprove()}
                   onUpdateAgent={(slotId, input) => dashboard.updateAgent(slotId, input)}
-                  onSubmitPrompt={(input) => dashboard.submitPrompt(input)}
+                  onSubmitPrompt={async (input) => {
+                    await dashboard.submitPrompt(input)
+                  }}
                 />
               </>
             ) : (
@@ -333,7 +313,9 @@ function ControlRoom({
                 }
                 onActivateSelfImprove={() => dashboard.activateSelfImprove()}
                 onUpdateAgent={(slotId, input) => dashboard.updateAgent(slotId, input)}
-                onSubmitPrompt={(input) => dashboard.submitPrompt(input)}
+                onSubmitPrompt={async (input) => {
+                  await dashboard.submitPrompt(input)
+                }}
               />
             )}
           </motion.div>

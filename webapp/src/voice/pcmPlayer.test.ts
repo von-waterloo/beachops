@@ -24,11 +24,20 @@ function installFakeAudioContext() {
       return clock.t
     },
     state: 'running',
-    sampleRate: 24_000,
+    sampleRate: 48_000,
     destination: {},
     createGain() {
       return {
         gain: { value: 1 },
+        connect() {},
+        disconnect() {},
+      }
+    },
+    createBiquadFilter() {
+      return {
+        type: 'lowpass',
+        frequency: { value: 11_000 },
+        Q: { value: 0.7 },
         connect() {},
         disconnect() {},
       }
@@ -81,9 +90,9 @@ function installFakeAudioContext() {
   }
 }
 
-/** 100 ms of PCM16 mono @ 24 kHz (4800 bytes). */
-function pcmFrame100ms(): ArrayBuffer {
-  return new ArrayBuffer(4_800)
+/** 150 ms of PCM16 mono @ 24 kHz (7200 bytes = 3600 samples). */
+function pcmFrame150ms(): ArrayBuffer {
+  return new ArrayBuffer(7_200)
 }
 
 describe('PcmStreamPlayer', () => {
@@ -109,55 +118,81 @@ describe('PcmStreamPlayer', () => {
     expect(() => player.stop()).not.toThrow()
   })
 
-  it('schedules consecutive chunks contiguously (gapless)', async () => {
+  it('prebuffers until enough bytes arrive, then schedules', async () => {
     const player = new PcmStreamPlayer()
-    // First frame: cursor 0 <= now 0 → re-anchor to 0.07, then += 0.1 → 0.17.
-    player.enqueue(pcmFrame100ms())
-    // Second frame, still at now=0: cursor 0.17 > now → start exactly at 0.17.
-    player.enqueue(pcmFrame100ms())
+    // 150 ms frame alone is below the 200 ms prebuffer → nothing scheduled yet.
+    player.enqueue(pcmFrame150ms())
     await Promise.resolve()
     await Promise.resolve()
+    expect(harness.starts).toEqual([])
 
-    expect(harness.starts).toEqual([0.07, 0.17])
+    // Second frame crosses the prebuffer threshold → scheduling begins.
+    player.enqueue(pcmFrame150ms())
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(harness.starts.length).toBeGreaterThanOrEqual(1)
+    player.stop()
+  })
+
+  it('schedules consecutive chunks contiguously (gapless) on flush', async () => {
+    const player = new PcmStreamPlayer()
+    // Flush forces whatever is pending to play immediately (re-anchor to lead).
+    player.enqueue(pcmFrame150ms())
+    player.flush()
+    await Promise.resolve()
+    await Promise.resolve()
+    // First chunk: cursor 0 <= now 0 → re-anchor to 0.12, then += 0.15 → 0.27.
+    expect(harness.starts).toEqual([0.12])
+
+    // Second frame, still at now=0: cursor 0.27 > now → start exactly at 0.27.
+    player.enqueue(pcmFrame150ms())
+    player.flush()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(harness.starts).toEqual([0.12, 0.27])
     player.stop()
   })
 
   it('does not re-anchor when the cursor sits inside the lead window', async () => {
     const player = new PcmStreamPlayer()
-    player.enqueue(pcmFrame100ms())
+    player.enqueue(pcmFrame150ms())
+    player.flush()
     await Promise.resolve()
     await Promise.resolve()
-    expect(harness.starts).toEqual([0.07])
+    expect(harness.starts).toEqual([0.12])
 
-    // Advance the clock so the cursor (0.17) is only 50 ms ahead of now —
-    // inside the 70 ms lead window. The old code re-anchored to now+0.07
-    // (0.19), opening a 20 ms gap from the previous slice's end (0.17).
-    harness.advance(0.12)
-    player.enqueue(pcmFrame100ms())
+    // Advance the clock so the cursor (0.27) is right at the edge of the
+    // 120 ms lead window. The old code re-anchored to now+lead, opening a gap.
+    harness.advance(0.15)
+    player.enqueue(pcmFrame150ms())
+    player.flush()
     await Promise.resolve()
     await Promise.resolve()
 
-    // New behaviour: keep the cursor, start at 0.17 — flush with the first slice.
-    expect(harness.starts[1]).toBeCloseTo(0.17, 6)
+    // New behaviour: keep the cursor, start at 0.27 — flush with the first slice.
+    expect(harness.starts[1]).toBeCloseTo(0.27, 6)
     player.stop()
   })
 
   it('re-anchors with lead after an underrun (cursor fell behind real time)', async () => {
     const player = new PcmStreamPlayer()
-    player.enqueue(pcmFrame100ms())
+    player.enqueue(pcmFrame150ms())
+    player.flush()
     await Promise.resolve()
     await Promise.resolve()
-    // First chunk scheduled at 0.07, cursor now 0.17.
-    expect(harness.starts).toEqual([0.07])
+    // First chunk scheduled at 0.12, cursor now 0.27.
+    expect(harness.starts).toEqual([0.12])
 
-    // Jump the clock past the scheduled tail → cursor 0.17 is in the past.
+    // Jump the clock past the scheduled tail → cursor 0.27 is in the past.
     harness.advance(1.0)
-    player.enqueue(pcmFrame100ms())
+    player.enqueue(pcmFrame150ms())
+    player.flush()
     await Promise.resolve()
     await Promise.resolve()
 
-    // Recovery: re-anchor to now (1.0) + lead (0.07).
-    expect(harness.starts[1]).toBeCloseTo(1.07, 6)
+    // Recovery: re-anchor to now (1.0) + lead (0.12).
+    expect(harness.starts[1]).toBeCloseTo(1.12, 6)
     player.stop()
   })
 })

@@ -221,6 +221,11 @@ export function useDashboard(pollMs = 15_000) {
     await refresh()
   }, [refresh])
 
+  const activateSelfImprove = useCallback(async () => {
+    const activeRepo = data.repositories.find((repo) => repo.active)
+    await setSelfImprove({ enabled: true, repoUrl: activeRepo?.url ?? null })
+  }, [data.repositories, setSelfImprove])
+
   const hasActive = data.jobs.some((job) => isActiveJobStatus(job.status))
     || (data.queue.running ?? 0) > 0
 
@@ -261,5 +266,6 @@ export function useDashboard(pollMs = 15_000) {
     deleteAgent,
     submitPrompt,
     setSelfImprove,
+    activateSelfImprove,
   }
 }

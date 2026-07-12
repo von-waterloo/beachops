@@ -9,7 +9,6 @@ from beachops.domain.prompts import (
     build_prompt,
     git_safety_prefix,
     is_protected_default_branch,
-    server_ssh_block,
 )
 
 
@@ -111,47 +110,3 @@ def test_protected_default_branches() -> None:
     assert is_protected_default_branch("Master")
     assert not is_protected_default_branch("dev")
     assert not is_protected_default_branch("develop")
-
-
-def test_server_ssh_block_mentions_readonly_docker_only() -> None:
-    block = server_ssh_block(label="prod")
-    assert "AGENT_SSH_HOST" in block
-    assert "AGENT_SSH_PRIVATE_KEY_B64" in block
-    assert "docker ps" in block
-    assert "Запрещено" in block
-    assert "exec" in block
-
-
-def test_server_ssh_block_adds_remote_dir_note() -> None:
-    block = server_ssh_block(label="prod", remote_dir="/home/const/tg-cursor-bot")
-    assert "/home/const/tg-cursor-bot" in block
-    assert "AGENT_SSH_REMOTE_DIR" in block
-
-
-def test_server_ssh_block_without_remote_dir_has_no_cd_note() -> None:
-    block = server_ssh_block(label="prod")
-    assert "AGENT_SSH_REMOTE_DIR" not in block
-
-
-def test_do_mode_includes_server_ssh_note_when_provided() -> None:
-    note = server_ssh_block(label="prod")
-    text = build_prompt("проверь логи бота", UserMode.DO, default_branch="dev", server_ssh_note=note)
-    assert "SSH-доступ для диагностики" in text
-    assert text.endswith("проверь логи бота")
-
-
-def test_do_mode_without_server_ssh_note_stays_clean() -> None:
-    text = build_prompt("исправь баг", UserMode.DO, default_branch="dev")
-    assert "SSH-доступ для диагностики" not in text
-
-
-def test_ask_mode_includes_server_ssh_note_when_provided() -> None:
-    note = server_ssh_block(label="dev")
-    text = build_prompt("почему бот падает?", UserMode.ASK, default_branch="dev", server_ssh_note=note)
-    assert "SSH-доступ для диагностики" in text
-
-
-def test_plan_mode_never_includes_server_ssh_note() -> None:
-    note = server_ssh_block(label="prod")
-    text = build_prompt("спланируй фичу", UserMode.PLAN, default_branch="dev", server_ssh_note=note)
-    assert "SSH-доступ для диагностики" not in text

@@ -67,15 +67,6 @@ export interface Repository {
   lastActivityAt?: string
 }
 
-export interface SelfImproveStatus {
-  enabled: boolean
-  available: boolean
-  repoUrl: string | null
-  branches: string[]
-  linked: boolean
-  active: boolean
-}
-
 export interface AgentSlot {
   id: string
   label: string
@@ -86,24 +77,13 @@ export interface AgentSlot {
   preferredWorkerId?: string | null
   cursorAgentId?: string | null
   cursorUrl?: string | null
-  localPath?: string | null
-  preferredWorkerId?: string | null
 }
 
-export interface JobStreamEvent {
+export interface StreamEvent {
   id: string
   eventType: string
   text: string | null
-  createdAt: string | null
-}
-
-export interface JobStreamSnapshot {
-  jobId: string
-  status: string
-  events: JobStreamEvent[]
-  lastEventId: string
-  latestText: string | null
-  finalText: string | null
+  createdAt: string
 }
 
 export interface Usage {
@@ -121,13 +101,6 @@ export interface WorkerNode {
   status: string
   lastHeartbeatAt?: string | null
   capabilities?: Record<string, unknown>
-}
-
-export interface StreamEvent {
-  id: string
-  eventType: string
-  text: string | null
-  createdAt: string
 }
 
 export interface JobStreamSnapshot {
@@ -172,14 +145,14 @@ export interface DashboardSnapshot {
   approvals: Approval[]
   repositories: Repository[]
   agents: AgentSlot[]
-  selfImprove?: SelfImproveStatus | null
+  panic?: boolean
   usage: Usage | null
   role: string
   defaultBranch?: string
   repositoryPolicy?: RepositoryPolicyInfo
   workers: WorkerNode[]
   queue: QueueSnapshot
-  selfImprove?: SelfImproveInfo
+  selfImprove?: SelfImproveInfo | null
 }
 
 export function isActiveJobStatus(status: JobStatus): boolean {

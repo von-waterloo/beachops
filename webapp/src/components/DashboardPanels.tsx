@@ -60,18 +60,19 @@ import {
   statusTone,
 } from '../lib/uiCopy'
 
-export type TabId = 'work' | 'voice' | 'history' | 'approvals' | 'repositories'
+export type TabId = 'voice' | 'active' | 'history' | 'approvals' | 'repositories'
 
 type Decision = 'approve' | 'reject' | 'revision'
 
 interface Props {
-  tab: Exclude<TabId, 'voice' | 'work'> | 'active' | 'overview'
+  tab: Exclude<TabId, 'voice'> | 'overview'
   data: DashboardSnapshot
   loading: boolean
   error: string | null
+  liveEvents?: Event[]
   runtimeFilter?: RuntimeFilter
   focusedJobId?: string | null
-  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: string) => void
+  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: TabId) => void
   onSelectJob?: (jobId: string, runtime?: string | null) => void
   onRefresh: () => void
   onDecision: (approvalId: string, decision: Decision, revision?: string) => Promise<void>
@@ -81,6 +82,13 @@ interface Props {
   onCreateAgent?: () => Promise<void>
   onUpdateAgent?: (slotId: string, input: { label?: string; makeActive?: boolean }) => Promise<void>
   onDeleteAgent?: (slotId: string) => Promise<void>
+  onActivateSelfImprove?: () => Promise<void>
+  onSubmitPrompt?: (input: {
+    prompt: string
+    mode?: 'ask' | 'plan' | 'do'
+    slotId?: string
+    images?: Array<{ mimeType: string; data: string }>
+  }) => Promise<void>
 }
 
 function Empty({ icon, title, copy }: { icon: React.ReactNode; title: string; copy: string }) {
@@ -886,7 +894,7 @@ function HistoryPanel({
   events: Event[]
   runtimeFilter: RuntimeFilter
   focusedJobId?: string | null
-  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: string) => void
+  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: TabId) => void
   onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
 }) {
   const jobsById = new Map(jobs.map((job) => [job.id, job]))
@@ -1001,7 +1009,7 @@ function Overview({
   act: (approvalId: string, decision: Decision, revision?: string) => void
   runtimeFilter: RuntimeFilter
   focusedJobId?: string | null
-  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: string) => void
+  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: TabId) => void
   onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
   onSetSelfImprove?: (input: { enabled: boolean; repoUrl?: string | null }) => Promise<void>
 }) {

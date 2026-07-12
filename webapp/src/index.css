@@ -337,24 +337,29 @@ main {
 }
 
 .voice-stage-center {
-  flex: 1;
-  min-height: 0;
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 14px;
   width: 100%;
+  pointer-events: none;
 }
 
 .voice-stage-footer {
-  flex-shrink: 0;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 14px;
   width: 100%;
   min-height: 88px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
+  pointer-events: auto;
 }
 
 .voice-stage::before {
@@ -366,7 +371,7 @@ main {
   left: 50%;
   border: 1px solid color-mix(in srgb, var(--accent) 10%, transparent);
   border-radius: 44% 56% 57% 43% / 46% 40% 60% 54%;
-  transform: translate(-50%, -58%);
+  transform: translate(-50%, -50%);
   animation: ambient-morph 12s ease-in-out infinite alternate;
   z-index: -1;
   pointer-events: none;
@@ -451,6 +456,36 @@ main {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   isolation: isolate;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.orb-ripple {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  pointer-events: none;
+  z-index: 3;
+  opacity: 0;
+}
+
+.orb-ripple.is-firing {
+  animation: orb-ripple 620ms var(--ease-out) forwards;
+}
+
+.orb-press-flash {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0;
+}
+
+.orb-press-flash.is-firing {
+  animation: orb-press-flash 320ms var(--ease-out) forwards;
 }
 
 .orb-ring {
@@ -566,8 +601,8 @@ main {
 }
 
 .spectrum {
-  height: 26px;
-  width: min(96px, 72%);
+  height: 24px;
+  width: min(64px, 52%);
   display: flex;
   gap: 2px;
   align-items: center;
@@ -576,10 +611,11 @@ main {
 }
 
 .spectrum i {
-  flex: 1 1 0;
+  flex: 0 0 2px;
   min-width: 0;
-  max-width: 3px;
-  height: 22px;
+  width: 2px;
+  max-width: 2px;
+  height: 20px;
   border-radius: 999px;
   background: linear-gradient(to top, color-mix(in srgb, var(--accent) 38%, transparent), var(--accent));
   transform: scaleY(0.08);
@@ -588,8 +624,13 @@ main {
 }
 
 .phase-listening .spectrum i {
-  opacity: 0.95;
-  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 24%, transparent);
+  opacity: 0.96;
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 30%, transparent);
+  animation: spectrum-bar-glow 1.6s ease-in-out infinite alternate;
+}
+
+.phase-listening .spectrum i:nth-child(odd) {
+  animation-delay: -0.5s;
 }
 
 .voice-status {
@@ -1629,6 +1670,21 @@ button.work-card.is-selected {
   50% { opacity: 0.62; }
 }
 
+@keyframes orb-ripple {
+  0% { transform: scale(1); opacity: 0.7; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+
+@keyframes orb-press-flash {
+  0% { opacity: 0.55; transform: scale(0.96); }
+  100% { opacity: 0; transform: scale(1.04); }
+}
+
+@keyframes spectrum-bar-glow {
+  from { filter: brightness(1); }
+  to { filter: brightness(1.4); }
+}
+
 @keyframes orb-glass-pulse {
   from {
     box-shadow:
@@ -1681,6 +1737,7 @@ button.work-card.is-selected {
 
   .voice-stage-footer {
     min-height: 76px;
+    bottom: 10px;
   }
 
   .orb-button {
@@ -1689,12 +1746,12 @@ button.work-card.is-selected {
   }
 
   .spectrum {
-    height: 22px;
-    width: min(84px, 68%);
+    height: 20px;
+    width: min(56px, 48%);
   }
 
   .spectrum i {
-    height: 18px;
+    height: 16px;
   }
 }
 

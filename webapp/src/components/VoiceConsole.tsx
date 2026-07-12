@@ -64,6 +64,7 @@ export function VoiceConsole({
   const [pulse, setPulse] = useState(0.2)
   const [selectedModel, setSelectedModel] = useState(cursorModelKey ?? '')
   const [modelBusy, setModelBusy] = useState(false)
+  const [rippleKey, setRippleKey] = useState(0)
 
   useEffect(() => {
     if (cursorModelKey) setSelectedModel(cursorModelKey)
@@ -94,6 +95,7 @@ export function VoiceConsole({
 
   const handleOrb = () => {
     feedback('tap')
+    setRippleKey((key) => key + 1)
     if (state.phase === 'listening') voice.finishListening()
     else if (state.phase === 'speaking') void voice.startListening()
     else if (canStart) void voice.startListening()
@@ -187,12 +189,19 @@ export function VoiceConsole({
             aria-label={state.phase === 'listening' ? 'Стоп' : 'Говорить'}
             aria-pressed={state.phase === 'listening'}
             onClick={handleOrb}
-            whileTap={reducedMotion ? undefined : { scale: 0.94 }}
+            whileTap={reducedMotion ? undefined : { scale: 0.9 }}
+            whileHover={reducedMotion ? undefined : { scale: 1.03 }}
             animate={{
-              scale: 1 + displayEnergy * (state.phase === 'listening' ? 0.05 : 0.018),
+              scale: 1 + displayEnergy * (state.phase === 'listening' ? 0.06 : 0.02),
             }}
-            transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+            transition={{ type: 'spring', stiffness: 460, damping: 24 }}
           >
+            {!reducedMotion && rippleKey > 0 && (
+              <span key={`ripple-${rippleKey}`} className="orb-ripple is-firing" aria-hidden="true" />
+            )}
+            {!reducedMotion && rippleKey > 0 && (
+              <span key={`flash-${rippleKey}`} className="orb-press-flash is-firing" aria-hidden="true" />
+            )}
             {!reducedMotion && state.phase === 'listening' && (
               <>
                 <motion.span
