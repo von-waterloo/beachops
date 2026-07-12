@@ -1929,20 +1929,6 @@ button.work-card.is-selected {
   color: rgba(158, 255, 213, 0.72);
 }
 
-.control-hero-copy h1 {
-  margin: 4px 0 6px;
-  color: #f2faf6;
-  font-size: 1.15rem;
-  letter-spacing: -0.02em;
-}
-
-.control-hero-copy p {
-  margin: 0;
-  color: rgba(210, 240, 228, 0.72);
-  font-size: 0.82rem;
-  line-height: 1.4;
-}
-
 .control-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
