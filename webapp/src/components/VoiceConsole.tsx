@@ -127,6 +127,22 @@ export function VoiceConsole({
       ? 'Действие'
       : 'План'
 
+  const isListening = state.phase === 'listening'
+
+  const statusTitle = cancelArmed
+    ? 'Отмена'
+    : isListening
+      ? 'Слушаю'
+      : state.phase === 'planning'
+        ? planningLabel
+        : phaseLabels[state.phase]
+
+  const statusSubtitle = cancelArmed
+    ? 'Отпусти — запись не уйдёт'
+    : isListening
+      ? null
+      : state.queuedHint ?? state.caption
+
   const handleMode = (mode: 'ask' | 'do') => {
     if (modeLocked || mode === agentMode) return
     feedback('select')
@@ -248,16 +264,20 @@ export function VoiceConsole({
             {Array.from({ length: 12 }, (_, index) => <i key={index} />)}
           </div>
         )}
-        <div className="connection-chip">
-          <span className={state.connected ? 'online-dot' : 'offline-dot'} />
-          {state.connected ? 'На связи' : 'Переподключаюсь'}
-        </div>
+        {!isListening && (
+          <>
+            <div className="connection-chip">
+              <span className={state.connected ? 'online-dot' : 'offline-dot'} />
+              {state.connected ? 'На связи' : 'Переподключаюсь'}
+            </div>
 
-        {activeJob && (
-          <div className="job-chip" role="status">
-            <Cloud size={12} />
-            <span>{activeJob.title.slice(0, 42)}</span>
-          </div>
+            {activeJob && (
+              <div className="job-chip" role="status">
+                <Cloud size={12} />
+                <span>{activeJob.title.slice(0, 42)}</span>
+              </div>
+            )}
+          </>
         )}
 
         <div className="voice-stage-center">
@@ -304,20 +324,10 @@ export function VoiceConsole({
             {!reducedMotion && rippleKey > 0 && (
               <span key={`flash-${rippleKey}`} className="orb-press-flash is-firing" aria-hidden="true" />
             )}
-            {!reducedMotion && state.phase === 'listening' && !cancelArmed && (
+            {!reducedMotion && isListening && !cancelArmed && (
               <>
-                <motion.span
-                  className="orb-ring orb-ring-1"
-                  aria-hidden="true"
-                  animate={{ scale: [1, 1.35], opacity: [0.45, 0] }}
-                  transition={{ duration: 1.6, repeat: Infinity, ease: 'easeOut' }}
-                />
-                <motion.span
-                  className="orb-ring orb-ring-2"
-                  aria-hidden="true"
-                  animate={{ scale: [1, 1.5], opacity: [0.3, 0] }}
-                  transition={{ duration: 1.6, repeat: Infinity, ease: 'easeOut', delay: 0.45 }}
-                />
+                <span className="orb-ring orb-ring-1" aria-hidden="true" />
+                <span className="orb-ring orb-ring-2" aria-hidden="true" />
               </>
             )}
             <span
@@ -362,37 +372,25 @@ export function VoiceConsole({
               animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
               exit={reducedMotion ? undefined : { opacity: 0, y: -6 }}
             >
-              <strong>
-                {cancelArmed
-                  ? 'Отмена'
-                  : state.phase === 'planning'
-                    ? planningLabel
-                    : phaseLabels[state.phase]}
-              </strong>
-              <p aria-live="polite">
-                {cancelArmed
-                  ? 'Отпусти — запись не уйдёт'
-                  : state.queuedHint
-                    ? state.queuedHint
-                    : state.caption}
-              </p>
-              {jobCaption && !cancelArmed && (
+              <strong>{statusTitle}</strong>
+              {statusSubtitle && (
+                <p aria-live="polite">{statusSubtitle}</p>
+              )}
+              {jobCaption && !cancelArmed && !isListening && (
                 <small className="job-status-caption">{jobCaption}</small>
               )}
             </motion.div>
           </AnimatePresence>
 
-          {state.phase === 'listening' && (
+          {isListening && cancelArmed && (
             <motion.div
-              className={`privacy-chip${cancelArmed ? ' is-cancel' : ''}`}
+              className="privacy-chip is-cancel"
               role="status"
               initial={reducedMotion ? false : { opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
             >
               <span className="privacy-pulse" />
-              {cancelArmed
-                ? 'Отмена отправки'
-                : 'Тап — отправить · влево — отмена'}
+              Отмена отправки
             </motion.div>
           )}
         </div>
@@ -496,16 +494,18 @@ export function VoiceConsole({
         </div>
       )}
 
-      <div className="voice-footnote">
-        {state.phase === 'speaking'
-          ? <><Mic size={14} /> Кнопка — прервать и сказать ещё</>
-          : state.phase === 'listening'
-            ? <><X size={14} /> Влево по кнопке — отменить без отправки</>
-            : <><MicOff size={14} /> Можно кидать несколько сообщений подряд в очередь</>}
-      </div>
-      <p className="telegram-workflow-hint">
-        Ответ стримится и в Mini App, и в Telegram-боте — один поток.
-      </p>
+      {!isListening && (
+        <>
+          <div className="voice-footnote">
+            {state.phase === 'speaking'
+              ? <><Mic size={14} /> Кнопка — прервать и сказать ещё</>
+              : <><MicOff size={14} /> Можно кидать несколько сообщений подряд в очередь</>}
+          </div>
+          <p className="telegram-workflow-hint">
+            Ответ стримится и в Mini App, и в Telegram-боте — один поток.
+          </p>
+        </>
+      )}
     </section>
   )
 }

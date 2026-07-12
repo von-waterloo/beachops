@@ -84,7 +84,7 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
         voiceRequireConfirm: state.voiceRequireConfirm,
         phase: 'listening',
         recordingStartedAt: action.at,
-        caption: 'Слушаю…',
+        caption: '',
       }
     case 'STOP_LISTENING':
       if (state.phase !== 'listening') return state
