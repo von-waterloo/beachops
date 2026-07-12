@@ -10,6 +10,7 @@ import {
   VOICE_RECONNECT_LIMIT,
 } from './reconnect'
 import { SPECTRUM_BAR_COUNT } from './constants'
+import { PcmStreamPlayer } from './pcmPlayer'
 import { initialVoiceState, voiceReducer } from './state'
 
 const MAX_RECORDING_MS = 60_000
@@ -75,9 +76,17 @@ export function useVoiceSession() {
   const pingTimerRef = useRef<number | undefined>(undefined)
   const intentionallyClosedRef = useRef(false)
   const fatalFailureRef = useRef(false)
-  const playbackQueueRef = useRef<ArrayBuffer[]>([])
-  const playingRef = useRef<AudioBufferSourceNode | null>(null)
-  const playbackContextRef = useRef<AudioContext | null>(null)
+  const pcmPlayerRef = useRef<PcmStreamPlayer | null>(null)
+
+  useEffect(() => {
+    pcmPlayerRef.current = new PcmStreamPlayer(() => {
+      dispatch({ type: 'PLAYBACK_DONE' })
+    })
+    return () => {
+      pcmPlayerRef.current?.stop()
+      pcmPlayerRef.current = null
+    }
+  }, [])
 
   const clearPing = useCallback(() => {
     window.clearInterval(pingTimerRef.current)
@@ -91,42 +100,8 @@ export function useVoiceSession() {
     return true
   }, [])
 
-  const playNext = useCallback(() => {
-    if (playingRef.current || playbackQueueRef.current.length === 0) {
-      if (!playingRef.current && playbackQueueRef.current.length === 0) {
-        dispatch({ type: 'PLAYBACK_DONE' })
-      }
-      return
-    }
-    const raw = playbackQueueRef.current.shift()!
-    const context = playbackContextRef.current ?? new AudioContext({ sampleRate: 24_000 })
-    playbackContextRef.current = context
-    const pcm = new Int16Array(raw)
-    const buffer = context.createBuffer(1, pcm.length, 24_000)
-    const channel = buffer.getChannelData(0)
-    for (let index = 0; index < pcm.length; index += 1) {
-      channel[index] = pcm[index] / 0x8000
-    }
-    const source = context.createBufferSource()
-    source.buffer = buffer
-    source.connect(context.destination)
-    playingRef.current = source
-    const finish = () => {
-      playingRef.current = null
-      playNext()
-    }
-    source.onended = finish
-    source.start()
-  }, [])
-
   const stopPlayback = useCallback(() => {
-    const current = playingRef.current
-    if (current) {
-      current.stop()
-      current.disconnect()
-      playingRef.current = null
-    }
-    playbackQueueRef.current = []
+    pcmPlayerRef.current?.stop()
   }, [])
 
   const handleServerEvent = useCallback((event: VoiceEvent) => {
@@ -165,7 +140,7 @@ export function useVoiceSession() {
         dispatch({ type: 'SPEAKING', caption: event.text })
         break
       case 'audio.ended':
-        playNext()
+        pcmPlayerRef.current?.flush()
         break
       case 'error':
         if (isFatalVoiceErrorCode(event.code)) {
@@ -175,7 +150,7 @@ export function useVoiceSession() {
         feedback('error')
         break
     }
-  }, [playNext])
+  }, [])
 
   const connect = useCallback(() => {
     if (!navigator.onLine || fatalFailureRef.current) return
@@ -213,9 +188,8 @@ export function useVoiceSession() {
     socket.onmessage = (message) => {
       if (message.data instanceof Blob) {
         void message.data.arrayBuffer().then((audio) => {
-          playbackQueueRef.current.push(audio)
+          pcmPlayerRef.current?.enqueue(audio)
           dispatch({ type: 'SPEAKING' })
-          playNext()
         })
         return
       }
@@ -264,7 +238,7 @@ export function useVoiceSession() {
       const delay = voiceReconnectDelayMs(attempt)
       reconnectTimerRef.current = window.setTimeout(connect, delay)
     }
-  }, [clearPing, handleServerEvent, playNext])
+  }, [clearPing, handleServerEvent])
 
   useEffect(() => {
     connect()
@@ -284,8 +258,6 @@ export function useVoiceSession() {
       window.clearTimeout(reconnectTimerRef.current)
       clearPing()
       wsRef.current?.close()
-      void playbackContextRef.current?.close()
-      playbackContextRef.current = null
       window.removeEventListener('online', online)
       window.removeEventListener('offline', offline)
     }

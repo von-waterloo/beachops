@@ -11,6 +11,9 @@ from beachops.domain.voice_persona import SPARTAN_TTS_INSTRUCTIONS, to_spoken_br
 
 logger = logging.getLogger(__name__)
 
+# ~200 ms PCM16 mono @ 24 kHz — fewer WebSocket frames on mobile clients.
+TTS_OUT_CHUNK_BYTES = 9_600
+
 
 class SpeechService:
     def __init__(
@@ -58,11 +61,14 @@ class SpeechService:
             ) as response:
                 pending = b""
                 async for chunk in response.iter_bytes():
-                    data = pending + chunk
-                    even_length = len(data) - (len(data) % 2)
-                    if even_length:
-                        yield data[:even_length]
-                    pending = data[even_length:]
+                    pending += chunk
+                    while len(pending) >= TTS_OUT_CHUNK_BYTES:
+                        take = TTS_OUT_CHUNK_BYTES - (TTS_OUT_CHUNK_BYTES % 2)
+                        yield pending[:take]
+                        pending = pending[take:]
+                even_length = len(pending) - (len(pending) % 2)
+                if even_length:
+                    yield pending[:even_length]
         except Exception:
             logger.exception("TTS stream failed", extra={"action": "tts"})
             raise
