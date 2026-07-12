@@ -17,6 +17,7 @@ import { requestTelegramFullscreen } from '../lib/telegram'
 import { feedback } from '../lib/feedback'
 import { setCursorModel, type CursorModelOption } from '../lib/passkeys'
 import { useVoiceSession } from '../voice/useVoiceSession'
+import { SPECTRUM_BAR_COUNT } from '../voice/constants'
 import type { VoicePhase } from '../voice/state'
 import type { Event, Job } from '../types/api'
 import { runtimeLabel, statusLabel } from '../lib/uiCopy'
@@ -92,6 +93,7 @@ export function VoiceConsole({
   }, [activeJob, latestEvent])
 
   const handleOrb = () => {
+    feedback('tap')
     if (state.phase === 'listening') voice.finishListening()
     else if (state.phase === 'speaking') void voice.startListening()
     else if (canStart) void voice.startListening()
@@ -178,63 +180,93 @@ export function VoiceConsole({
           </div>
         )}
 
-        <motion.button
-          type="button"
-          className="orb-button"
-          aria-label={state.phase === 'listening' ? 'Стоп' : 'Говорить'}
-          aria-pressed={state.phase === 'listening'}
-          onClick={handleOrb}
-          whileTap={reducedMotion ? undefined : { scale: 0.96 }}
-          animate={{
-            scale: 1 + displayEnergy * (state.phase === 'listening' ? 0.04 : 0.015),
-          }}
-          transition={{ type: 'spring', stiffness: 420, damping: 28 }}
-        >
-          <span
-            className="orb-halo"
-            style={{
-              opacity: 0.35 + displayEnergy * 0.45,
-              transform: `scale(${1 + displayEnergy * 0.18})`,
+        <div className="voice-stage-center">
+          <motion.button
+            type="button"
+            className="orb-button"
+            aria-label={state.phase === 'listening' ? 'Стоп' : 'Говорить'}
+            aria-pressed={state.phase === 'listening'}
+            onClick={handleOrb}
+            whileTap={reducedMotion ? undefined : { scale: 0.94 }}
+            animate={{
+              scale: 1 + displayEnergy * (state.phase === 'listening' ? 0.05 : 0.018),
             }}
-          />
-          <span className="orb-glass" aria-hidden="true" />
-          <span className="orb-core">
-            {state.phase === 'listening' ? <Square size={26} fill="currentColor" /> : <Mic size={30} />}
-          </span>
-        </motion.button>
-
-        <div className="spectrum" aria-hidden="true">
-          {(state.phase === 'listening' ? voice.spectrum : Array.from({ length: 24 }, (_, i) =>
-            Math.max(0.08, displayEnergy * (0.45 + 0.55 * Math.abs(Math.sin((i + 1) * 0.55 + displayEnergy * 4)))),
-          )).map((value, index) => (
-            <motion.i
-              key={index}
-              animate={{ scaleY: reducedMotion ? 0.3 : Math.max(0.12, value) }}
-              transition={{ type: 'spring', stiffness: 440, damping: 32 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+          >
+            {!reducedMotion && state.phase === 'listening' && (
+              <>
+                <motion.span
+                  className="orb-ring orb-ring-1"
+                  aria-hidden="true"
+                  animate={{ scale: [1, 1.35], opacity: [0.45, 0] }}
+                  transition={{ duration: 1.6, repeat: Infinity, ease: 'easeOut' }}
+                />
+                <motion.span
+                  className="orb-ring orb-ring-2"
+                  aria-hidden="true"
+                  animate={{ scale: [1, 1.5], opacity: [0.3, 0] }}
+                  transition={{ duration: 1.6, repeat: Infinity, ease: 'easeOut', delay: 0.45 }}
+                />
+              </>
+            )}
+            <span
+              className="orb-halo"
+              style={{
+                opacity: 0.35 + displayEnergy * 0.45,
+                transform: `scale(${1 + displayEnergy * 0.18})`,
+              }}
             />
-          ))}
+            <span className="orb-glass" aria-hidden="true" />
+            <span className="orb-core">
+              {state.phase === 'listening' ? <Square size={26} fill="currentColor" /> : <Mic size={30} />}
+            </span>
+          </motion.button>
+
+          <div className="spectrum" aria-hidden="true">
+            {(state.phase === 'listening' ? voice.spectrum : Array.from({ length: SPECTRUM_BAR_COUNT }, (_, i) =>
+              Math.max(0.08, displayEnergy * (0.45 + 0.55 * Math.abs(Math.sin((i + 1) * 0.55 + displayEnergy * 4)))),
+            )).map((value, index) => (
+              <motion.i
+                key={index}
+                animate={{ scaleY: reducedMotion ? 0.3 : Math.max(0.12, value) }}
+                transition={{
+                  type: 'spring',
+                  stiffness: 440,
+                  damping: 32,
+                  delay: state.phase === 'listening' ? index * 0.012 : 0,
+                }}
+              />
+            ))}
+          </div>
         </div>
 
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={`${state.phase}-${jobCaption ?? ''}`}
-            className="voice-status"
-            initial={reducedMotion ? false : { opacity: 0, y: 8, filter: 'blur(5px)' }}
-            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-            exit={reducedMotion ? undefined : { opacity: 0, y: -6 }}
-          >
-            <strong>{phaseLabels[state.phase]}</strong>
-            <p aria-live="polite">{state.caption}</p>
-            {jobCaption && <small className="job-status-caption">{jobCaption}</small>}
-          </motion.div>
-        </AnimatePresence>
+        <div className="voice-stage-footer">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={`${state.phase}-${jobCaption ?? ''}`}
+              className="voice-status"
+              initial={reducedMotion ? false : { opacity: 0, y: 8, filter: 'blur(5px)' }}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              exit={reducedMotion ? undefined : { opacity: 0, y: -6 }}
+            >
+              <strong>{phaseLabels[state.phase]}</strong>
+              <p aria-live="polite">{state.caption}</p>
+              {jobCaption && <small className="job-status-caption">{jobCaption}</small>}
+            </motion.div>
+          </AnimatePresence>
 
-        {state.phase === 'listening' && (
-          <div className="privacy-chip" role="status">
-            <span className="privacy-pulse" />
-            Микрофон открыт · канал защищён
-          </div>
-        )}
+          {state.phase === 'listening' && (
+            <motion.div
+              className="privacy-chip"
+              role="status"
+              initial={reducedMotion ? false : { opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <span className="privacy-pulse" />
+              Микрофон открыт · канал защищён
+            </motion.div>
+          )}
+        </div>
       </div>
 
       {showComposer && (

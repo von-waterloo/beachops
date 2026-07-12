@@ -9,6 +9,7 @@ import {
   VOICE_FATAL_CLOSE_CODES,
   VOICE_RECONNECT_LIMIT,
 } from './reconnect'
+import { SPECTRUM_BAR_COUNT } from './constants'
 import { initialVoiceState, voiceReducer } from './state'
 
 const MAX_RECORDING_MS = 60_000
@@ -58,7 +59,7 @@ function voiceErrorMessage(event: VoiceEvent): string {
 export function useVoiceSession() {
   const [state, dispatch] = useReducer(voiceReducer, initialVoiceState)
   const [energy, setEnergy] = useState(0)
-  const [spectrum, setSpectrum] = useState<number[]>(() => Array(24).fill(0.04))
+  const [spectrum, setSpectrum] = useState<number[]>(() => Array(SPECTRUM_BAR_COUNT).fill(0.04))
   const wsRef = useRef<WebSocket | null>(null)
   const workletRef = useRef<AudioWorkletNode | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
@@ -351,8 +352,8 @@ export function useVoiceSession() {
         if (now - lastPaint < (lowPower ? 100 : 32)) return
         lastPaint = now
         analyser.getByteFrequencyData(values)
-        const bands = Array.from({ length: 24 }, (_, index) => {
-          const value = values[Math.floor(index * values.length / 24)] ?? 0
+        const bands = Array.from({ length: SPECTRUM_BAR_COUNT }, (_, index) => {
+          const value = values[Math.floor(index * values.length / SPECTRUM_BAR_COUNT)] ?? 0
           return Math.max(0.035, value / 255)
         })
         setSpectrum(bands)

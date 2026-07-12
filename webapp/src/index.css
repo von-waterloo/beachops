@@ -310,45 +310,77 @@ main {
 
 .voice-stage {
   min-height: 420px;
-  padding: 20px 16px 26px;
+  padding: 52px 16px 18px;
   position: relative;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  align-items: stretch;
   border: 1px solid var(--line);
   border-radius: 31px;
   background:
-    radial-gradient(circle at 50% 44%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 32%),
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 32%),
     linear-gradient(150deg, color-mix(in srgb, var(--surface-high) 95%, transparent), var(--surface));
   box-shadow: var(--shadow), inset 0 1px rgba(255, 255, 255, 0.05);
   isolation: isolate;
+  transition:
+    border-color 280ms var(--ease-out),
+    box-shadow 280ms var(--ease-out);
+}
+
+.voice-stage.is-active {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+  box-shadow:
+    var(--shadow),
+    inset 0 1px rgba(255, 255, 255, 0.05),
+    0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.voice-stage-center {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.voice-stage-footer {
+  flex-shrink: 0;
+  width: 100%;
+  min-height: 88px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
 }
 
 .voice-stage::before {
   content: "";
-  width: 300px;
-  height: 300px;
+  width: 280px;
+  height: 280px;
   position: absolute;
-  top: 32%;
+  top: 50%;
   left: 50%;
   border: 1px solid color-mix(in srgb, var(--accent) 10%, transparent);
   border-radius: 44% 56% 57% 43% / 46% 40% 60% 54%;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -58%);
   animation: ambient-morph 12s ease-in-out infinite alternate;
   z-index: -1;
+  pointer-events: none;
 }
 
 .voice-stage.phase-speaking {
   background:
-    radial-gradient(circle at 50% 44%, rgba(94, 217, 232, 0.19), transparent 35%),
+    radial-gradient(circle at 50% 50%, rgba(94, 217, 232, 0.19), transparent 35%),
     linear-gradient(150deg, var(--surface-high), var(--surface));
 }
 
 .voice-stage.phase-error {
   background:
-    radial-gradient(circle at 50% 44%, rgba(255, 118, 109, 0.14), transparent 33%),
+    radial-gradient(circle at 50% 50%, rgba(255, 118, 109, 0.14), transparent 33%),
     linear-gradient(150deg, var(--surface-high), var(--surface));
 }
 
@@ -407,7 +439,7 @@ main {
 .orb-button {
   width: 132px;
   height: 132px;
-  margin-bottom: 24px;
+  margin: 0;
   padding: 0;
   position: relative;
   display: grid;
@@ -419,6 +451,19 @@ main {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   isolation: isolate;
+}
+
+.orb-ring {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.orb-ring-2 {
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
 }
 
 .orb-core,
@@ -485,6 +530,11 @@ main {
     inset 0 -18px 28px rgba(0, 0, 0, 0.16),
     0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent),
     0 18px 44px color-mix(in srgb, var(--accent) 28%, transparent);
+  animation: orb-glass-pulse 1.1s ease-in-out infinite alternate;
+}
+
+.phase-listening .orb-halo {
+  animation: orb-glow 1.8s ease-in-out infinite;
 }
 
 .phase-listening .orb-core {
@@ -516,26 +566,35 @@ main {
 }
 
 .spectrum {
-  height: 35px;
-  width: min(255px, 74vw);
+  height: 26px;
+  width: min(96px, 72%);
   display: flex;
-  gap: 4px;
+  gap: 2px;
   align-items: center;
   justify-content: center;
+  padding: 0 2px;
 }
 
 .spectrum i {
-  width: 4px;
-  height: 30px;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 3px;
+  height: 22px;
   border-radius: 999px;
   background: linear-gradient(to top, color-mix(in srgb, var(--accent) 38%, transparent), var(--accent));
   transform: scaleY(0.08);
+  transform-origin: center bottom;
   opacity: 0.82;
 }
 
+.phase-listening .spectrum i {
+  opacity: 0.95;
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
 .voice-status {
-  min-height: 59px;
-  margin-top: 18px;
+  min-height: 52px;
+  margin-top: 0;
   text-align: center;
 }
 
@@ -556,7 +615,7 @@ main {
 
 .privacy-chip {
   min-height: 28px;
-  margin-top: 12px;
+  margin-top: 10px;
   gap: 7px;
   padding: 6px 10px;
   border-radius: 999px;
@@ -1567,7 +1626,24 @@ button.work-card.is-selected {
 
 @keyframes orb-glow {
   0%, 100% { opacity: 0.32; }
-  50% { opacity: 0.58; }
+  50% { opacity: 0.62; }
+}
+
+@keyframes orb-glass-pulse {
+  from {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.46),
+      inset 0 -18px 28px rgba(0, 0, 0, 0.16),
+      0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent),
+      0 16px 36px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  to {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.58),
+      inset 0 -18px 28px rgba(0, 0, 0, 0.14),
+      0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent),
+      0 22px 48px color-mix(in srgb, var(--accent) 36%, transparent);
+  }
 }
 
 @keyframes privacy-pulse {
@@ -1600,16 +1676,25 @@ button.work-card.is-selected {
 @media (max-height: 690px) {
   .voice-stage {
     min-height: 345px;
+    padding-top: 48px;
+  }
+
+  .voice-stage-footer {
+    min-height: 76px;
   }
 
   .orb-button {
     width: 112px;
     height: 112px;
-    margin-bottom: 14px;
   }
 
   .spectrum {
-    height: 27px;
+    height: 22px;
+    width: min(84px, 68%);
+  }
+
+  .spectrum i {
+    height: 18px;
   }
 }
 
