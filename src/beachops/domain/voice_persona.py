@@ -41,9 +41,9 @@ _STATUS_MILESTONES: dict[str, str] = {
 
 
 def spoken_ack(*, runtime: str | None = None, room: str | None = None) -> str:
-    """Short human acknowledgement — no queue/runtime/metrics."""
-    del runtime, room  # kept for call-site compatibility
-    return "Ок, беру."
+    """Deprecated: no hardcoded voice ack — wait for a real answer."""
+    del runtime, room
+    return ""
 
 
 def milestone_line(

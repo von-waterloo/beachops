@@ -1773,7 +1773,6 @@ async def _speak_job_result(
     from beachops.domain.voice_persona import (
         MilestoneGate,
         milestone_line,
-        spoken_ack,
         to_spoken_briefing,
     )
 
@@ -1811,15 +1810,7 @@ async def _speak_job_result(
         return
 
     previous_status = job.status.value
-    try:
-        ack = spoken_ack()
-        await _stream_voice_pcm(context, websocket, ack, kind="milestone")
-        gate.mark(time.monotonic(), ack, count=False)
-    except Exception:
-        logger.exception(
-            "Voice speak ack failed",
-            extra={"job_id": str(job_id), "action": "voice_speak"},
-        )
+    # No hardcoded «Ок, беру» — wait for real progress / final answer.
 
     for _ in range(1800):
         await asyncio.sleep(2)

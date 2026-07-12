@@ -499,7 +499,27 @@ main {
   -webkit-tap-highlight-color: transparent;
   isolation: isolate;
   pointer-events: auto;
-  touch-action: manipulation;
+  touch-action: none;
+}
+
+.orb-button.is-cancel {
+  color: #ffb4b4;
+}
+
+.orb-button.is-cancel .orb-halo {
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, #e85d5d 35%, transparent),
+    transparent 70%
+  );
+}
+
+.voice-stage.is-cancel {
+  border-color: color-mix(in srgb, #e85d5d 28%, var(--line));
+}
+
+.privacy-chip.is-cancel {
+  color: #ffc9c9;
 }
 
 .orb-ripple {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import {
   Captions,
@@ -20,6 +20,8 @@ import { SPECTRUM_BAR_COUNT } from '../voice/constants'
 import type { VoiceAgentMode, VoicePhase } from '../voice/state'
 import type { Event, Job } from '../types/api'
 import { runtimeLabel, statusLabel } from '../lib/uiCopy'
+
+const CANCEL_SWIPE_PX = 72
 
 const phaseLabels: Record<VoicePhase, string> = {
   idle: 'На посту',
@@ -76,15 +78,29 @@ export function VoiceConsole({
   const [modelBusy, setModelBusy] = useState(false)
   const [rippleKey, setRippleKey] = useState(0)
   const [agentMode, setAgentMode] = useState<VoiceAgentMode>('ask')
+  const [dragX, setDragX] = useState(0)
+  const [cancelArmed, setCancelArmed] = useState(false)
+  const pointerStartX = useRef<number | null>(null)
+  const dragXRef = useRef(0)
+  const didSwipeRef = useRef(false)
 
   useEffect(() => {
     if (cursorModelKey) setSelectedModel(cursorModelKey)
   }, [cursorModelKey])
 
+  useEffect(() => {
+    if (state.phase !== 'listening') {
+      setDragX(0)
+      setCancelArmed(false)
+      pointerStartX.current = null
+      didSwipeRef.current = false
+    }
+  }, [state.phase])
+
   const active = ['listening', 'transcribing', 'planning', 'speaking'].includes(state.phase)
-  const canStart = ['idle', 'error'].includes(state.phase)
-  const showComposer = ['idle', 'error'].includes(state.phase)
-  const modeLocked = ['listening', 'transcribing', 'planning', 'speaking'].includes(state.phase)
+  const canStart = ['idle', 'error', 'planning', 'speaking'].includes(state.phase)
+  const showComposer = ['idle', 'error', 'planning', 'speaking'].includes(state.phase)
+  const modeLocked = ['listening', 'transcribing'].includes(state.phase)
 
   useEffect(() => {
     if (reducedMotion || state.phase === 'listening') return undefined
@@ -119,11 +135,48 @@ export function VoiceConsole({
   }
 
   const handleOrb = () => {
+    if (didSwipeRef.current) {
+      didSwipeRef.current = false
+      return
+    }
     feedback('tap')
     setRippleKey((key) => key + 1)
     if (state.phase === 'listening') voice.finishListening()
-    else if (state.phase === 'speaking') void voice.startListening()
     else if (canStart) void voice.startListening()
+  }
+
+  const onOrbPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (state.phase !== 'listening') return
+    pointerStartX.current = event.clientX
+    dragXRef.current = 0
+    didSwipeRef.current = false
+    setCancelArmed(false)
+    setDragX(0)
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const onOrbPointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (state.phase !== 'listening' || pointerStartX.current === null) return
+    const delta = Math.min(0, event.clientX - pointerStartX.current)
+    dragXRef.current = delta
+    setDragX(delta)
+    const armed = delta <= -CANCEL_SWIPE_PX
+    if (armed !== cancelArmed) setCancelArmed(armed)
+  }
+
+  const onOrbPointerUp = () => {
+    if (state.phase !== 'listening' || pointerStartX.current === null) return
+    pointerStartX.current = null
+    const delta = dragXRef.current
+    dragXRef.current = 0
+    setDragX(0)
+    if (delta <= -CANCEL_SWIPE_PX) {
+      didSwipeRef.current = true
+      setCancelArmed(false)
+      voice.cancelListening()
+      return
+    }
+    setCancelArmed(false)
   }
 
   const handleComposer = () => {
@@ -189,7 +242,7 @@ export function VoiceConsole({
         </div>
       )}
 
-      <div className={`voice-stage phase-${state.phase} ${active ? 'is-active' : ''}`}>
+      <div className={`voice-stage phase-${state.phase} ${active ? 'is-active' : ''} ${cancelArmed ? 'is-cancel' : ''}`}>
         {!reducedMotion && (
           <div className="particles" aria-hidden="true">
             {Array.from({ length: 12 }, (_, index) => <i key={index} />)}
@@ -225,13 +278,22 @@ export function VoiceConsole({
 
           <motion.button
             type="button"
-            className="orb-button"
-            aria-label={state.phase === 'listening' ? 'Стоп' : 'Говорить'}
+            className={`orb-button${cancelArmed ? ' is-cancel' : ''}`}
+            aria-label={
+              state.phase === 'listening'
+                ? (cancelArmed ? 'Отменить запись' : 'Отправить · влево отмена')
+                : 'Говорить'
+            }
             aria-pressed={state.phase === 'listening'}
             onClick={handleOrb}
-            whileTap={reducedMotion ? undefined : { scale: 0.9 }}
+            onPointerDown={onOrbPointerDown}
+            onPointerMove={onOrbPointerMove}
+            onPointerUp={onOrbPointerUp}
+            onPointerCancel={onOrbPointerUp}
+            whileTap={reducedMotion || state.phase === 'listening' ? undefined : { scale: 0.9 }}
             whileHover={reducedMotion ? undefined : { scale: 1.03 }}
             animate={{
+              x: state.phase === 'listening' ? dragX * 0.45 : 0,
               scale: 1 + displayEnergy * (state.phase === 'listening' ? 0.06 : 0.02),
             }}
             transition={{ type: 'spring', stiffness: 460, damping: 24 }}
@@ -242,7 +304,7 @@ export function VoiceConsole({
             {!reducedMotion && rippleKey > 0 && (
               <span key={`flash-${rippleKey}`} className="orb-press-flash is-firing" aria-hidden="true" />
             )}
-            {!reducedMotion && state.phase === 'listening' && (
+            {!reducedMotion && state.phase === 'listening' && !cancelArmed && (
               <>
                 <motion.span
                   className="orb-ring orb-ring-1"
@@ -267,7 +329,9 @@ export function VoiceConsole({
             />
             <span className="orb-glass" aria-hidden="true" />
             <span className="orb-core">
-              {state.phase === 'listening' ? <Square size={26} fill="currentColor" /> : <Mic size={30} />}
+              {state.phase === 'listening'
+                ? (cancelArmed ? <X size={28} /> : <Square size={26} fill="currentColor" />)
+                : <Mic size={30} />}
             </span>
           </motion.button>
 
@@ -292,29 +356,43 @@ export function VoiceConsole({
         <div className="voice-stage-footer">
           <AnimatePresence mode="wait">
             <motion.div
-              key={`${state.phase}-${jobCaption ?? ''}`}
+              key={`${state.phase}-${jobCaption ?? ''}-${cancelArmed ? 'c' : 'n'}`}
               className="voice-status"
               initial={reducedMotion ? false : { opacity: 0, y: 8, filter: 'blur(5px)' }}
               animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
               exit={reducedMotion ? undefined : { opacity: 0, y: -6 }}
             >
               <strong>
-                {state.phase === 'planning' ? planningLabel : phaseLabels[state.phase]}
+                {cancelArmed
+                  ? 'Отмена'
+                  : state.phase === 'planning'
+                    ? planningLabel
+                    : phaseLabels[state.phase]}
               </strong>
-              <p aria-live="polite">{state.caption}</p>
-              {jobCaption && <small className="job-status-caption">{jobCaption}</small>}
+              <p aria-live="polite">
+                {cancelArmed
+                  ? 'Отпусти — запись не уйдёт'
+                  : state.queuedHint
+                    ? state.queuedHint
+                    : state.caption}
+              </p>
+              {jobCaption && !cancelArmed && (
+                <small className="job-status-caption">{jobCaption}</small>
+              )}
             </motion.div>
           </AnimatePresence>
 
           {state.phase === 'listening' && (
             <motion.div
-              className="privacy-chip"
+              className={`privacy-chip${cancelArmed ? ' is-cancel' : ''}`}
               role="status"
               initial={reducedMotion ? false : { opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
             >
               <span className="privacy-pulse" />
-              Микрофон открыт · канал защищён
+              {cancelArmed
+                ? 'Отмена отправки'
+                : 'Тап — отправить · влево — отмена'}
             </motion.div>
           )}
         </div>
@@ -322,7 +400,11 @@ export function VoiceConsole({
 
       {showComposer && (
         <div className="composer-card">
-          <label htmlFor="voice-composer">Приказ</label>
+          <label htmlFor="voice-composer">
+            {state.phase === 'planning' || state.phase === 'speaking'
+              ? 'Ещё в очередь'
+              : 'Приказ'}
+          </label>
           <div className="composer-row">
             <input
               id="voice-composer"
@@ -416,8 +498,10 @@ export function VoiceConsole({
 
       <div className="voice-footnote">
         {state.phase === 'speaking'
-          ? <><Mic size={14} /> Кнопка — прервать ответ</>
-          : <><MicOff size={14} /> Микрофон молчит, пока не коснёшься кнопки</>}
+          ? <><Mic size={14} /> Кнопка — прервать и сказать ещё</>
+          : state.phase === 'listening'
+            ? <><X size={14} /> Влево по кнопке — отменить без отправки</>
+            : <><MicOff size={14} /> Можно кидать несколько сообщений подряд в очередь</>}
       </div>
       <p className="telegram-workflow-hint">
         Ответ стримится и в Mini App, и в Telegram-боте — один поток.

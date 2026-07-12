@@ -50,6 +50,25 @@ def is_stream_expired_message(message: str) -> bool:
     return "stream" in lower and "no longer available" in lower
 
 
+def is_agent_gone_error(exc: Exception) -> bool:
+    """True when the Cursor agent/run no longer exists (queue must not wait forever)."""
+    code = ""
+    message = str(exc or "")
+    status_code: int | None = None
+    if isinstance(exc, CursorCloudError):
+        code = (exc.code or "").lower()
+        message = exc.message or message
+        status_code = exc.status_code
+    lower = message.lower()
+    if code in {"agent_not_found", "not_found", "run_not_found"}:
+        return True
+    if "agent not found" in lower or "run not found" in lower:
+        return True
+    if status_code == 404 and "not found" in lower:
+        return True
+    return False
+
+
 @dataclass(frozen=True, slots=True)
 class PromptImage:
     data: str

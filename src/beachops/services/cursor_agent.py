@@ -19,6 +19,7 @@ from beachops.services.cursor_cloud_client import (
     CursorCloudClient,
     CursorCloudError,
     CursorStreamExpiredError,
+    is_agent_gone_error,
     is_stream_expired_message,
     ModelParam,
     ModelSelection,
@@ -251,14 +252,72 @@ class CursorAgentService:
         mcp = self._mcp_servers()
         async with self._client(api_key) as client:
             if cursor_agent_id:
-                run = await client.create_run(
-                    cursor_agent_id,
-                    prompt_text=prompt,
-                    mode=mode,
-                    images=prompt_images or None,
-                    mcp_servers=mcp,
-                )
-                agent_id = cursor_agent_id
+                try:
+                    run = await client.create_run(
+                        cursor_agent_id,
+                        prompt_text=prompt,
+                        mode=mode,
+                        images=prompt_images or None,
+                        mcp_servers=mcp,
+                    )
+                    agent_id = cursor_agent_id
+                except CursorAgentBusyError:
+                    logger.warning(
+                        "Agent %s busy — cancelling stale runs and retrying",
+                        cursor_agent_id,
+                    )
+                    await self._cancel_active_runs(client, cursor_agent_id)
+                    try:
+                        run = await client.create_run(
+                            cursor_agent_id,
+                            prompt_text=prompt,
+                            mode=mode,
+                            images=prompt_images or None,
+                            mcp_servers=mcp,
+                        )
+                        agent_id = cursor_agent_id
+                    except (CursorAgentBusyError, CursorCloudError) as exc:
+                        if not (
+                            isinstance(exc, CursorAgentBusyError)
+                            or is_agent_gone_error(exc)
+                        ):
+                            raise
+                        logger.warning(
+                            "Agent %s still blocked (%s) — creating a fresh agent",
+                            cursor_agent_id,
+                            getattr(exc, "code", None) or exc,
+                        )
+                        agent, run = await client.create_agent(
+                            prompt_text=prompt,
+                            repo_url=repo.github_url,
+                            starting_ref=repo.default_branch,
+                            model=model_sel,
+                            mode=mode,
+                            images=prompt_images or None,
+                            auto_create_pr=auto_create_pr,
+                            work_on_current_branch=work_on_current_branch,
+                            mcp_servers=mcp,
+                        )
+                        agent_id = agent.id
+                except CursorCloudError as exc:
+                    if not is_agent_gone_error(exc):
+                        raise
+                    logger.warning(
+                        "Agent %s gone — creating a fresh agent",
+                        cursor_agent_id,
+                    )
+                    agent, run = await client.create_agent(
+                        prompt_text=prompt,
+                        repo_url=repo.github_url,
+                        starting_ref=repo.default_branch,
+                        model=model_sel,
+                        mode=mode,
+                        images=prompt_images or None,
+                        auto_create_pr=auto_create_pr,
+                        work_on_current_branch=work_on_current_branch,
+                        mcp_servers=mcp,
+                    )
+                    agent_id = agent.id
             else:
                 agent, run = await client.create_agent(
                     prompt_text=prompt,
@@ -278,6 +337,32 @@ class CursorAgentService:
         if on_update is not None:
             await on_update(state)
         return StartedRun(agent_id=agent_id, run_id=run.id, state=state)
+
+    async def _cancel_active_runs(self, client: Any, agent_id: str) -> int:
+        """Best-effort cancel of non-terminal runs so a new prompt can start."""
+        cancelled = 0
+        try:
+            runs, _ = await client.list_runs(agent_id, limit=10)
+        except CursorCloudError:
+            logger.warning("Could not list runs for busy agent %s", agent_id, exc_info=True)
+            return 0
+        for item in runs:
+            status = normalize_run_status(item.status)
+            if status not in {"running", "creating", "in_progress"}:
+                continue
+            try:
+                await client.cancel_run(agent_id, item.id)
+                cancelled += 1
+            except CursorCloudError:
+                logger.warning(
+                    "Could not cancel run %s on agent %s",
+                    item.id,
+                    agent_id,
+                    exc_info=True,
+                )
+        if cancelled:
+            await asyncio.sleep(1.5)
+        return cancelled
 
     async def observe_run(
         self,

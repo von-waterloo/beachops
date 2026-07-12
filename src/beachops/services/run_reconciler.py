@@ -12,6 +12,10 @@ from telegram import Bot
 from beachops.app_context import AppContext
 from beachops.domain.models import UserMode
 from beachops.domain.security import Job, JobStatus
+from beachops.services.cursor_cloud_client import (
+    CursorCloudError,
+    is_agent_gone_error,
+)
 from beachops.services.cursor_agent import RunOutcome
 from beachops.services.run_finalizer import RunFinalizer
 from beachops.services.stream_bridge import StreamState
@@ -27,6 +31,16 @@ _RECOVERABLE_STATUSES = (
     JobStatus.PLANNING,
     JobStatus.FAILED,
 )
+
+# Snapshot returned when Cursor says the agent/run is gone — fail & unblock queue.
+_GONE_RUN = {
+    "status": "error",
+    "result": "",
+    "pr_url": None,
+    "branch_name": None,
+    "duration_ms": None,
+    "gone": True,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,11 +131,11 @@ class RunReconciler:
             state.cache_write_tokens = usage.cache_write_tokens
             state.total_tokens = usage.total_tokens
 
-        error_message = (
-            "Run finished with error"
-            if status == "error"
-            else None
-        )
+        error_message = None
+        if run_info.get("gone"):
+            error_message = "Cursor agent disappeared"
+        elif status == "error":
+            error_message = "Run finished with error"
         outcome = RunOutcome(state, status, error_message)
         run_ctx = await self._app.agent_slots.get_run_context(job.actor_id)
         repo_id = run_ctx.repo.id if run_ctx else 0
@@ -145,6 +159,25 @@ class RunReconciler:
                 job.cursor_run_id,
                 api_key=self._app.settings.cursor_api_key_for(job.cursor_token_key),
             )
+        except CursorCloudError as exc:
+            if is_agent_gone_error(exc):
+                logger.warning(
+                    "Cursor agent gone for job %s — failing to unblock queue",
+                    job.id,
+                    extra={
+                        "job_id": str(job.id),
+                        "action": "reconcile_agent_gone",
+                        "error_code": exc.code or "agent_not_found",
+                    },
+                )
+                return dict(_GONE_RUN)
+            logger.warning(
+                "Could not fetch Cursor run %s for job %s",
+                job.cursor_run_id,
+                job.id,
+                exc_info=True,
+            )
+            return None
         except Exception:
             logger.warning(
                 "Could not fetch Cursor run %s for job %s",

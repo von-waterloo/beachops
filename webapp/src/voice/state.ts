@@ -99,6 +99,7 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
       return { ...state, partialTranscript: action.text, caption: action.text }
     case 'FINAL':
       if (!state.voiceRequireConfirm) {
+        const queued = ['planning', 'speaking'].includes(state.phase)
         return {
           ...state,
           phase: 'planning',
@@ -106,7 +107,7 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
           partialTranscript: '',
           recordingStartedAt: null,
           speakingKind: null,
-          queuedHint: null,
+          queuedHint: queued ? 'В очереди — доделаю текущее и возьмусь' : null,
           caption: captionForMode(action.mode, 'submit'),
         }
       }

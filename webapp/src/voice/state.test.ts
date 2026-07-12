@@ -60,6 +60,22 @@ describe('voiceReducer', () => {
     expect(queued.queuedHint).toContain('очереди')
   })
 
+  it('queues additional voice while already planning', () => {
+    const planning = voiceReducer(initialVoiceState, {
+      type: 'SUBMIT_TEXT',
+      text: 'Первая',
+      mode: 'ask',
+    })
+    const queued = voiceReducer(planning, {
+      type: 'FINAL',
+      text: 'Вторая голосом',
+      mode: 'ask',
+    })
+    expect(queued.phase).toBe('planning')
+    expect(queued.transcript).toBe('Вторая голосом')
+    expect(queued.queuedHint).toContain('очереди')
+  })
+
   it('auto-dispatches to planning when confirm is disabled', () => {
     const listening = voiceReducer(initialVoiceState, { type: 'START_LISTENING', at: 1 })
     const done = voiceReducer(listening, {

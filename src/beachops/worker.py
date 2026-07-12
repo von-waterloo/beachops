@@ -168,8 +168,33 @@ async def execute_job(ctx: dict, job_id: str) -> None:
         and active.cursor_run_id
         and active.finalized_at is None
     ):
-        await app.arq.enqueue_job("execute_job", job_id, _defer_by=5)
-        return
+        # Zombie RUNNING jobs (Cursor agent gone) block the whole queue forever.
+        # Fail stale blockers so deferred queued jobs can start.
+        stamp = active.updated_at or active.created_at
+        age = datetime.now(timezone.utc) - stamp if stamp is not None else timedelta(0)
+        if age >= timedelta(minutes=20):
+            logger.warning(
+                "Failing stale active job %s (age=%ss) to unblock queue",
+                active.id,
+                int(age.total_seconds()),
+                extra={
+                    "job_id": str(active.id),
+                    "action": "worker_zombie_timeout",
+                    "actor_id": job.actor_id,
+                },
+            )
+            await app.jobs.transition(
+                active.actor_id,
+                active.id,
+                from_statuses=[JobStatus.RUNNING, JobStatus.PLANNING],
+                to_status=JobStatus.FAILED,
+                event_type="worker.zombie_timeout",
+                details={"reason": "stale active run blocked queue"},
+            )
+            await app.jobs.mark_finalized(active.actor_id, active.id)
+        else:
+            await app.arq.enqueue_job("execute_job", job_id, _defer_by=5)
+            return
 
     lock = app.redis.lock(
         f"beachops:actor-lock:{job.actor_id}",

@@ -448,6 +448,15 @@ export function useVoiceSession() {
     }
   }, [connect, discardShortCapture, sendJson, state.connected, stopCapture, stopPlayback])
 
+  const cancelListening = useCallback(() => {
+    // Discard audio — do not commit / send transcript to the agent.
+    stopCapture(false)
+    sendJson({ type: 'session.cancel' })
+    sendJson({ type: 'barge_in' })
+    dispatch({ type: 'CANCEL' })
+    feedback('warning')
+  }, [sendJson, stopCapture])
+
   const finishListening = useCallback(() => {
     if (startingCaptureRef.current) return
     const elapsed = Date.now() - recordingStartedAtRef.current
@@ -510,6 +519,7 @@ export function useVoiceSession() {
     setMode,
     startListening,
     finishListening,
+    cancelListening,
     cancel,
     confirmPlan,
     submitComposer,

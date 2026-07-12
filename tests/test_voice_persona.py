@@ -41,11 +41,9 @@ def test_stt_prompt_biases_beachops_terms() -> None:
     assert "Keywords:" in BEACHOPS_STT_PROMPT
 
 
-def test_spoken_ack_is_human_without_metrics() -> None:
-    assert spoken_ack() == "Ок, беру."
-    assert spoken_ack(runtime="cloud", room="В очереди ещё 1.") == "Ок, беру."
-    assert "Windows" not in spoken_ack(runtime="windows")
-    assert "Cloud" not in spoken_ack(runtime="cloud")
+def test_spoken_ack_disabled() -> None:
+    assert spoken_ack() == ""
+    assert spoken_ack(runtime="cloud", room="В очереди ещё 1.") == ""
 
 
 def test_milestone_line_only_approval() -> None:
