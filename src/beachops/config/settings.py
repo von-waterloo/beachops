@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     tg_bot_username: str = Field(default="", alias="TG_BOT_USERNAME")
     cursor_api_key: str = Field(alias="CURSOR_API_KEY")
     cursor_api_key_mt2: str = Field(default="", alias="CURSOR_API_KEY_MT2")
+    cursor_api_key_mt3: str = Field(default="", alias="CURSOR_API_KEY_MT3")
     openai_api_key: str = Field(alias="OPENAI_API_KEY")
     whitelist_user_ids: Annotated[list[int], NoDecode] = Field(
         default_factory=list, alias="WHITELIST_USER_IDS"
@@ -302,11 +303,15 @@ class Settings(BaseSettings):
     def has_cursor_token(self, token_key: str) -> bool:
         if token_key == CursorTokenKey.MT2.value:
             return bool(self.cursor_api_key_mt2.strip())
+        if token_key == CursorTokenKey.MT3.value:
+            return bool(self.cursor_api_key_mt3.strip())
         return bool(self.cursor_api_key.strip())
 
     def cursor_api_key_for(self, token_key: str) -> str:
         if token_key == CursorTokenKey.MT2.value and self.cursor_api_key_mt2.strip():
             return self.cursor_api_key_mt2
+        if token_key == CursorTokenKey.MT3.value and self.cursor_api_key_mt3.strip():
+            return self.cursor_api_key_mt3
         return self.cursor_api_key
 
 

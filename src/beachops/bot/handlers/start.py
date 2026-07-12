@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from beachops.app_context import AppContext
-from beachops.services.cursor_token_ui import current_token_key_for_ui
+from beachops.services.cursor_token_ui import token_ui_pair
 from beachops.services.inline_keyboards import welcome_keyboard
 from beachops.services.ui_copy import build_welcome_message
 
@@ -29,7 +29,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     repos = await app.repos.list_repos(user.id)
     is_admin = app.settings.is_admin(user.id)
     slot = await app.agent_slots.ensure_default_slot(user.id)
-    token_key = await current_token_key_for_ui(app, user.id)
+    token_key, available_tokens = await token_ui_pair(app, user.id)
     webapp_url = _webapp_url(app)
 
     text = build_welcome_message(
@@ -52,6 +52,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 current=mode,
                 current_model_key=model_key,
                 current_token_key=token_key,
+                available_token_keys=available_tokens,
                 webapp_url=webapp_url or None,
             ),
         )

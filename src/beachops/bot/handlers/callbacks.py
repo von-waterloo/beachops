@@ -16,7 +16,7 @@ from beachops.domain.models import UserMode
 from beachops.domain.security import ApprovalDecision, ApprovalKind, JobStatus, Role
 from beachops.services.approval_actions import approve_job, reject_job, request_revision
 from beachops.services.cancel_service import cancel_user_work, cancel_was_successful
-from beachops.services.cursor_token_ui import current_token_key_for_ui
+from beachops.services.cursor_token_ui import available_token_keys_for_ui, token_ui_pair
 from beachops.services.forward_context import clear_forward_context, get_forward_context_buffer
 from beachops.services.prompt_coalesce import clear_prompt_coalesce, get_prompt_coalesce
 from beachops.bot.handlers.agent_list_ui import (
@@ -476,7 +476,7 @@ async def _handle_cancel(query, context, app: AppContext, user_id: int) -> None:
         model_key = await app.users.get_cursor_model_key(
             user_id, default=app.settings.cursor_model
         )
-        token_key = await current_token_key_for_ui(app, user_id)
+        token_key, available_tokens = await token_ui_pair(app, user_id)
         repos = await app.repos.list_repos(user_id)
         try:
             await query.message.edit_reply_markup(
@@ -486,6 +486,7 @@ async def _handle_cancel(query, context, app: AppContext, user_id: int) -> None:
                     current_model_key=model_key,
                     has_repos=bool(repos),
                     current_token_key=token_key,
+                    available_token_keys=available_tokens,
                 ),
             )
         except BadRequest:
@@ -760,7 +761,7 @@ async def _handle_agent_new(query, app: AppContext, user_id: int) -> None:
     model_key = await app.users.get_cursor_model_key(
         user_id, default=app.settings.cursor_model
     )
-    token_key = await current_token_key_for_ui(app, user_id)
+    token_key, available_tokens = await token_ui_pair(app, user_id)
     repos = await app.repos.list_repos(user_id)
     await query.message.reply_text(
         agent_created(slot.label),
@@ -770,6 +771,7 @@ async def _handle_agent_new(query, app: AppContext, user_id: int) -> None:
             current_model_key=model_key,
             has_repos=bool(repos),
             current_token_key=token_key,
+            available_token_keys=available_tokens,
         ),
     )
 
@@ -803,7 +805,7 @@ async def _handle_mode_select(query, app: AppContext, user_id: int, mode_value: 
     toast = mode_set_next(mode) if has_work else mode_set(mode)
     await query.answer(toast)
 
-    token_key = await current_token_key_for_ui(app, user_id)
+    token_key, available_tokens = await token_ui_pair(app, user_id)
     if active_run and active_run.message_id == query.message.message_id:
         markup = run_activity_keyboard(
             is_admin=is_admin,
@@ -819,6 +821,7 @@ async def _handle_mode_select(query, app: AppContext, user_id: int, mode_value: 
             current_model_key=model_key,
             has_repos=bool(repos),
             current_token_key=token_key,
+            available_token_keys=available_tokens,
         )
     await query.message.edit_reply_markup(reply_markup=markup)
 
@@ -845,7 +848,7 @@ async def _handle_model_select(query, app: AppContext, user_id: int, model_value
     toast = model_set_next(model_key) if has_work else model_set(model_key)
     await query.answer(toast)
 
-    token_key = await current_token_key_for_ui(app, user_id)
+    token_key, available_tokens = await token_ui_pair(app, user_id)
     if active_run and active_run.message_id == query.message.message_id:
         markup = run_activity_keyboard(
             is_admin=is_admin,
@@ -861,6 +864,7 @@ async def _handle_model_select(query, app: AppContext, user_id: int, model_value
             current_model_key=model_key,
             has_repos=bool(repos),
             current_token_key=token_key,
+            available_token_keys=available_tokens,
         )
     await query.message.edit_reply_markup(reply_markup=markup)
 
@@ -901,12 +905,14 @@ async def _handle_token_select(query, app: AppContext, user_id: int, token_value
         )
     else:
         repos = await app.repos.list_repos(user_id)
+        available_tokens = available_token_keys_for_ui(app.settings)
         markup = status_reply_markup(
             is_admin=is_admin,
             current=mode,
             current_model_key=model_key,
             has_repos=bool(repos),
             current_token_key=token_value,
+            available_token_keys=available_tokens,
         )
     try:
         await query.message.edit_reply_markup(reply_markup=markup)

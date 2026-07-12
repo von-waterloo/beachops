@@ -147,10 +147,10 @@ GitHub URL). Непустой allowlist по-прежнему ограничив
 Финальный результат длиннее ~3000 символов дополнительно отправляется полным
 `.md`-файлом: Telegram-сообщение с шапкой и футером ограничено 4096 символами.
 
-### Токены Cursor (mt / mt2)
+### Токены Cursor (mt / mt2 / mt3)
 
-- Два API key: `CURSOR_API_KEY` (`mt`) и опциональный `CURSOR_API_KEY_MT2` (`mt2`); ключ передаётся per-run в `run_prompt(api_key=...)` / `cancel_run(api_key=...)`.
-- Выбор пользователя — `users.cursor_token_key` (кнопки 🔑 mt / 🔑 mt2 в клавиатурах, только если mt2 настроен).
+- API keys: `CURSOR_API_KEY` (`mt`), опционально `CURSOR_API_KEY_MT2` (`mt2`) и `CURSOR_API_KEY_MT3` (`mt3`); ключ передаётся per-run в `run_prompt(api_key=...)` / `cancel_run(api_key=...)`.
+- Выбор пользователя — `users.cursor_token_key` (кнопки 🔑 mt / mt2 / mt3, только заполненные; ряд скрыт, если нет ни mt2, ни mt3).
 - При первом run токен **фиксируется на слоте** (`user_agent_slots.cursor_token_key`): агента, созданного под одним ключом, нельзя резюмить другим. Переключение действует для новых агентов (`/new`).
 - Резолв: `run_executor.resolve_run_token_key` — токен слота (если агент уже создан), иначе выбор пользователя; ключи — `domain/cursor_tokens.py`.
 

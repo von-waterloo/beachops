@@ -145,6 +145,7 @@ def test_token_row_shows_mt_and_mt2_with_checkmark() -> None:
         current_model_key=CursorModelKey.FABLE_5.value,
         has_repos=False,
         current_token_key="mt2",
+        available_token_keys=("mt", "mt2"),
     )
     token_buttons = [
         b
@@ -158,6 +159,28 @@ def test_token_row_shows_mt_and_mt2_with_checkmark() -> None:
     ]
     assert token_buttons[0].text == "🔑 mt"
     assert token_buttons[1].text == "✓ 🔑 mt2"
+
+
+def test_token_row_shows_only_configured_keys_including_mt3() -> None:
+    markup = status_reply_markup(
+        is_admin=False,
+        current=UserMode.ASK,
+        current_model_key=CursorModelKey.FABLE_5.value,
+        has_repos=False,
+        current_token_key="mt3",
+        available_token_keys=("mt", "mt3"),
+    )
+    token_buttons = [
+        b
+        for row in markup.inline_keyboard
+        for b in row
+        if (b.callback_data or "").startswith(CB_TOKEN_PREFIX)
+    ]
+    assert [b.callback_data for b in token_buttons] == [
+        f"{CB_TOKEN_PREFIX}mt",
+        f"{CB_TOKEN_PREFIX}mt3",
+    ]
+    assert token_buttons[1].text == "✓ 🔑 mt3"
 
 
 def test_status_nav_keyboard_always_exposes_agents_and_memory() -> None:

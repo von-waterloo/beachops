@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Sequence
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
@@ -50,6 +51,7 @@ class TelegramStreamRenderer:
         mode: UserMode,
         current_model_key: str,
         current_token_key: str | None = None,
+        available_token_keys: Sequence[str] | None = None,
         min_edit_interval: float = 1.0,
         placeholder_animation: AnimatedStatus | None = None,
         thinking_display: ThinkingDisplay = "none",
@@ -61,6 +63,7 @@ class TelegramStreamRenderer:
         self._mode = mode
         self._current_model_key = current_model_key
         self._current_token_key = current_token_key
+        self._available_token_keys = available_token_keys
         self._thinking_display = thinking_display
         self._thinking_preview_chars = thinking_preview_chars
         self._min_edit_interval = min_edit_interval
@@ -220,6 +223,7 @@ class TelegramStreamRenderer:
                     current=self._mode,
                     current_model_key=self._current_model_key,
                     current_token_key=self._current_token_key,
+                    available_token_keys=self._available_token_keys,
                     with_retry=False,
                 )
             else:

@@ -16,7 +16,7 @@ from beachops.domain.cursor_models import resolve_cursor_model
 from beachops.domain.cursor_tokens import normalize_cursor_token_key
 from beachops.domain.models import UserMode
 from beachops.services.agent_slots import RunContext
-from beachops.services.cursor_token_ui import current_token_key_for_ui
+from beachops.services.cursor_token_ui import token_ui_pair
 from beachops.services.cursor_agent import RunOutcome
 from beachops.services.job_queue import RunCancelled, SubmitInfo, SubmitResult
 from beachops.services.stream_bridge import StreamState
@@ -331,7 +331,7 @@ async def _run_job(
     )
     token_key = await resolve_run_token_key(app, user_id, slot)
     api_key = app.settings.cursor_api_key_for(token_key)
-    ui_token_key = await current_token_key_for_ui(app, user_id)
+    ui_token_key, available_tokens = await token_ui_pair(app, user_id)
     message, placeholder_anim = await send_placeholder(
         context,
         user_id,
@@ -349,6 +349,7 @@ async def _run_job(
         mode=mode,
         current_model_key=model_key,
         current_token_key=ui_token_key,
+        available_token_keys=available_tokens,
         placeholder_animation=placeholder_anim,
         thinking_display=thinking_display,
         thinking_preview_chars=preview_chars,
@@ -452,7 +453,7 @@ async def _run_job(
             final_model_key = await app.users.get_cursor_model_key(
                 user_id, default=app.settings.cursor_model
             )
-            final_token_key = await current_token_key_for_ui(app, user_id)
+            final_token_key, available_tokens = await token_ui_pair(app, user_id)
             await renderer.finalize(
                 StreamState(),
                 footer="⏹ Отменено",
@@ -462,6 +463,7 @@ async def _run_job(
                     current_model_key=final_model_key,
                     has_repos=True,
                     current_token_key=final_token_key,
+                    available_token_keys=available_tokens,
                 ),
             )
             return None
@@ -496,7 +498,7 @@ async def _run_job(
         final_model_key = await app.users.get_cursor_model_key(
             user_id, default=app.settings.cursor_model
         )
-        final_token_key = await current_token_key_for_ui(app, user_id)
+        final_token_key, available_tokens = await token_ui_pair(app, user_id)
         await renderer.finalize(
             outcome.state,
             footer=footer,
@@ -505,6 +507,7 @@ async def _run_job(
                 current=final_mode,
                 current_model_key=final_model_key,
                 current_token_key=final_token_key,
+                available_token_keys=available_tokens,
                 with_retry=with_retry,
                 with_build_plan=with_build_plan,
             ),
@@ -531,7 +534,7 @@ async def _run_job(
         final_model_key = await app.users.get_cursor_model_key(
             user_id, default=app.settings.cursor_model
         )
-        final_token_key = await current_token_key_for_ui(app, user_id)
+        final_token_key, available_tokens = await token_ui_pair(app, user_id)
         await renderer.finalize(
             StreamState(),
             footer="⏹ Отменено",
@@ -541,6 +544,7 @@ async def _run_job(
                 current_model_key=final_model_key,
                 has_repos=True,
                 current_token_key=final_token_key,
+                available_token_keys=available_tokens,
             ),
         )
     except Exception:
@@ -549,7 +553,7 @@ async def _run_job(
         final_model_key = await app.users.get_cursor_model_key(
             user_id, default=app.settings.cursor_model
         )
-        final_token_key = await current_token_key_for_ui(app, user_id)
+        final_token_key, available_tokens = await token_ui_pair(app, user_id)
         await renderer.finalize(
             StreamState(),
             footer="⚠️ Внутренняя ошибка бота",
@@ -558,6 +562,7 @@ async def _run_job(
                 current=final_mode,
                 current_model_key=final_model_key,
                 current_token_key=final_token_key,
+                available_token_keys=available_tokens,
                 with_retry=True,
             ),
         )

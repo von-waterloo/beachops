@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from beachops.app_context import AppContext
-from beachops.services.cursor_token_ui import current_token_key_for_ui
+from beachops.services.cursor_token_ui import token_ui_pair
 from beachops.services.forward_context import get_forward_context_buffer
 from beachops.services.inline_keyboards import status_reply_markup
 from beachops.services.ui_copy import build_status_message
@@ -26,7 +26,7 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     is_admin = app.settings.is_admin(user.id)
     forward_count = get_forward_context_buffer(context).item_count(user.id)
     repos = await app.repos.list_repos(user.id)
-    token_key = await current_token_key_for_ui(app, user.id)
+    token_key, available_tokens = await token_ui_pair(app, user.id)
 
     pending = await app.jobs.count_pending_for_actor(user.id)
     active_job = await app.jobs.latest_active_for_actor(user.id)
@@ -55,5 +55,6 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             current_model_key=model_key,
             has_repos=bool(repos),
             current_token_key=token_key,
+            available_token_keys=available_tokens,
         ),
     )

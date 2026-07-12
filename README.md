@@ -41,7 +41,7 @@ Plus: multiple named agent sessions, semantic memory, a real job queue, owner ap
 - Durable jobs (Postgres + Redis/ARQ), cancel, reconciler if Telegram UI lags
 - GitHub repos: open mode or allowlist; soft pin via OAuth in the Mini App
 - Memory: every finished run is indexed; ask/plan recall top-k
-- Models & Cursor accounts (`mt` / `mt2`) switchable from `/status`
+- Models & Cursor accounts (`mt` / `mt2` / `mt3`) switchable from `/status`
 - Owner `/rollback` via GitHub Actions `workflow_dispatch`
 
 ---

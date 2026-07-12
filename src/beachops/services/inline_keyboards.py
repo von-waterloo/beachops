@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 from beachops.domain.cursor_models import CURSOR_MODEL_ORDER, cursor_model_label
-from beachops.domain.cursor_tokens import CURSOR_TOKEN_ORDER, cursor_token_label
+from beachops.domain.cursor_tokens import cursor_token_label
 from beachops.domain.models import AgentSlot, RepoConfig, RunSummary, UserMode
 from beachops.services.agent_slot_naming import slot_button_text
 from beachops.services.ui_copy import MODE_LABELS
@@ -163,17 +165,21 @@ def _model_buttons(*, current_model_key: str) -> list[list[InlineKeyboardButton]
     ]
 
 
-def _token_buttons(*, current_token_key: str | None) -> list[list[InlineKeyboardButton]]:
-    """Token switch row; hidden when the second token is not configured."""
-    if current_token_key is None:
+def _token_buttons(
+    *,
+    current_token_key: str | None,
+    available_token_keys: Sequence[str] | None = None,
+) -> list[list[InlineKeyboardButton]]:
+    """Token switch row; hidden when no extra keys are configured."""
+    if current_token_key is None or not available_token_keys:
         return []
     row: list[InlineKeyboardButton] = []
-    for choice in CURSOR_TOKEN_ORDER:
-        prefix = "✓ " if choice.value == current_token_key else ""
+    for key in available_token_keys:
+        prefix = "✓ " if key == current_token_key else ""
         row.append(
             InlineKeyboardButton(
-                f"{prefix}🔑 {cursor_token_label(choice.value)}",
-                callback_data=f"{CB_TOKEN_PREFIX}{choice.value}",
+                f"{prefix}🔑 {cursor_token_label(key)}",
+                callback_data=f"{CB_TOKEN_PREFIX}{key}",
             )
         )
     return [row]
@@ -186,10 +192,16 @@ def status_reply_markup(
     current_model_key: str,
     has_repos: bool,
     current_token_key: str | None = None,
+    available_token_keys: Sequence[str] | None = None,
 ) -> InlineKeyboardMarkup:
     rows = [_mode_buttons(is_admin=is_admin, current=current)]
     rows.extend(_model_buttons(current_model_key=current_model_key))
-    rows.extend(_token_buttons(current_token_key=current_token_key))
+    rows.extend(
+        _token_buttons(
+            current_token_key=current_token_key,
+            available_token_keys=available_token_keys,
+        )
+    )
     rows.extend(status_nav_keyboard(has_repos=has_repos).inline_keyboard)
     return InlineKeyboardMarkup(rows)
 
@@ -211,12 +223,18 @@ def post_run_keyboard(
     current: UserMode,
     current_model_key: str,
     current_token_key: str | None = None,
+    available_token_keys: Sequence[str] | None = None,
     with_retry: bool = False,
     with_build_plan: bool = False,
 ) -> InlineKeyboardMarkup:
     rows = [_mode_buttons(is_admin=is_admin, current=current)]
     rows.extend(_model_buttons(current_model_key=current_model_key))
-    rows.extend(_token_buttons(current_token_key=current_token_key))
+    rows.extend(
+        _token_buttons(
+            current_token_key=current_token_key,
+            available_token_keys=available_token_keys,
+        )
+    )
     if with_build_plan and is_admin:
         rows.append(
             [InlineKeyboardButton("▶️ Выполнить план", callback_data=CB_BUILD_PLAN)]
@@ -233,6 +251,7 @@ def welcome_keyboard(
     current: UserMode,
     current_model_key: str,
     current_token_key: str | None = None,
+    available_token_keys: Sequence[str] | None = None,
     webapp_url: str | None = None,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
@@ -243,7 +262,12 @@ def welcome_keyboard(
         )
     rows.append(_mode_buttons(is_admin=is_admin, current=current))
     rows.extend(_model_buttons(current_model_key=current_model_key))
-    rows.extend(_token_buttons(current_token_key=current_token_key))
+    rows.extend(
+        _token_buttons(
+            current_token_key=current_token_key,
+            available_token_keys=available_token_keys,
+        )
+    )
     rows.extend(status_nav_keyboard(has_repos=has_repos).inline_keyboard)
     return InlineKeyboardMarkup(rows)
 

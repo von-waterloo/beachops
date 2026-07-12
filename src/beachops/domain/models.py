@@ -32,7 +32,7 @@ class AgentSlot:
     active_run_id: str | None
     is_active: bool
     repo_alias: str | None = None
-    # Токен (mt/mt2), под которым создан агент Cursor; None — run ещё не было.
+    # Токен (mt/mt2/mt3), под которым создан агент Cursor; None — run ещё не было.
     cursor_token_key: str | None = None
     runtime: str = "cloud"
     local_path: str | None = None

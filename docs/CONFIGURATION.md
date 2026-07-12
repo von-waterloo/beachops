@@ -49,7 +49,8 @@ Docker compose переопределяет `DATABASE_URL` на `@postgres:5432`
 | Переменная | По умолчанию | Описание |
 |------------|--------------|----------|
 | `CURSOR_MODEL` | `composer-2.5` | модель Cloud Agent |
-| `CURSOR_API_KEY_MT2` | — (пусто) | второй Cursor API key — переключалка **mt / mt2** в боте; пусто = переключалка скрыта, работает только `CURSOR_API_KEY` |
+| `CURSOR_API_KEY_MT2` | — (пусто) | второй Cursor API key — кнопка **🔑 mt2**; пусто = кнопка скрыта |
+| `CURSOR_API_KEY_MT3` | — (пусто) | третий Cursor API key — кнопка **🔑 mt3**; ряд токенов виден, если задан MT2 и/или MT3 |
 | `WORKSPACE_PATH` | `./data/workspace` | workspace для cursor-sdk bridge; в Docker: `/data/workspace` |
 | `DEFAULT_BRANCH` | `dev` | стартовая ветка; обязана входить в policy |
 | `DEFAULT_REPO_URL` | — (пусто) | seed только если точная пара URL/branch разрешена policy |
