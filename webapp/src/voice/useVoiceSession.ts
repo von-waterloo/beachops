@@ -182,6 +182,7 @@ export function useVoiceSession() {
         })
         break
       case 'caption':
+      case 'job.progress':
         dispatch({ type: 'PROGRESS', caption: event.text ?? event.caption ?? '' })
         break
       case 'audio.ended':
@@ -366,6 +367,8 @@ export function useVoiceSession() {
       if (context.state === 'suspended') {
         await context.resume()
       }
+      // Unlock TTS playback in the same gesture — otherwise Mini App stays mute.
+      void pcmPlayerRef.current?.unlock()
 
       sendJson({ type: 'barge_in' })
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -479,6 +482,7 @@ export function useVoiceSession() {
 
   const confirmPlan = useCallback(() => {
     if (!state.transcript.trim()) return
+    void pcmPlayerRef.current?.unlock()
     sendJson({
       type: 'plan.request',
       transcript: state.transcript.trim(),
@@ -501,6 +505,7 @@ export function useVoiceSession() {
       dispatch({ type: 'FAIL', message: 'Voice service is reconnecting' })
       return false
     }
+    void pcmPlayerRef.current?.unlock()
     sendJson({
       type: 'plan.request',
       transcript: trimmed,

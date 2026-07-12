@@ -112,6 +112,13 @@ describe('PcmStreamPlayer', () => {
     player.stop()
   })
 
+  it('unlock creates a running AudioContext under a user gesture', async () => {
+    const player = new PcmStreamPlayer()
+    await player.unlock()
+    expect(harness.starts).toEqual([])
+    player.stop()
+  })
+
   it('stop clears pending without touching AudioContext', () => {
     const player = new PcmStreamPlayer()
     player.enqueue(new Uint8Array([0, 0, 1, 2]).buffer)

@@ -70,6 +70,14 @@ export class PcmStreamPlayer {
     return this.context
   }
 
+  /**
+   * Create/resume the playback AudioContext inside a user gesture.
+   * Telegram / iOS WebViews keep a late-created context suspended → silent TTS.
+   */
+  async unlock(): Promise<void> {
+    await this.ensureContext()
+  }
+
   enqueue(chunk: ArrayBuffer): void {
     if (!chunk.byteLength) return
     const merged = new Uint8Array(this.pending.length + chunk.byteLength)

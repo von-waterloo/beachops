@@ -22,6 +22,7 @@ import type { Event, Job } from '../types/api'
 import { runtimeLabel, statusLabel } from '../lib/uiCopy'
 
 const CANCEL_SWIPE_PX = 72
+const MODEL_PREVIEW_COUNT = 4
 
 const phaseLabels: Record<VoicePhase, string> = {
   idle: 'На посту',
@@ -76,6 +77,7 @@ export function VoiceConsole({
   const [pulse, setPulse] = useState(0.2)
   const [selectedModel, setSelectedModel] = useState(cursorModelKey ?? '')
   const [modelBusy, setModelBusy] = useState(false)
+  const [modelsExpanded, setModelsExpanded] = useState(false)
   const [rippleKey, setRippleKey] = useState(0)
   const [agentMode, setAgentMode] = useState<VoiceAgentMode>('ask')
   const [dragX, setDragX] = useState(0)
@@ -87,6 +89,12 @@ export function VoiceConsole({
   useEffect(() => {
     if (cursorModelKey) setSelectedModel(cursorModelKey)
   }, [cursorModelKey])
+
+  useEffect(() => {
+    if (!selectedModel || models.length <= MODEL_PREVIEW_COUNT) return
+    const index = models.findIndex((model) => model.key === selectedModel)
+    if (index >= MODEL_PREVIEW_COUNT) setModelsExpanded(true)
+  }, [models, selectedModel])
 
   useEffect(() => {
     if (state.phase !== 'listening') {
@@ -236,7 +244,7 @@ export function VoiceConsole({
 
       {models.length > 0 && (
         <div className="model-picker" role="group" aria-label="Модель Cursor">
-          {models.map((model) => {
+          {(modelsExpanded ? models : models.slice(0, MODEL_PREVIEW_COUNT)).map((model) => {
             const selected = model.key === selectedModel
             return (
               <button
@@ -255,6 +263,19 @@ export function VoiceConsole({
               </button>
             )
           })}
+          {models.length > MODEL_PREVIEW_COUNT && (
+            <button
+              type="button"
+              className="model-chip model-chip-more"
+              aria-expanded={modelsExpanded}
+              onClick={() => {
+                feedback('select')
+                setModelsExpanded((open) => !open)
+              }}
+            >
+              <span>{modelsExpanded ? 'Свернуть' : `Ещё ${models.length - MODEL_PREVIEW_COUNT}`}</span>
+            </button>
+          )}
         </div>
       )}
 

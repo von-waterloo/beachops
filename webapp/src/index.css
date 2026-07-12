@@ -266,6 +266,12 @@ main {
   cursor: wait;
 }
 
+.model-chip-more {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-weight: 550;
+}
+
 .panel-page {
   min-height: calc(100svh - 160px);
 }
