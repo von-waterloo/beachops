@@ -1,14 +1,12 @@
 import { motion } from 'motion/react'
-import { CloudLightning, Layers3, MonitorSmartphone } from 'lucide-react'
+import { CloudLightning, Layers3 } from 'lucide-react'
 import type { RuntimeFilter } from '../lib/runtimeFilter'
 import { feedback } from '../lib/feedback'
 
 interface Props {
   running: number
   pending: number
-  workersOnline: number
   cloudJobs: number
-  windowsJobs: number
   runtimeFilter: RuntimeFilter
   onSelectFilter: (filter: RuntimeFilter, tabHint?: 'active' | 'voice' | 'approvals') => void
 }
@@ -16,9 +14,7 @@ interface Props {
 export function ControlRoomHero({
   running,
   pending,
-  workersOnline,
   cloudJobs,
-  windowsJobs,
   runtimeFilter,
   onSelectFilter,
 }: Props) {
@@ -36,7 +32,7 @@ export function ControlRoomHero({
       />
       <div className="control-hero-copy">
         <p className="eyebrow">Ваши агенты</p>
-        <h1>Cloud и Windows — все рядом</h1>
+        <h1>Cursor Cloud — один пульт</h1>
         <p>Жмите метрики — откроется нужный срез.</p>
       </div>
       <div className="control-metrics" role="toolbar" aria-label="Фильтр агентов">
@@ -58,17 +54,6 @@ export function ControlRoomHero({
           <Layers3 size={16} />
           <strong>{pending}</strong>
           <span>Очередь</span>
-        </button>
-        <button
-          type="button"
-          className={runtimeFilter === 'windows' ? 'live' : ''}
-          onClick={() => pick('windows')}
-          aria-pressed={runtimeFilter === 'windows'}
-          title={workersOnline ? `${workersOnline} Windows-воркер онлайн` : 'Нет Windows-воркеров'}
-        >
-          <MonitorSmartphone size={16} />
-          <strong>{windowsJobs}</strong>
-          <span>Windows</span>
         </button>
         <button
           type="button"

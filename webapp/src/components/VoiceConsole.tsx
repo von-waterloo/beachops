@@ -7,7 +7,6 @@ import {
   Expand,
   Mic,
   MicOff,
-  Monitor,
   RotateCcw,
   Send,
   Square,
@@ -177,7 +176,7 @@ export function VoiceConsole({
 
         {activeJob && (
           <div className="job-chip" role="status">
-            {activeJob.runtime === 'windows' ? <Monitor size={12} /> : <Cloud size={12} />}
+            <Cloud size={12} />
             <span>{activeJob.title.slice(0, 42)}</span>
           </div>
         )}

@@ -405,7 +405,7 @@ def mode_set_next(mode: UserMode) -> str:
 def dashboard_message() -> str:
     return (
         "🎛 BeachOps · ваши агенты\n\n"
-        "Голос, Cloud и Windows, очередь и решения — "
+        "Голос, Cloud-агенты, очередь и решения — "
         "в одном Mini App."
     )
 

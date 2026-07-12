@@ -9,11 +9,9 @@ import {
   Cloud,
   ExternalLink,
   GitBranch,
-  HeartPulse,
   Loader2,
   LockKeyhole,
   LogIn,
-  Monitor,
   Plus,
   Radio,
   RefreshCw,
@@ -29,7 +27,6 @@ import type {
   DashboardSnapshot,
   Event,
   Job,
-  WorkerNode,
 } from '../types/api'
 import { isActiveJobStatus } from '../types/api'
 import { feedback } from '../lib/feedback'
@@ -454,7 +451,6 @@ function AgentCard({
   selected?: boolean
   onSelect?: () => void
 }) {
-  const windows = false
   const interactive = Boolean(onSelect)
   const openCursor = (event: React.MouseEvent) => {
     event.stopPropagation()
@@ -464,7 +460,7 @@ function AgentCard({
   }
   return (
     <motion.article
-      className={`agent-card runtime-${windows ? 'windows' : 'cloud'}${selected ? ' is-selected' : ''}${interactive ? ' is-clickable' : ''}`}
+      className={`agent-card runtime-cloud${selected ? ' is-selected' : ''}${interactive ? ' is-clickable' : ''}`}
       layout
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
@@ -481,7 +477,7 @@ function AgentCard({
       } : undefined}
     >
       <div className="agent-mark">
-        {windows ? <Monitor size={18} /> : <Cloud size={18} />}
+        <Cloud size={18} />
       </div>
       <div className="agent-body">
         <div className="card-topline">
@@ -611,48 +607,6 @@ function statusProgress(status: Job['status']): number {
     default:
       return 18
   }
-}
-
-function WorkerCard({
-  worker,
-  onSelect,
-}: {
-  worker: WorkerNode
-  onSelect?: () => void
-}) {
-  const healthy = worker.status === 'online'
-  const interactive = Boolean(onSelect)
-  return (
-    <motion.article
-      className={`worker-card ${healthy ? 'is-online' : 'is-offline'}${interactive ? ' is-clickable' : ''}`}
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      role={interactive ? 'button' : undefined}
-      tabIndex={interactive ? 0 : undefined}
-      onClick={onSelect}
-      onKeyDown={interactive ? (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          onSelect?.()
-        }
-      } : undefined}
-    >
-      <div className="worker-mark">
-        <HeartPulse size={16} />
-      </div>
-      <div>
-        <h2>{worker.hostname}</h2>
-        <p>
-          {worker.platform}
-          {' · '}
-          {relativeTimeRu(worker.lastHeartbeatAt)}
-        </p>
-      </div>
-      <span className={`repo-state ${healthy ? 'ready' : 'offline'}`}>
-        {statusLabel(worker.status)}
-      </span>
-    </motion.article>
-  )
 }
 
 function ApprovalActions({
@@ -1026,11 +980,9 @@ function Overview({
   const queuedCount = data.queue?.queued ?? data.queue?.pending ?? 0
   const blocked = data.queue?.blocked ?? 0
   const planeTitle =
-    runtimeFilter === 'windows'
-      ? 'Windows'
-      : runtimeFilter === 'cloud'
-        ? 'Cloud'
-        : 'Cloud и Windows'
+    runtimeFilter === 'cloud'
+      ? 'Cloud'
+      : 'Cloud-агенты'
 
   return (
     <div className="control-feed">
@@ -1075,11 +1027,9 @@ function Overview({
             icon={<Activity />}
             title="Тихий горизонт"
             copy={
-              runtimeFilter === 'windows'
-                ? 'Нет активных Windows-задач. Переключитесь на Cloud или Все.'
-                : runtimeFilter === 'cloud'
-                  ? 'Нет активных Cloud-задач. Переключитесь на Windows или Все.'
-                  : 'Сейчас нет активных агентов Cloud или Windows.'
+              runtimeFilter === 'cloud'
+                ? 'Нет активных Cloud-задач. Переключитесь на «Все».'
+                : 'Сейчас нет активных Cloud-агентов.'
             }
           />
         )}
@@ -1164,30 +1114,6 @@ function Overview({
           onSelectJob={onSelectJob}
           limit={12}
         />
-      </Section>
-
-      <Section eyebrow="Воркеры" title="Здоровье узлов">
-        {data.workers.length ? (
-          <div className="worker-grid">
-            {data.workers.map((worker) => (
-              <WorkerCard
-                key={worker.id}
-                worker={worker}
-                onSelect={
-                  onRuntimeFilterChange
-                    ? () => onRuntimeFilterChange('windows', 'active')
-                    : undefined
-                }
-              />
-            ))}
-          </div>
-        ) : (
-          <Empty
-            icon={<HeartPulse />}
-            title="Только Cloud"
-            copy="Windows-воркеры ещё не стучатся. Cloud-агенты работают как обычно."
-          />
-        )}
       </Section>
     </div>
   )

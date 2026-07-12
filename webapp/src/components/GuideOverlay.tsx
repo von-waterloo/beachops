@@ -1,16 +1,10 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowRight, CircleHelp, Sparkles, X } from 'lucide-react'
-import {
-  GUIDE_TIPS,
-  ONBOARDING_STEPS,
-  TIP_TOPICS,
-  type GuideTip,
-} from '../lib/guideContent'
+import { CircleHelp, X } from 'lucide-react'
+import { GUIDE_TIPS, TIP_TOPICS, type GuideTip } from '../lib/guideContent'
 import { feedback } from '../lib/feedback'
-import { markOnboardingDone } from '../lib/onboarding'
 
-export type GuideMode = 'onboarding' | 'help' | null
+export type GuideMode = 'help' | null
 
 interface GuideOverlayProps {
   mode: GuideMode
@@ -20,12 +14,10 @@ interface GuideOverlayProps {
 const ease = [0.22, 1, 0.36, 1] as const
 
 export function GuideOverlay({ mode, onClose }: GuideOverlayProps) {
-  const [step, setStep] = useState(0)
   const [topic, setTopic] = useState('Все')
   const [spotlight, setSpotlight] = useState(0)
 
   useEffect(() => {
-    if (mode === 'onboarding') setStep(0)
     if (mode === 'help') {
       setTopic('Все')
       setSpotlight(0)
@@ -40,9 +32,8 @@ export function GuideOverlay({ mode, onClose }: GuideOverlayProps) {
     return () => window.clearInterval(timer)
   }, [mode])
 
-  const finish = (completed: boolean) => {
-    if (completed) markOnboardingDone()
-    feedback(completed ? 'success' : 'tap')
+  const close = () => {
+    feedback('tap')
     onClose()
   }
 
@@ -55,20 +46,20 @@ export function GuideOverlay({ mode, onClose }: GuideOverlayProps) {
 
   return (
     <AnimatePresence>
-      {mode && (
+      {mode === 'help' && (
         <motion.div
           className="guide-scrim"
           role="dialog"
           aria-modal="true"
-          aria-label={mode === 'onboarding' ? 'Онбординг BeachOps' : 'Справка BeachOps'}
+          aria-label="Справка BeachOps"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.22 }}
-          onClick={() => finish(mode === 'onboarding')}
+          onClick={close}
         >
           <motion.div
-            className={`guide-sheet ${mode === 'onboarding' ? 'is-onboarding' : 'is-help'}`}
+            className="guide-sheet is-help"
             initial={{ y: 36, opacity: 0.85 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 24, opacity: 0 }}
@@ -78,126 +69,32 @@ export function GuideOverlay({ mode, onClose }: GuideOverlayProps) {
             <div className="guide-sheet-handle" aria-hidden="true" />
             <header className="guide-sheet-head">
               <div>
-                <p className="eyebrow">
-                  {mode === 'onboarding' ? 'Знакомство' : 'Справка'}
-                </p>
-                <h2>
-                  {mode === 'onboarding'
-                    ? 'Как устроен пульт'
-                    : 'Типсы и быстрые ответы'}
-                </h2>
+                <p className="eyebrow">Справка</p>
+                <h2>Типсы и быстрые ответы</h2>
               </div>
               <button
                 type="button"
                 className="auth-icon-button"
                 aria-label="Закрыть"
-                onClick={() => finish(mode === 'onboarding')}
+                onClick={close}
               >
                 <X size={17} />
               </button>
             </header>
 
-            {mode === 'onboarding' ? (
-              <OnboardingBody
-                step={step}
-                onStep={setStep}
-                onDone={() => finish(true)}
-                onSkip={() => finish(true)}
-              />
-            ) : (
-              <HelpBody
-                featured={featured}
-                tips={tips}
-                topic={topic}
-                onTopic={(next) => {
-                  feedback('select')
-                  setTopic(next)
-                }}
-              />
-            )}
+            <HelpBody
+              featured={featured}
+              tips={tips}
+              topic={topic}
+              onTopic={(next) => {
+                feedback('select')
+                setTopic(next)
+              }}
+            />
           </motion.div>
         </motion.div>
       )}
     </AnimatePresence>
-  )
-}
-
-function OnboardingBody({
-  step,
-  onStep,
-  onDone,
-  onSkip,
-}: {
-  step: number
-  onStep: (index: number) => void
-  onDone: () => void
-  onSkip: () => void
-}) {
-  const current = ONBOARDING_STEPS[step]
-  const last = step >= ONBOARDING_STEPS.length - 1
-
-  return (
-    <div className="guide-onboarding">
-      <div className="guide-progress" aria-hidden="true">
-        {ONBOARDING_STEPS.map((item, index) => (
-          <span
-            key={item.id}
-            className={index === step ? 'active' : index < step ? 'done' : ''}
-          />
-        ))}
-      </div>
-
-      <AnimatePresence mode="wait">
-        <motion.article
-          key={current.id}
-          className="guide-step"
-          initial={{ opacity: 0, x: 18 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -14 }}
-          transition={{ duration: 0.3, ease }}
-        >
-          {step === 0 ? (
-            <div className="guide-brand-mark" aria-hidden="true">
-              <span>B</span>
-              <motion.i
-                animate={{ scale: [1, 1.08, 1], opacity: [0.45, 0.8, 0.45] }}
-                transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-              />
-            </div>
-          ) : (
-            <motion.div
-              className="guide-step-accent"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
-              <Sparkles size={14} />
-              {current.accent}
-            </motion.div>
-          )}
-          <p className="eyebrow">{current.eyebrow}</p>
-          <h3>{current.title}</h3>
-          <p>{current.body}</p>
-        </motion.article>
-      </AnimatePresence>
-
-      <div className="guide-actions">
-        <button type="button" className="guide-ghost" onClick={onSkip}>
-          Пропустить
-        </button>
-        <button
-          type="button"
-          className="guide-primary"
-          onClick={() => {
-            feedback('tap')
-            if (last) onDone()
-            else onStep(step + 1)
-          }}
-        >
-          {last ? 'В пульт' : 'Дальше'}
-          <ArrowRight size={16} />
-        </button>
-      </div>
-    </div>
   )
 }
 

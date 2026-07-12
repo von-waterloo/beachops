@@ -1,12 +1,4 @@
-/** In-app onboarding + animated tips for the BeachOps Mini App. */
-
-export interface GuideStep {
-  id: string
-  eyebrow: string
-  title: string
-  body: string
-  accent?: string
-}
+/** In-app help tips for the BeachOps Mini App. */
 
 export interface GuideTip {
   id: string
@@ -14,37 +6,6 @@ export interface GuideTip {
   title: string
   body: string
 }
-
-export const ONBOARDING_STEPS: GuideStep[] = [
-  {
-    id: 'welcome',
-    eyebrow: 'BeachOps',
-    title: 'Пульт ваших Cursor-агентов',
-    body: 'Голос, Cloud и Windows, очередь и решения — в одном экране. Дальше коротко, как этим пользоваться.',
-    accent: 'Старт',
-  },
-  {
-    id: 'modes',
-    eyebrow: 'Режимы',
-    title: 'Спросить · спланировать · сделать',
-    body: 'В Telegram: /ask без правок, /plan и /task с approve, /do сразу в базовую ветку. Здесь — эфир и контроль.',
-    accent: 'Ask / Plan / Do',
-  },
-  {
-    id: 'planes',
-    eyebrow: 'Плоскости',
-    title: 'Cloud рядом с Windows',
-    body: 'Метрики сверху фильтруют срез. Windows-воркер на ПК claim’ит локальные jobs — чип внизу покажет online.',
-    accent: 'Cloud · Windows',
-  },
-  {
-    id: 'flow',
-    eyebrow: 'Поток',
-    title: 'Репо → задача → решение',
-    body: 'Вкладка Репо — URL и ветка. Актив и Лента — очередь. Решения — approve плана. Голос не снимает panic и не approve’ит.',
-    accent: 'Репо · Очередь · Owner',
-  },
-]
 
 export const GUIDE_TIPS: GuideTip[] = [
   {
@@ -63,13 +24,7 @@ export const GUIDE_TIPS: GuideTip[] = [
     id: 'filter-metrics',
     topic: 'Пульт',
     title: 'Жмите метрики',
-    body: 'Cloud / Очередь / Windows / В работе — это фильтры. Откроют нужный срез Актива без лишних табов.',
-  },
-  {
-    id: 'windows-worker',
-    topic: 'Windows',
-    title: 'Локальный агент на ПК',
-    body: 'Установите worker: .\\scripts\\install-windows-worker.ps1. Слоту нужны runtime=windows и local_path к репо.',
+    body: 'Cloud / Очередь / В работе — фильтры сверху. Откроют нужный срез Актива без лишних табов.',
   },
   {
     id: 'slots',
@@ -93,7 +48,7 @@ export const GUIDE_TIPS: GuideTip[] = [
     id: 'passkey',
     topic: 'Доступ',
     title: 'Passkey для браузера',
-    body: 'Owner: откройте /dashboard в Telegram и нажмите отпечаток. Потом вход с Face ID / Windows Hello без Telegram.',
+    body: 'Owner: откройте /dashboard в Telegram и нажмите отпечаток. Потом вход с Face ID / Touch ID без Telegram.',
   },
   {
     id: 'self-deploy',

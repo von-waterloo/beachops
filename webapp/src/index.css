@@ -5,15 +5,15 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  /* War-room palette: deep ink, mint accent, high readable contrast */
-  --canvas: var(--tg-theme-bg-color, #050c0b);
-  --surface: var(--tg-theme-secondary-bg-color, #0c1614);
+  /* Dark-only palette — ignore Telegram light tokens for surfaces. */
+  --canvas: #050c0b;
+  --surface: #0c1614;
   --surface-high: #152420;
-  --surface-glass: rgba(12, 24, 21, 0.82);
-  --ink: var(--tg-theme-text-color, #f2faf6);
-  --muted: var(--tg-theme-hint-color, #9eb5ad);
+  --surface-glass: rgba(12, 24, 21, 0.88);
+  --ink: #f2faf6;
+  --muted: #9eb5ad;
   --accent: var(--tg-theme-button-color, #3dd9a0);
-  --accent-ink: var(--tg-theme-button-text-color, #031a14);
+  --accent-ink: #031a14;
   --cyan: #6ad4e4;
   --sand: #dcc9a8;
   --danger: #ff7a72;
@@ -29,16 +29,7 @@
 }
 
 :root[data-theme="light"] {
-  --canvas: var(--tg-theme-bg-color, #f3f7f4);
-  --surface: var(--tg-theme-secondary-bg-color, #ffffff);
-  --surface-high: #e8f1ec;
-  --surface-glass: rgba(255, 255, 255, 0.88);
-  --ink: var(--tg-theme-text-color, #0e1f19);
-  --muted: var(--tg-theme-hint-color, #3d5249);
-  --line: rgba(14, 55, 42, 0.14);
-  --line-strong: rgba(14, 55, 42, 0.22);
-  --shadow: 0 18px 44px rgba(20, 60, 48, 0.12);
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 * {
@@ -63,8 +54,22 @@ body {
 }
 
 button,
-textarea {
+textarea,
+input {
   font: inherit;
+}
+
+input,
+textarea,
+select {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--muted) 88%, transparent);
 }
 
 button {
@@ -746,7 +751,7 @@ main {
   border: 1px solid var(--line);
   border-radius: 14px;
   color: var(--ink);
-  background: var(--canvas);
+  background: var(--surface-high);
 }
 
 .composer-send {
@@ -779,7 +784,7 @@ main {
   border-radius: 14px;
   padding: 12px;
   color: var(--ink);
-  background: var(--canvas);
+  background: var(--surface-high);
   line-height: 1.5;
 }
 

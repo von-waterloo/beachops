@@ -8,7 +8,6 @@ import {
   GitBranch,
   LayoutDashboard,
   LogOut,
-  Monitor,
   ShieldCheck,
   Siren,
   Volume2,
@@ -23,11 +22,9 @@ import { useAuth } from './hooks/useAuth'
 import { useDashboard } from './hooks/useDashboard'
 import { useJobStream } from './hooks/useJobStream'
 import type { AuthenticatedUser } from './lib/passkeys'
-import { isOnboardingDone } from './lib/onboarding'
 import { roleLabel } from './lib/uiCopy'
 import {
   initializeTelegram,
-  telegramTheme,
 } from './lib/telegram'
 import { feedback, isSoundMuted, setSoundMuted } from './lib/feedback'
 import {
@@ -49,7 +46,6 @@ export default function App() {
 
   useEffect(() => {
     initializeTelegram()
-    document.documentElement.dataset.theme = telegramTheme()
   }, [])
 
   if (!auth.user) {
@@ -92,9 +88,7 @@ function ControlRoom({
   const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>('all')
   const [focusedJobId, setFocusedJobId] = useState<string | null>(null)
   const [cursorModelKey, setCursorModelKey] = useState(user.cursorModelKey ?? '')
-  const [guideMode, setGuideMode] = useState<GuideMode>(() =>
-    isOnboardingDone() ? null : 'onboarding',
-  )
+  const [guideMode, setGuideMode] = useState<GuideMode>(null)
   const dashboard = useDashboard()
   const [now, setNow] = useState(() => Date.now())
   const [soundMuted, setSoundMutedState] = useState(() => isSoundMuted())
@@ -155,16 +149,16 @@ function ControlRoom({
     feedback('select')
   }
 
-  const selectJob = (jobId: string, runtime: string | null | undefined) => {
+  const selectJob = (jobId: string) => {
     setFocusedJobId(jobId)
-    setRuntimeFilter(runtime === 'windows' ? 'windows' : 'cloud')
+    setRuntimeFilter('all')
     setTab('voice')
     feedback('select')
   }
 
   const running = dashboard.data.queue?.running ?? dashboard.data.queue?.active ?? 0
   const pending = dashboard.data.queue?.pending ?? dashboard.data.queue?.queued ?? 0
-  const workersOnline = dashboard.data.workers?.length ?? 0
+  const cloudJobs = activeJobs.length
   const liveEvents = stream.events.length ? stream.events : dashboard.data.events
 
   return (
@@ -240,9 +234,7 @@ function ControlRoom({
       <ControlRoomHero
         running={running}
         pending={pending}
-        workersOnline={workersOnline}
-        cloudJobs={activeJobs.filter((job) => job.runtime !== 'windows').length}
-        windowsJobs={activeJobs.filter((job) => job.runtime === 'windows').length}
+        cloudJobs={cloudJobs}
         runtimeFilter={runtimeFilter}
         onSelectFilter={selectFilter}
       />
@@ -322,7 +314,7 @@ function ControlRoom({
         </AnimatePresence>
       </main>
 
-      <section className="worker-strip" aria-label="Плоскости исполнения">
+      <section className="worker-strip" aria-label="Статус Cloud">
         <button
           type="button"
           className={`worker-chip ${runtimeFilter === 'cloud' ? 'selected' : ''}`}
@@ -330,16 +322,7 @@ function ControlRoom({
           onClick={() => selectFilter('cloud', 'active')}
         >
           <Cloud size={14} />
-          Cloud · в эфире
-        </button>
-        <button
-          type="button"
-          className={`worker-chip ${workersOnline ? 'online' : ''} ${runtimeFilter === 'windows' ? 'selected' : ''}`}
-          aria-pressed={runtimeFilter === 'windows'}
-          onClick={() => selectFilter('windows', 'active')}
-        >
-          <Monitor size={14} />
-          Windows · {workersOnline ? `${workersOnline} онлайн` : 'офлайн'}
+          Cloud · {running > 0 ? 'в эфире' : 'на посту'}
         </button>
         <button
           type="button"
@@ -347,7 +330,7 @@ function ControlRoom({
           aria-pressed={runtimeFilter === 'all'}
           onClick={() => selectFilter('all', 'active')}
         >
-          Все
+          Все задачи
         </button>
         <time className="worker-chip muted">
           {new Date(now).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
