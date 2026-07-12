@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from beachops.app_context import AppContext
@@ -15,6 +14,7 @@ from beachops.services.ops_ssh import OpsSshError, OpsSshService, parse_ops_ssh_
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["mcp"])
+MCP_PROTOCOL_VERSION = "2024-11-05"
 
 TOOLS = [
     {
@@ -141,7 +141,7 @@ async def _call_tool(ops: OpsSshService, name: str, arguments: dict[str, Any]) -
 async def mcp_rpc(
     request: Request,
     context: AppContext = Depends(_require_mcp_auth),
-) -> JSONResponse:
+) -> Response:
     try:
         body = await request.json()
     except Exception as exc:
@@ -150,6 +150,8 @@ async def mcp_rpc(
     if isinstance(body, list):
         # Batch not needed for agents; reject clearly.
         return JSONResponse(_rpc_error(None, -32600, "batch not supported"), status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse(_rpc_error(None, -32600, "invalid request"), status_code=400)
 
     req_id = body.get("id")
     method = str(body.get("method") or "")
@@ -161,14 +163,16 @@ async def mcp_rpc(
             _rpc_result(
                 req_id,
                 {
-                    "protocolVersion": "2024-11-05",
+                    "protocolVersion": MCP_PROTOCOL_VERSION,
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "beachops-ops", "version": "1.0.0"},
                 },
             )
         )
     if method == "notifications/initialized":
-        return JSONResponse({"jsonrpc": "2.0", "result": {}})
+        return Response(status_code=202)
+    if method == "ping":
+        return JSONResponse(_rpc_result(req_id, {}))
     if method == "tools/list":
         return JSONResponse(_rpc_result(req_id, {"tools": TOOLS}))
     if method == "tools/call":
@@ -206,14 +210,26 @@ async def mcp_rpc(
             return JSONResponse(_rpc_error(req_id, -32000, "tool failed"))
 
     if method.startswith("notifications/"):
-        return JSONResponse({"jsonrpc": "2.0", "result": {}})
+        return Response(status_code=202)
 
     return JSONResponse(_rpc_error(req_id, -32601, f"method not found: {method}"))
 
 
 @router.get("/mcp")
 @router.get("/api/mcp")
-async def mcp_probe(
+async def mcp_stream(
+    context: AppContext = Depends(_require_mcp_auth),
+) -> Response:
+    del context
+    # This server is intentionally stateless and returns each JSON-RPC response
+    # on POST. Streamable HTTP requires a server without a standalone SSE
+    # stream to reject GET instead of returning an application/json probe.
+    return Response(status_code=405, headers={"Allow": "POST"})
+
+
+@router.get("/mcp/status")
+@router.get("/api/mcp/status")
+async def mcp_status(
     context: AppContext = Depends(_require_mcp_auth),
 ) -> dict:
     ops = _ops(context)

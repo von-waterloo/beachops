@@ -129,6 +129,9 @@ GitHub URL). Непустой allowlist по-прежнему ограничив
 **HTTP MCP `beachops-ops`:** when `MCP_ENABLED` + `MCP_PUBLIC_URL` + `MCP_BEARER_TOKEN`
 are set, `CursorAgentService` injects `HttpMcpServerConfig` with tools
 `ssh_exec`, `docker_ps`, `docker_logs` (`web/mcp_server.py` → `OpsSshService`).
+Transport is stateless Streamable HTTP (`POST /mcp`); diagnostics use
+authenticated `GET /mcp/status`, while `GET /mcp` returns `405` because the
+server does not expose a standalone SSE stream.
 Ask/plan/do prompts map aliases: `eu` (BeachOps), `mt-dev` (app DEV), `ru` (app PROD).
 Setup guide: [OPS_MCP.md](./OPS_MCP.md). Independent of Cursor key presets (`mt`/`mt2`/`mt3`).
 

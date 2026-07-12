@@ -17,7 +17,10 @@ Tools exposed as MCP server `beachops-ops`:
 | `docker_logs` | Tail logs for one container name |
 
 BeachOps keeps the SSH private key on the API host. Cloud agents only call
-your public HTTPS MCP URL with a bearer token.
+your public HTTPS MCP URL with a bearer token. The MCP endpoint uses stateless
+Streamable HTTP: JSON-RPC requests and responses use `POST /mcp`; `GET /mcp`
+intentionally returns `405` because there is no standalone SSE stream. The
+authenticated diagnostic endpoint is `GET /mcp/status`.
 
 ## Environment
 
@@ -123,7 +126,7 @@ Cursor API key presets (`mt` / `mt2` / `mt3`).
 
 ```bash
 TOKEN=…  # MCP_BEARER_TOKEN
-curl -sS -H "Authorization: Bearer $TOKEN" "$MCP_PUBLIC_URL"
+curl -sS -H "Authorization: Bearer $TOKEN" "$MCP_PUBLIC_URL/status"
 # expect JSON listing enabled tools and host aliases
 
 curl -sS -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
