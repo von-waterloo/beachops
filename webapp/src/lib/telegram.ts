@@ -11,6 +11,9 @@ interface TelegramWebApp {
   ready(): void
   expand(): void
   requestFullscreen?: () => void
+  setHeaderColor?: (color: string) => void
+  setBackgroundColor?: (color: string) => void
+  setBottomBarColor?: (color: string) => void
   HapticFeedback?: TelegramHapticFeedback
 }
 
@@ -22,6 +25,8 @@ declare global {
 
 export const telegram = () => window.Telegram?.WebApp
 
+const DARK_CANVAS = '#050c0b'
+
 /**
  * `telegram-web-app.js` injects a `window.Telegram.WebApp` stub even in a plain
  * browser tab, complete with a no-op `ready()`/`expand()`. The only reliable signal
@@ -32,10 +37,28 @@ export function isTelegramWebApp(): boolean {
   return Boolean(getTelegramInitData())
 }
 
+/** Force BeachOps dark chrome inside Telegram regardless of client colorScheme. */
+export function applyBeachOpsDarkTheme(): void {
+  document.documentElement.dataset.theme = 'dark'
+  document.documentElement.style.colorScheme = 'dark'
+  const meta = document.querySelector('meta[name="theme-color"]')
+  if (meta) meta.setAttribute('content', DARK_CANVAS)
+
+  const app = telegram()
+  try {
+    app?.setHeaderColor?.(DARK_CANVAS)
+    app?.setBackgroundColor?.(DARK_CANVAS)
+    app?.setBottomBarColor?.(DARK_CANVAS)
+  } catch {
+    // Optional Telegram theme APIs.
+  }
+}
+
 export function initializeTelegram(): void {
   const app = telegram()
   app?.ready()
   app?.expand()
+  applyBeachOpsDarkTheme()
 }
 
 export function getTelegramInitData(): string {
@@ -82,8 +105,7 @@ export function haptic(
   else feedback.notificationOccurred(kind)
 }
 
-export function telegramTheme(): 'light' | 'dark' {
-  return telegram()?.colorScheme ?? (
-    window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
-  )
+/** Product is dark-only; kept for callers that still ask. */
+export function telegramTheme(): 'dark' {
+  return 'dark'
 }

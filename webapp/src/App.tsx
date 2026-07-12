@@ -20,7 +20,7 @@ import { useDashboard } from './hooks/useDashboard'
 import { useJobStream } from './hooks/useJobStream'
 import type { AuthenticatedUser } from './lib/auth'
 import { roleLabel } from './lib/uiCopy'
-import { initializeTelegram } from './lib/telegram'
+import { initializeTelegram, applyBeachOpsDarkTheme } from './lib/telegram'
 import { feedback, isSoundMuted, setSoundMuted } from './lib/feedback'
 import { isActiveJobStatus } from './types/api'
 
@@ -37,7 +37,7 @@ export default function App() {
 
   useEffect(() => {
     initializeTelegram()
-    document.documentElement.dataset.theme = 'dark'
+    applyBeachOpsDarkTheme()
   }, [])
 
   if (!auth.user) {
