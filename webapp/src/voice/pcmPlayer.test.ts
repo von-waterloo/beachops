@@ -120,13 +120,16 @@ describe('PcmStreamPlayer', () => {
 
   it('prebuffers until enough bytes arrive, then schedules', async () => {
     const player = new PcmStreamPlayer()
-    // 150 ms frame alone is below the 200 ms prebuffer → nothing scheduled yet.
+    // A single 150 ms frame is below the prebuffer threshold on every device →
+    // nothing scheduled yet.
     player.enqueue(pcmFrame150ms())
     await Promise.resolve()
     await Promise.resolve()
     expect(harness.starts).toEqual([])
 
-    // Second frame crosses the prebuffer threshold → scheduling begins.
+    // Feed enough to cross the largest (low-power) prebuffer threshold too, so
+    // the assertion is deterministic across CI runners and local machines.
+    player.enqueue(pcmFrame150ms())
     player.enqueue(pcmFrame150ms())
     await Promise.resolve()
     await Promise.resolve()
