@@ -17,10 +17,21 @@ def test_ask_mode_prepends_ask_system_prefix() -> None:
     assert text.startswith(ASK_SYSTEM_PREFIX.strip()[:20])
     assert "РЕЖИМ ЧАТ" in text
     assert "репозиторий не меняй" in text
-    assert "2500 символов" in text
+    assert "1500 символов" in text
     assert "не гадай" in text
     assert "Правила write-run" not in text
     assert text.endswith("что такое asyncio?")
+
+
+def test_ask_mode_dev_questionnaire_only_when_needed() -> None:
+    assert "A/B/C" in ASK_SYSTEM_PREFIX
+    assert "прямой ответ" in ASK_SYSTEM_PREFIX.lower()
+
+
+def test_ask_mode_prefers_laconic_chat() -> None:
+    assert "лаконично" in ASK_SYSTEM_PREFIX.lower()
+    assert "Суть сразу" in ASK_SYSTEM_PREFIX or "суть сразу" in ASK_SYSTEM_PREFIX.lower()
+    assert "воды" in ASK_SYSTEM_PREFIX.lower()
 
 
 def test_plan_mode_uses_plan_prefix_without_git_safety() -> None:
@@ -87,22 +98,10 @@ def test_plan_mode_with_memory_block() -> None:
     assert "РЕЖИМ ПЛАН" in text
 
 
-def test_ask_mode_dev_questionnaire_only_when_needed() -> None:
-    assert "A/B/C" in ASK_SYSTEM_PREFIX
-    assert "разработку" in ASK_SYSTEM_PREFIX.lower()
-    assert "прямой ответ" in ASK_SYSTEM_PREFIX.lower()
-
-
 def test_plan_mode_asks_clarifying_questions_with_limit() -> None:
     assert "A/B/C" in PLAN_SYSTEM_PREFIX
     assert "до 3" in PLAN_SYSTEM_PREFIX
     assert "без допросов" in PLAN_SYSTEM_PREFIX
-
-
-def test_ask_mode_prefers_freeform_chat() -> None:
-    assert "как в мессенджере" in ASK_SYSTEM_PREFIX
-    assert "Глубина = сложности" in ASK_SYSTEM_PREFIX
-    assert "отчётных шаблонов" in ASK_SYSTEM_PREFIX
 
 
 def test_protected_default_branches() -> None:

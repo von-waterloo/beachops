@@ -17,7 +17,7 @@ import { feedback } from '../lib/feedback'
 import { setCursorModel, type CursorModelOption } from '../lib/passkeys'
 import { useVoiceSession } from '../voice/useVoiceSession'
 import { SPECTRUM_BAR_COUNT } from '../voice/constants'
-import type { VoicePhase } from '../voice/state'
+import type { VoiceAgentMode, VoicePhase } from '../voice/state'
 import type { Event, Job } from '../types/api'
 import { runtimeLabel, statusLabel } from '../lib/uiCopy'
 
@@ -26,9 +26,20 @@ const phaseLabels: Record<VoicePhase, string> = {
   listening: 'Слушаю',
   transcribing: 'Разбираю',
   confirming: 'Подтверди',
-  planning: 'Строю план',
-  speaking: 'Брифинг',
+  planning: 'В работе',
+  speaking: 'Отвечаю',
   error: 'Сбой',
+}
+
+const modeLabels: Record<'ask' | 'do', string> = {
+  ask: 'Чат',
+  do: 'Действие',
+}
+
+const confirmLabels: Record<VoiceAgentMode, string> = {
+  ask: 'Спросить',
+  plan: 'В план',
+  do: 'Сделать',
 }
 
 const phaseEnergy: Record<VoicePhase, number> = {
@@ -64,6 +75,7 @@ export function VoiceConsole({
   const [selectedModel, setSelectedModel] = useState(cursorModelKey ?? '')
   const [modelBusy, setModelBusy] = useState(false)
   const [rippleKey, setRippleKey] = useState(0)
+  const [agentMode, setAgentMode] = useState<VoiceAgentMode>('ask')
 
   useEffect(() => {
     if (cursorModelKey) setSelectedModel(cursorModelKey)
@@ -72,6 +84,7 @@ export function VoiceConsole({
   const active = ['listening', 'transcribing', 'planning', 'speaking'].includes(state.phase)
   const canStart = ['idle', 'error'].includes(state.phase)
   const showComposer = ['idle', 'error'].includes(state.phase)
+  const modeLocked = ['listening', 'transcribing', 'planning', 'speaking'].includes(state.phase)
 
   useEffect(() => {
     if (reducedMotion || state.phase === 'listening') return undefined
@@ -91,6 +104,19 @@ export function VoiceConsole({
     const eventBit = latestEvent?.summary ? ` · ${latestEvent.summary}` : ''
     return `${runtimeLabel(activeJob.runtime)} · ${statusLabel(activeJob.status)}${eventBit}`
   }, [activeJob, latestEvent])
+
+  const planningLabel = agentMode === 'ask'
+    ? 'Чат'
+    : agentMode === 'do'
+      ? 'Действие'
+      : 'План'
+
+  const handleMode = (mode: 'ask' | 'do') => {
+    if (modeLocked || mode === agentMode) return
+    feedback('select')
+    setAgentMode(mode)
+    voice.setMode(mode)
+  }
 
   const handleOrb = () => {
     feedback('tap')
@@ -182,6 +208,21 @@ export function VoiceConsole({
         )}
 
         <div className="voice-stage-center">
+          <div className="voice-mode-toggle" role="toolbar" aria-label="Режим">
+            {(['ask', 'do'] as const).map((item) => (
+              <button
+                key={item}
+                type="button"
+                className={agentMode === item ? 'selected' : ''}
+                aria-pressed={agentMode === item}
+                disabled={modeLocked}
+                onClick={() => handleMode(item)}
+              >
+                {modeLabels[item]}
+              </button>
+            ))}
+          </div>
+
           <motion.button
             type="button"
             className="orb-button"
@@ -257,7 +298,9 @@ export function VoiceConsole({
               animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
               exit={reducedMotion ? undefined : { opacity: 0, y: -6 }}
             >
-              <strong>{phaseLabels[state.phase]}</strong>
+              <strong>
+                {state.phase === 'planning' ? planningLabel : phaseLabels[state.phase]}
+              </strong>
               <p aria-live="polite">{state.caption}</p>
               {jobCaption && <small className="job-status-caption">{jobCaption}</small>}
             </motion.div>
@@ -286,7 +329,7 @@ export function VoiceConsole({
               type="text"
               value={composer}
               maxLength={4000}
-              placeholder="Коротко. Что сделать."
+              placeholder={agentMode === 'do' ? 'Что сделать в репо.' : 'Короткий вопрос.'}
               onChange={(event) => setComposer(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
@@ -329,7 +372,9 @@ export function VoiceConsole({
               autoFocus
             />
             <p className="security-note">
-              Голос просит план. Approve и panic — только у владельца.
+              {agentMode === 'do'
+                ? 'Режим действия: после отправки агент пойдёт в репо.'
+                : 'Режим чата: ответит коротко, код не меняет.'}
             </p>
             <div className="action-row">
               <button className="secondary-button" type="button" onClick={voice.cancel}>
@@ -341,7 +386,7 @@ export function VoiceConsole({
                 onClick={voice.confirmPlan}
                 disabled={!state.transcript.trim()}
               >
-                <Send size={17} /> В план
+                <Send size={17} /> {confirmLabels[agentMode]}
               </button>
             </div>
           </motion.div>
@@ -363,20 +408,19 @@ export function VoiceConsole({
         </div>
       )}
 
-      {state.phase === 'planning' && (
+      {state.phase === 'planning' && agentMode === 'do' && (
         <div className="plan-safety" role="status">
-          <Check size={17} /> Только план. Писать в репо не буду, пока не прикажешь.
+          <Check size={17} /> Действие: пишу и пушу в выбранную базу.
         </div>
       )}
 
       <div className="voice-footnote">
         {state.phase === 'speaking'
-          ? <><Mic size={14} /> Кнопка — прервать брифинг</>
+          ? <><Mic size={14} /> Кнопка — прервать ответ</>
           : <><MicOff size={14} /> Микрофон молчит, пока не коснёшься кнопки</>}
       </div>
       <p className="telegram-workflow-hint">
-        Telegram-бот как раньше: напишите задачу, перешлите сообщение или голос
-        в чат с ботом — /ask /plan /do /task. Mini App — панель и голос.
+        Ответ стримится и в Mini App, и в Telegram-боте — один поток.
       </p>
     </section>
   )

@@ -688,6 +688,7 @@ def create_app() -> FastAPI:
             actor_id=principal.user_id,
             run_context=run_context,
             role=role,
+            channel="web",
         )
         prompt = with_situation(user_prompt, situation)
         key = idempotency_key or f"web:{principal.user_id}:{uuid4()}"
@@ -700,6 +701,7 @@ def create_app() -> FastAPI:
             idempotency_key=key,
             display_summary=user_prompt,
             images=image_payload or None,
+            channel="web",
         )
         await context.hot_cache.bump_dashboard_generation()
         return {
@@ -1022,7 +1024,7 @@ def create_app() -> FastAPI:
         )
         result_tasks: set[asyncio.Task] = set()
 
-        async def on_plan_request(transcript: str, mode: UserMode = UserMode.PLAN) -> str:
+        async def on_plan_request(transcript: str, mode: UserMode = UserMode.ASK) -> str:
             run_context = await context.agent_slots.get_run_context(principal.user_id)
             if run_context is None:
                 logger.warning(

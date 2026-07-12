@@ -56,9 +56,20 @@ _TOOL_NAME_LABEL: dict[str, str] = {
 }
 
 
-def build_run_header(mode: UserMode, repo_alias: str) -> str:
+def build_run_header(
+    mode: UserMode,
+    repo_alias: str,
+    *,
+    channel: str | None = None,
+) -> str:
     mode_label = MODE_LABELS.get(mode.value, mode.value)
-    return f"Режим · {mode_label}\nРепо · {repo_alias}"
+    lines = [f"Режим · {mode_label}", f"Репо · {repo_alias}"]
+    channel_key = (channel or "").strip().lower()
+    if channel_key == "voice":
+        lines.append("Канал · голос")
+    elif channel_key == "web":
+        lines.append("Канал · Mini App")
+    return "\n".join(lines)
 
 
 def build_run_footer(

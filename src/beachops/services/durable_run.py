@@ -61,7 +61,7 @@ async def launch_durable_cloud_job(
         is_admin=is_admin,
     )
     del thinking_display  # used by observer later
-    header = build_run_header(mode, repo.alias)
+    header = build_run_header(mode, repo.alias, channel=channel)
     model_key, cursor_model = await resolve_user_model_selection(app, actor_id)
     token_key = await resolve_run_token_key(app, actor_id, slot)
     api_key = app.settings.cursor_api_key_for(token_key)

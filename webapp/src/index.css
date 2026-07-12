@@ -353,6 +353,43 @@ main {
   pointer-events: none;
 }
 
+.voice-mode-toggle {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 80%, transparent);
+  background: color-mix(in srgb, var(--surface-high) 78%, transparent);
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+  z-index: 2;
+}
+
+.voice-mode-toggle button {
+  min-height: 32px;
+  padding: 5px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: color 160ms var(--ease-out), background 160ms var(--ease-out);
+}
+
+.voice-mode-toggle button.selected {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-high));
+}
+
+.voice-mode-toggle button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .voice-stage-footer {
   position: absolute;
   left: 0;
@@ -2509,14 +2546,16 @@ button.worker-chip:hover {
 }
 
 .runtime-toggle,
-.prompt-mode-row {
+.prompt-mode-row,
+.composer-mode-row {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
 }
 
 .runtime-toggle button,
-.prompt-mode-row button {
+.prompt-mode-row button,
+.composer-mode-row button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2534,20 +2573,23 @@ button.worker-chip:hover {
 }
 
 .runtime-toggle button:hover,
-.prompt-mode-row button:hover {
+.prompt-mode-row button:hover,
+.composer-mode-row button:hover {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
   color: var(--ink);
 }
 
 .runtime-toggle button.selected,
-.prompt-mode-row button.selected {
+.prompt-mode-row button.selected,
+.composer-mode-row button.selected {
   color: var(--ink);
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
   background: color-mix(in srgb, var(--accent) 14%, var(--surface-high));
 }
 
 .runtime-toggle button:disabled,
-.prompt-mode-row button:disabled {
+.prompt-mode-row button:disabled,
+.composer-mode-row button:disabled {
   opacity: 0.45;
   cursor: default;
 }

@@ -11,7 +11,11 @@ import {
 } from './reconnect'
 import { SPECTRUM_BAR_COUNT } from './constants'
 import { PcmStreamPlayer } from './pcmPlayer'
-import { initialVoiceState, voiceReducer } from './state'
+import {
+  initialVoiceState,
+  voiceReducer,
+  type VoiceAgentMode,
+} from './state'
 
 const MAX_RECORDING_MS = 60_000
 const PING_INTERVAL_MS = 25_000
@@ -32,6 +36,10 @@ interface VoiceEvent {
   caption?: string
   message?: string
   code?: string
+  kind?: 'milestone' | 'final'
+  voiceRequireConfirm?: boolean
+  mode?: string
+  jobId?: string
 }
 
 const VOICE_ERROR_MESSAGES: Record<string, string> = {
@@ -87,6 +95,8 @@ export function useVoiceSession() {
   const pingTimerRef = useRef<number | undefined>(undefined)
   const intentionallyClosedRef = useRef(false)
   const fatalFailureRef = useRef(false)
+  const modeRef = useRef<VoiceAgentMode>('ask')
+  const requireConfirmRef = useRef(false)
   const pcmPlayerRef = useRef<PcmStreamPlayer | null>(null)
 
   useEffect(() => {
@@ -127,28 +137,52 @@ export function useVoiceSession() {
     }
 
     switch (event.type) {
-      case 'session.ready':
+      case 'session.ready': {
         reconnectRef.current = 0
         fatalFailureRef.current = false
-        dispatch({ type: 'CONNECTED', connected: true })
+        const requireConfirm = Boolean(event.voiceRequireConfirm)
+        requireConfirmRef.current = requireConfirm
+        dispatch({
+          type: 'CONNECTED',
+          connected: true,
+          voiceRequireConfirm: requireConfirm,
+        })
         break
+      }
       case 'pong':
         break
       case 'transcript.partial':
         dispatch({ type: 'PARTIAL', text: event.text ?? '' })
         break
-      case 'transcript.final':
-        dispatch({ type: 'FINAL', text: event.text ?? '' })
+      case 'transcript.final': {
+        const text = (event.text ?? '').trim()
+        dispatch({ type: 'FINAL', text: event.text ?? '', mode: modeRef.current })
         feedback('success')
+        // Confirm UI off → dispatch immediately (was stuck with no plan.request).
+        if (text && !requireConfirmRef.current) {
+          sendJson({
+            type: 'plan.request',
+            transcript: text,
+            mode: modeRef.current,
+          })
+        }
         break
+      }
       case 'plan.started':
-        dispatch({ type: 'CONFIRM' })
+        dispatch({
+          type: 'PLAN_STARTED',
+          mode: (event.mode as VoiceAgentMode | undefined) ?? modeRef.current,
+        })
         break
       case 'audio.started':
-        dispatch({ type: 'SPEAKING', caption: event.caption })
+        dispatch({
+          type: 'SPEAKING',
+          caption: event.caption,
+          kind: event.kind === 'milestone' ? 'milestone' : 'final',
+        })
         break
       case 'caption':
-        dispatch({ type: 'SPEAKING', caption: event.text })
+        dispatch({ type: 'PROGRESS', caption: event.text ?? event.caption ?? '' })
         break
       case 'audio.ended':
         pcmPlayerRef.current?.flush()
@@ -161,6 +195,10 @@ export function useVoiceSession() {
         feedback('error')
         break
     }
+  }, [sendJson])
+
+  const setMode = useCallback((mode: VoiceAgentMode) => {
+    modeRef.current = mode
   }, [])
 
   const connect = useCallback(() => {
@@ -432,8 +470,12 @@ export function useVoiceSession() {
 
   const confirmPlan = useCallback(() => {
     if (!state.transcript.trim()) return
-    sendJson({ type: 'plan.request', transcript: state.transcript.trim() })
-    dispatch({ type: 'CONFIRM' })
+    sendJson({
+      type: 'plan.request',
+      transcript: state.transcript.trim(),
+      mode: modeRef.current,
+    })
+    dispatch({ type: 'CONFIRM', mode: modeRef.current })
     feedback('success')
   }, [sendJson, state.transcript])
 
@@ -450,8 +492,12 @@ export function useVoiceSession() {
       dispatch({ type: 'FAIL', message: 'Voice service is reconnecting' })
       return false
     }
-    sendJson({ type: 'plan.request', transcript: trimmed })
-    dispatch({ type: 'SUBMIT_TEXT', text: trimmed })
+    sendJson({
+      type: 'plan.request',
+      transcript: trimmed,
+      mode: modeRef.current,
+    })
+    dispatch({ type: 'SUBMIT_TEXT', text: trimmed, mode: modeRef.current })
     feedback('success')
     return true
   }, [connect, sendJson, state.connected])
@@ -460,6 +506,8 @@ export function useVoiceSession() {
     state,
     energy,
     spectrum,
+    mode: modeRef.current,
+    setMode,
     startListening,
     finishListening,
     cancel,

@@ -62,8 +62,13 @@ describe('voiceReducer', () => {
 
   it('auto-dispatches to planning when confirm is disabled', () => {
     const listening = voiceReducer(initialVoiceState, { type: 'START_LISTENING', at: 1 })
-    const done = voiceReducer(listening, { type: 'FINAL', text: 'Fix the deploy' })
+    const done = voiceReducer(listening, {
+      type: 'FINAL',
+      text: 'Fix the deploy',
+      mode: 'ask',
+    })
     expect(done.phase).toBe('planning')
+    expect(done.caption).toContain('Спрашиваю')
   })
 
   it('returns to idle after final playback', () => {

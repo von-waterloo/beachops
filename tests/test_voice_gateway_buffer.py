@@ -9,6 +9,16 @@ def test_min_commit_is_100ms_pcm16_24k() -> None:
     assert MIN_COMMIT_AUDIO_BYTES == 4800
 
 
+def test_resolve_voice_mode_defaults_to_ask() -> None:
+    from beachops.web.voice.gateway import resolve_voice_mode
+    from beachops.domain.models import UserMode
+
+    assert resolve_voice_mode(None) is UserMode.ASK
+    assert resolve_voice_mode("") is UserMode.ASK
+    assert resolve_voice_mode("do") is UserMode.DO
+    assert resolve_voice_mode("garbage") is UserMode.ASK
+
+
 def test_can_commit_rejects_empty_and_short() -> None:
     assert not can_commit_audio_buffer(0)
     assert not can_commit_audio_buffer(4799)

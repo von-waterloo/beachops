@@ -258,12 +258,11 @@ def test_simulate_voice_plan_call_and_write_recording() -> None:
         ("ask", UserMode.ASK),
         ("plan", UserMode.PLAN),
         ("do", UserMode.DO),
-        ("nope", UserMode.PLAN),
+        ("nope", UserMode.ASK),
+        (None, UserMode.ASK),
     ],
 )
-def test_voice_mode_resolution(mode_raw: str, expected: UserMode) -> None:
-    try:
-        mode = UserMode(mode_raw)
-    except ValueError:
-        mode = UserMode.PLAN
-    assert mode == expected
+def test_voice_mode_resolution(mode_raw: str | None, expected: UserMode) -> None:
+    from beachops.web.voice.gateway import resolve_voice_mode
+
+    assert resolve_voice_mode(mode_raw) == expected

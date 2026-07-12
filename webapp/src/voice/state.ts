@@ -45,7 +45,7 @@ export type VoiceAction =
   | { type: 'START_LISTENING'; at: number }
   | { type: 'STOP_LISTENING' }
   | { type: 'PARTIAL'; text: string }
-  | { type: 'FINAL'; text: string }
+  | { type: 'FINAL'; text: string; mode?: VoiceAgentMode }
   | { type: 'EDIT'; text: string }
   | { type: 'CONFIRM'; mode?: VoiceAgentMode }
   | { type: 'SUBMIT_TEXT'; text: string; mode?: VoiceAgentMode }
@@ -107,7 +107,7 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
           recordingStartedAt: null,
           speakingKind: null,
           queuedHint: null,
-          caption: 'Отправляю…',
+          caption: captionForMode(action.mode, 'submit'),
         }
       }
       return {

@@ -15,12 +15,23 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 from openai import AsyncOpenAI
 
+from beachops.domain.models import UserMode
 from beachops.services.logging_config import bind_log_context
 
 logger = logging.getLogger(__name__)
 
 # OpenAI rejects input_audio_buffer.commit below ~100ms of PCM16 mono @ 24 kHz.
 MIN_COMMIT_AUDIO_BYTES = 24_000 * 2 // 10  # 4800 bytes
+
+OnPlanRequest = Callable[[str, UserMode], Awaitable[str]]
+
+
+def resolve_voice_mode(raw: object | None) -> UserMode:
+    """Map client mode string to UserMode; default chat (ask)."""
+    try:
+        return UserMode(str(raw or "ask").strip().lower())
+    except ValueError:
+        return UserMode.ASK
 
 
 def can_commit_audio_buffer(buffered_bytes: int) -> bool:
@@ -103,7 +114,7 @@ class RealtimeVoiceGateway:
         self,
         websocket: WebSocket,
         *,
-        on_plan_request: Callable[[str], Awaitable[str]] | None = None,
+        on_plan_request: OnPlanRequest | None = None,
     ) -> None:
         session_bytes = 0
         buffered_bytes = 0
@@ -245,17 +256,23 @@ class RealtimeVoiceGateway:
                                 }
                             )
                             continue
-                        job_id = await on_plan_request(transcript)
+                        mode = resolve_voice_mode(event.get("mode"))
+                        job_id = await on_plan_request(transcript, mode)
                         bind_log_context(job_id=str(job_id))
                         logger.info(
                             "Voice plan requested",
                             extra={
                                 "action": "voice_plan_request",
                                 "job_id": str(job_id),
+                                "mode": mode.value,
                             },
                         )
                         await websocket.send_json(
-                            {"type": "plan.started", "jobId": job_id}
+                            {
+                                "type": "plan.started",
+                                "jobId": job_id,
+                                "mode": mode.value,
+                            }
                         )
                     elif event_type == "ping":
                         await websocket.send_json(
