@@ -111,6 +111,10 @@ echo y | plink -ssh -l const -i "C:\Users\vonwa\.ssh\const.ppk" 185.244.49.94 "c
 - Self-improve (`SELF_IMPROVE_*`) по умолчанию выключен. Включение только в вашем `.env`
   добавляет ваш форк BeachOps в allowlist; откат прода — `/rollback` (нужен
   `GITHUB_DEPLOY_DISPATCH`).
+- **MCP ops** (`MCP_ENABLED`, `OPS_SSH_*`): cloud-агент ходит в `beachops-ops`
+  (`ssh_exec` / `docker_ps` / `docker_logs`). На проде ключ
+  `/home/const/.ssh/beachops_ops` монтируется в api как
+  `/run/beachops-ssh/id_ed25519`; pubkey должен быть в `authorized_keys` у `const`.
 - На проде: docker `webapp` слушает host port `8080`; host nginx + Let's Encrypt
   проксируют `https://beachops.marketolog.tech` → `127.0.0.1:8080`
   (конфиг `/etc/nginx/sites-available/beachops-marketolog.conf`, шаблон в

@@ -104,7 +104,7 @@ Docker compose переопределяет `DATABASE_URL` на `@postgres:5432`
 | `MCP_PUBLIC_URL` | — | публичный URL Streamable HTTP MCP (например `{WEBAPP_BASE_URL}/mcp`) |
 | `MCP_BEARER_TOKEN` | — | Bearer для `Authorization` при вызове MCP и в `HttpMcpServerConfig` |
 | `OPS_SSH_HOSTS` | — | allowlist: `alias=user@host:port` через запятую (например `eu=const@185.244.49.94`) |
-| `OPS_SSH_KEY_PATH` | — | путь к приватному SSH-ключу на хосте API/worker |
+| `OPS_SSH_KEY_PATH` | — | путь к приватному SSH-ключу **внутри контейнера api** (compose монтирует host-ключ в `/run/beachops-ssh/id_ed25519`) |
 | `OPS_SSH_TIMEOUT_SEC` | `30` | таймаут SSH-команды (5–120) |
 | `OPS_SSH_MAX_OUTPUT_CHARS` | `12000` | обрезка stdout/stderr в ответе tool |
 

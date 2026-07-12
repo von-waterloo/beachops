@@ -120,6 +120,8 @@ services:
     command: ["beachops-api"]
     volumes:
       - bot-data:/data
+      # Host key for MCP beachops-ops (ssh_exec / docker_logs). Path must match OPS_SSH_KEY_PATH.
+      - /home/const/.ssh/beachops_ops:/run/beachops-ssh/id_ed25519:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
