@@ -60,8 +60,34 @@ async def startup(ctx: dict) -> None:
             continue
         if observers.is_observing(job.id):
             continue
+        token_key = job.cursor_token_key
+        api_key = app.settings.cursor_api_key_for(token_key)
         if job.telegram_message_id is None:
             continue
+        try:
+            from beachops.services.stream_bridge import normalize_run_status
+
+            snapshot = await app.cursor.get_run_snapshot(
+                job.cursor_agent_id,
+                job.cursor_run_id,
+                api_key=api_key,
+            )
+            status = normalize_run_status(str(snapshot.get("status") or ""))
+            if status in {"finished", "error", "cancelled", "completed"}:
+                result = await RunReconciler(app).reconcile_job(bot, job)
+                if result:
+                    logger.info(
+                        "Rehydrate finalized job %s (%s)",
+                        job.id,
+                        result.action,
+                    )
+                continue
+        except Exception:
+            logger.debug(
+                "Rehydrate pre-check failed for job %s; attaching observer",
+                job.id,
+                exc_info=True,
+            )
         payload = {}
         try:
             payload = app.payload_crypto.decrypt_json(job.payload_ciphertext or "")
@@ -74,8 +100,6 @@ async def startup(ctx: dict) -> None:
             prompt = str(payload.get("prompt") or prompt)
         except ValueError:
             pass
-        token_key = job.cursor_token_key
-        api_key = app.settings.cursor_api_key_for(token_key)
         run_ctx = await app.agent_slots.get_run_context(job.actor_id)
         repo_id = run_ctx.repo.id if run_ctx else 0
         repo_alias = run_ctx.repo.alias if run_ctx else "repo"

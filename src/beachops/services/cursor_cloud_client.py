@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -37,6 +38,16 @@ class CursorAgentBusyError(CursorCloudError):
 
 class CursorStreamExpiredError(CursorCloudError):
     pass
+
+
+def is_stream_expired_message(message: str) -> bool:
+    """True when Cursor closed the SSE replay window (410 / stale Last-Event-ID)."""
+    lower = (message or "").lower()
+    if not lower:
+        return False
+    if "stream_expired" in lower or "stream expired" in lower:
+        return True
+    return "stream" in lower and "no longer available" in lower
 
 
 @dataclass(frozen=True, slots=True)
@@ -351,8 +362,16 @@ class CursorCloudClient:
         url = f"{self._base_url}/v1/agents/{agent_id}/runs/{run_id}/stream"
         async with self._client.stream("GET", url, headers=headers) as response:
             if response.status_code == 410:
+                body = await response.aread()
+                try:
+                    raw = json.loads(body.decode("utf-8", errors="replace"))
+                    payload = raw if isinstance(raw, dict) else {}
+                except Exception:
+                    payload = {}
                 raise CursorStreamExpiredError(
-                    "stream expired", status_code=410, code="stream_expired"
+                    str(payload.get("message") or "stream expired"),
+                    status_code=410,
+                    code=str(payload.get("code") or "stream_expired"),
                 )
             if response.status_code >= 400:
                 body = await response.aread()

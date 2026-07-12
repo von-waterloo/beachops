@@ -19,6 +19,7 @@ from beachops.services.cursor_cloud_client import (
     CursorCloudClient,
     CursorCloudError,
     CursorStreamExpiredError,
+    is_stream_expired_message,
     ModelParam,
     ModelSelection,
     PromptImage,
@@ -309,7 +310,14 @@ class CursorAgentService:
             except CursorStreamExpiredError:
                 logger.info("SSE expired for %s; polling GET run", run_id)
                 break
-            except CursorCloudError:
+            except CursorCloudError as exc:
+                if is_stream_expired_message(exc.message):
+                    logger.info(
+                        "SSE unavailable for %s (%s); polling GET run",
+                        run_id,
+                        exc.message,
+                    )
+                    break
                 reconnects += 1
                 if reconnects > max_reconnects:
                     raise
@@ -413,8 +421,18 @@ class CursorAgentService:
                         state.pr_url = pr_url
                     terminal = True
                 elif etype == "error":
-                    state.status = "error"
                     message = str(data.get("message") or "stream error")
+                    if is_stream_expired_message(message):
+                        logger.info(
+                            "SSE stream expired for %s: %s",
+                            run_id,
+                            message,
+                        )
+                        raise CursorStreamExpiredError(
+                            message,
+                            code="stream_expired",
+                        )
+                    state.status = "error"
                     state.final_text = redact_text(message)
                     terminal = True
                 elif etype == "done":
@@ -649,6 +667,8 @@ def _apply_snapshot(state: StreamState, snapshot: dict[str, Any]) -> None:
 
 def _friendly_cursor_error(message: str) -> str:
     lower = (message or "").lower()
+    if is_stream_expired_message(message):
+        return "Эфир run завершён — результат подтягивается через API."
     if "failed to verify existence of branch" in lower or (
         "branch" in lower and "repository" in lower and "verify" in lower
     ):
