@@ -24,7 +24,6 @@ from beachops.services.telegram_images import (
     build_prompt_text,
     download_message_as_sdk_image,
     extract_group_caption,
-    limit_sdk_images,
     message_has_image,
 )
 from beachops.services.ui_copy import photo_error, photo_too_many, photo_unsupported_document
@@ -261,12 +260,12 @@ class PromptCoalesceBuffer:
                         )
                     return
 
-            images, dropped = limit_sdk_images(images, max_count=self._max_images)
-            if dropped:
+            if len(images) > self._max_images:
                 await context.bot.send_message(
                     chat_id=user_id,
-                    text=photo_too_many(len(images) + dropped, self._max_images),
+                    text=photo_too_many(len(images), self._max_images),
                 )
+                return
 
             await submit_user_prompt(
                 context=context,

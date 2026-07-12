@@ -19,8 +19,8 @@ def test_welcome_message_contains_quick_start() -> None:
         is_admin=False,
         has_repos=False,
     )
-    assert "Быстрый старт" in text
-    assert "/status" in text
+    assert "/repo" in text
+    assert "/ask" in text
 
 
 def test_queued_message_position() -> None:

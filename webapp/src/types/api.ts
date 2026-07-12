@@ -28,6 +28,11 @@ export interface Job {
   cursorAgentId?: string | null
   cursorUrl?: string | null
   branch?: string | null
+  totalTokens?: number | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+  cacheReadTokens?: number | null
+  cacheWriteTokens?: number | null
 }
 
 export interface Event {

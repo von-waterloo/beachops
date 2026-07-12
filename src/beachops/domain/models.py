@@ -37,6 +37,8 @@ class AgentSlot:
     runtime: str = "cloud"
     local_path: str | None = None
     preferred_worker_id: str | None = None
+    cloud_status: str = "unknown"
+    last_cloud_sync_at: str | None = None
 
 
 @dataclass(frozen=True)

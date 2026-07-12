@@ -38,8 +38,6 @@ def bot_commands(*, is_admin: bool, is_owner: bool = False) -> list[BotCommand]:
             BotCommand("agents", "Агенты · переключить/создать"),
             BotCommand("new", "Новый агент"),
             BotCommand("repo", "Репозитории"),
-            BotCommand("remember", "Сохранить заметку в память"),
-            BotCommand("memory", "Память · поиск"),
             BotCommand("cancel", "Отменить задачу"),
             BotCommand("jobs", "Задачи · статус и история"),
             BotCommand("dashboard", "Агенты · голос и Mini App"),

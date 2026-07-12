@@ -13,10 +13,9 @@ from beachops.domain.cursor_tokens import CursorTokenKey
 from beachops.domain.models import UserMode
 from beachops.domain.security import Role
 
-# Cursor Cloud Agent (Anthropic vision backend): up to 100 images per request.
-# Above 20, max image dimension drops from 8000px to 2000px per provider rules.
-CURSOR_MAX_IMAGES_PER_PROMPT = 100
-DEFAULT_PHOTO_MAX_COUNT = 20
+# Cloud Agents API v1 accepts at most 5 images per prompt.
+CURSOR_MAX_IMAGES_PER_PROMPT = 5
+DEFAULT_PHOTO_MAX_COUNT = 5
 DEFAULT_DOCUMENT_MAX_CHARS = 30_000
 DEFAULT_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024
 
@@ -155,6 +154,9 @@ class Settings(BaseSettings):
         default=60, alias="CALLBACK_RATE_WINDOW_SEC", ge=1, le=3_600
     )
     workspace_path: Path = Field(default=Path("./data/workspace"), alias="WORKSPACE_PATH")
+    cursor_api_base_url: str = Field(
+        default="https://api.cursor.com", alias="CURSOR_API_BASE_URL"
+    )
     cursor_model: str = Field(default="composer-2.5", alias="CURSOR_MODEL")
     transcribe_model: str = Field(
         default="gpt-4o-mini-transcribe-2025-12-15", alias="TRANSCRIBE_MODEL"

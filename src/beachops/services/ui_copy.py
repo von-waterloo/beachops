@@ -68,7 +68,10 @@ def build_run_footer(
     error_message: str | None = None,
     duration_ms: int | None = None,
     total_tokens: int | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
 ) -> str:
+    del input_tokens, output_tokens  # kept for call-site stability; not rendered
     lines: list[str] = []
     if duration_ms is not None and duration_ms >= 1000:
         secs = duration_ms // 1000
@@ -553,67 +556,26 @@ def build_welcome_message(
     active_agent_label: str | None = None,
     token_key: str | None = None,
 ) -> str:
-    from beachops.domain.cursor_models import cursor_model_label
-    from beachops.domain.cursor_tokens import cursor_token_label
-
-    mode_label = MODE_LABELS.get(mode.value, mode.value)
-    model_label = cursor_model_label(model_key)
+    del mode, model_key, token_key  # kept in signature for call-site stability
     if repo:
-        repo_line = f"{repo.alias}"
+        repo_line = repo.alias
     elif has_repos:
-        repo_line = "не выбран — откройте /repo"
+        repo_line = "не выбран — /repo"
     else:
-        repo_line = "не добавлен — см. быстрый старт"
+        repo_line = "не добавлен — /repo"
 
     agent_line = active_agent_label or "—"
 
     lines = [
-        "BeachOps · ваши агенты в одном диалоге",
+        f"Репо · {repo_line}",
+        f"Агент · {agent_line}",
         "",
-        "Сейчас",
-        f"· Режим · {mode_label}",
-        f"· Модель · {model_label}",
+        "/repo — выбрать репозиторий",
     ]
-    if token_key is not None:
-        lines.append(f"· Токен · {cursor_token_label(token_key)}")
-    lines.extend([
-        f"· Репо · {repo_line}",
-        f"· Агент · {agent_line}",
-        "",
-        "Быстрый старт",
-        "1. /repo — выбрать репозиторий",
-        "2. /do — кодить сразу, /ask — спросить, /plan — если хочется план",
-        "3. Текст, 🎤 голос или Mini App — и поехали",
-        "",
-        "Режимы",
-        "· чат (/ask) — ответ без правок кода",
-    ])
     if is_admin:
-        lines.extend(
-            [
-                "· действие (/do) — сразу правки в базовой ветке репо",
-                "· план (/plan, /task) — разбор, затем сразу выполнение",
-            ]
-        )
+        lines.append("/do — сразу код, /ask — спросить, /plan — план")
     else:
-        lines.append("· /plan, /do и /task — для operator/owner")
-
-    lines.extend(
-        [
-            "",
-            "Пока агент работает",
-            "· Ответ стримится в одном сообщении",
-            "· Отмена: кнопка «Отменить» или /cancel",
-            "· Задачи не теряются при перезапуске",
-            "",
-            "Память",
-            "/remember текст — сохранить заметку",
-            "/memory — последние записи; /memory запрос — семантический поиск",
-            "",
-            "Команды",
-            "/status /agents /repo /new /remember /memory /cancel",
-        ]
-    )
+        lines.append("/ask — спросить агента")
     return "\n".join(lines)
 
 

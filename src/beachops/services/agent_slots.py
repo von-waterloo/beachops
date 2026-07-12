@@ -134,6 +134,12 @@ class AgentSlotService:
     async def set_active_run(self, slot_id: int, run_id: str | None) -> None:
         await self._slots.set_active_run(slot_id, run_id)
 
+    async def set_cloud_status(self, slot_id: int, *, cloud_status: str) -> None:
+        await self._slots.set_cloud_status(slot_id, cloud_status=cloud_status)
+
+    async def clear_cursor_agent(self, slot_id: int) -> None:
+        await self._slots.clear_cursor_agent(slot_id)
+
     async def clear_stale_active_runs(self) -> None:
         await self._slots.clear_all_active_runs()
 

@@ -20,7 +20,7 @@ const MODE_LABELS: Record<PromptMode, string> = {
   do: 'Сделать',
 }
 
-const MAX_ATTACHMENTS = 8
+const MAX_ATTACHMENTS = 5
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024
 const ACCEPTED_MIME = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'])
 

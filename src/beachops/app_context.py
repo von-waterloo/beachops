@@ -145,6 +145,7 @@ class AppContext:
                 mcp_enabled=settings.mcp_enabled,
                 mcp_public_url=settings.mcp_public_url,
                 mcp_bearer_token=settings.mcp_bearer_token,
+                api_base_url=settings.cursor_api_base_url,
             ),
             transcription=TranscriptionService(
                 api_key=settings.openai_api_key,

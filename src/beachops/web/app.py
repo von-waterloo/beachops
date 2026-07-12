@@ -21,7 +21,6 @@ from starlette.responses import Response
 from beachops.app_context import AppContext
 from beachops.config.settings import Settings, get_settings
 from beachops.domain.cursor_models import (
-    CURSOR_MODEL_ORDER,
     CursorModelKey,
     cursor_model_label,
     normalize_cursor_model_key,
@@ -144,6 +143,10 @@ def create_app() -> FastAPI:
         model_key = await context.users.get_cursor_model_key(
             principal.user_id, default=context.settings.cursor_model
         )
+        token_key = await context.users.get_cursor_token_key(principal.user_id)
+        from beachops.services.cursor_model_catalog import CursorModelCatalog
+
+        models = await CursorModelCatalog(context).options_for_ui(token_key)
         return {
             "userId": principal.user_id,
             "role": role.value if role else "none",
@@ -151,10 +154,7 @@ def create_app() -> FastAPI:
             "authMethod": principal.auth_method,
             "hasPasskey": await context.passkeys.has_any(principal.user_id),
             "cursorModelKey": model_key,
-            "models": [
-                {"key": choice.value, "label": cursor_model_label(choice.value)}
-                for choice in CURSOR_MODEL_ORDER
-            ],
+            "models": models,
         }
 
     @app.put("/api/me/model")
@@ -168,9 +168,30 @@ def create_app() -> FastAPI:
         model_key = normalize_cursor_model_key(
             raw_key, default=context.settings.cursor_model
         )
-        if model_key not in {item.value for item in CursorModelKey}:
+        known = {item.value for item in CursorModelKey}
+        if not (
+            model_key in known
+            or model_key.startswith("dyn:")
+            or model_key.startswith("h:")
+        ):
             raise HTTPException(status_code=400, detail="unknown model")
-        await context.users.set_cursor_model_key(principal.user_id, model_key)
+        if model_key.startswith("h:"):
+            from beachops.services.cursor_model_catalog import CursorModelCatalog
+
+            token_key = await context.users.get_cursor_token_key(principal.user_id)
+            resolved = await CursorModelCatalog(context).resolve_fingerprint(
+                token_key, model_key[2:]
+            )
+            if not resolved:
+                raise HTTPException(status_code=400, detail="unknown model fingerprint")
+        params = body.get("params")
+        if params is not None and not isinstance(params, dict):
+            raise HTTPException(status_code=400, detail="params must be an object")
+        await context.users.set_cursor_model_key(
+            principal.user_id,
+            model_key,
+            params=params if isinstance(params, dict) else None,
+        )
         logger.info(
             "Cursor model updated",
             extra={
@@ -182,6 +203,26 @@ def create_app() -> FastAPI:
             "cursorModelKey": model_key,
             "label": cursor_model_label(model_key),
         }
+
+    @app.get("/api/cursor/health")
+    async def cursor_health(
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+        refresh: bool = False,
+    ) -> dict:
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        if role is None:
+            raise HTTPException(status_code=403, detail="forbidden")
+        repo = await context.repos.get_active_repo(principal.user_id)
+        from beachops.services.cursor_health import CursorHealthService
+
+        return await CursorHealthService(context).snapshot_for_user(
+            principal.user_id,
+            is_owner=role == Role.OWNER,
+            force_refresh=refresh,
+            active_repo_url=repo.github_url if repo else None,
+        )
 
     @app.get("/api/dashboard")
     async def dashboard(
@@ -484,7 +525,13 @@ def create_app() -> FastAPI:
         slots = await context.agent_slots.list_slots(principal.user_id)
         if len(slots) <= 1:
             raise HTTPException(status_code=409, detail="cannot delete the last agent")
-        deleted = await context.agent_slots.delete_slot(principal.user_id, slot_id)
+        from beachops.services.agent_lifecycle import delete_agent_slot
+        from beachops.services.agent_slots import AgentSlotLastError
+
+        try:
+            deleted = await delete_agent_slot(context, principal.user_id, slot_id)
+        except AgentSlotLastError:
+            raise HTTPException(status_code=409, detail="cannot delete the last agent")
         if deleted is None:
             raise HTTPException(status_code=404, detail="agent slot not found")
         await context.hot_cache.bump_dashboard_generation()
@@ -493,6 +540,38 @@ def create_app() -> FastAPI:
             "deleted": True,
             "active": _agent_slot_json(active) if active else None,
         }
+
+    @app.post("/api/agents/{slot_id}/archive")
+    async def archive_agent(
+        slot_id: int,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        context = _context(request)
+        if context.settings.role_for(principal.user_id) != Role.OWNER:
+            raise HTTPException(status_code=403, detail="owner role required")
+        from beachops.services.agent_lifecycle import archive_slot_agent
+
+        slot = await archive_slot_agent(context, principal.user_id, slot_id)
+        if slot is None:
+            raise HTTPException(status_code=404, detail="agent slot not found")
+        return _agent_slot_json(slot)
+
+    @app.post("/api/agents/{slot_id}/unarchive")
+    async def unarchive_agent(
+        slot_id: int,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        context = _context(request)
+        if context.settings.role_for(principal.user_id) != Role.OWNER:
+            raise HTTPException(status_code=403, detail="owner role required")
+        from beachops.services.agent_lifecycle import unarchive_slot_agent
+
+        slot = await unarchive_slot_agent(context, principal.user_id, slot_id)
+        if slot is None:
+            raise HTTPException(status_code=404, detail="agent slot not found")
+        return _agent_slot_json(slot)
 
     @app.patch("/api/agents/{slot_id}")
     async def update_agent(
@@ -674,6 +753,34 @@ def create_app() -> FastAPI:
                 raise HTTPException(status_code=404, detail="job not found")
         rows = await context.run_events.list_for_job(job_id, limit=300)
         return _assemble_transcript(job, rows)
+
+    @app.get("/api/jobs/{job_id}/artifacts")
+    async def job_artifacts(
+        job_id: UUID,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> list[dict]:
+        context = _context(request)
+        job = await context.jobs.get(principal.user_id, job_id)
+        if job is None and context.settings.role_for(principal.user_id) != Role.OWNER:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job is None:
+            job = await context.jobs.get_internal(job_id)
+            if job is None:
+                raise HTTPException(status_code=404, detail="job not found")
+        rows = await context.jobs.list_artifacts(job.actor_id, job_id)
+        return [
+            {
+                "id": str(row.get("id") or ""),
+                "kind": row.get("artifact_kind") or row.get("kind"),
+                "uri": row.get("uri"),
+                "metadata": row.get("metadata") or {},
+                "createdAt": row["created_at"].isoformat()
+                if row.get("created_at")
+                else None,
+            }
+            for row in rows
+        ]
 
     @app.post("/api/approvals/{approval_id}/decision")
     async def decide_approval(
@@ -1466,6 +1573,11 @@ def _job_json(job) -> dict:
         "cursorAgentId": agent_id,
         "cursorUrl": cursor_agent_url(agent_id),
         "branch": getattr(job, "branch", None),
+        "totalTokens": getattr(job, "total_tokens", None),
+        "inputTokens": getattr(job, "input_tokens", None),
+        "outputTokens": getattr(job, "output_tokens", None),
+        "cacheReadTokens": getattr(job, "cache_read_tokens", None),
+        "cacheWriteTokens": getattr(job, "cache_write_tokens", None),
     }
 
 

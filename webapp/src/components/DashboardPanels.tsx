@@ -43,10 +43,9 @@ import {
   type GithubRemoteRepo,
 } from '../lib/github'
 import {
-  FLOW_TIPS,
-  PLACE_TIPS,
-  type TipItem,
-} from '../lib/capabilities'
+  fetchCursorHealth,
+  type CursorHealthSnapshot,
+} from '../lib/cursorHealth'
 import {
   matchesRuntimeFilter,
   type RuntimeFilter,
@@ -112,6 +111,71 @@ function preferredBranch(branches: string[], defaultBranch: string): string {
     (branch) => !['main', 'master'].includes(branch.toLowerCase()),
   )
   return nonProtected ?? branches[0] ?? defaultBranch
+}
+
+function CursorHealthPanel() {
+  const [health, setHealth] = useState<CursorHealthSnapshot | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = async (force = false) => {
+    setLoading(true)
+    setError(null)
+    try {
+      setHealth(await fetchCursorHealth(force))
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Не удалось проверить Cursor API')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void refresh(false)
+  }, [])
+
+  // Silent unless there's an actual problem — no need to show "all good" noise.
+  if (!loading && !error && health?.ok) return null
+
+  return (
+    <Section eyebrow="Cursor" title="Проблема с доступом">
+      <article className="github-connect-card">
+        {loading && !health ? null : error ? (
+          <p className="muted-hint">{error}</p>
+        ) : (
+          <>
+            <div className="github-connect-topline">
+              <strong>Проблема с ключом</strong>
+              <button
+                type="button"
+                className="ghost-link"
+                onClick={() => {
+                  feedback('tap')
+                  void refresh(true).then(() => feedback('success')).catch(() => feedback('error'))
+                }}
+              >
+                <RefreshCw size={14} /> Обновить
+              </button>
+            </div>
+            <ul className="muted-hint" style={{ margin: 0, paddingLeft: '1.1rem' }}>
+              {(health?.tokens ?? []).map((token) => (
+                <li key={token.tokenKey}>
+                  {token.ok ? '✓' : '✗'} {token.tokenKey}
+                  {token.identity ? ` · ${token.identity}` : ''}
+                  {token.hasActiveRepo === true
+                    ? ' · активный repo доступен'
+                    : token.hasActiveRepo === false
+                      ? ' · активный repo не найден в Cursor'
+                      : ''}
+                  {token.error ? ` · ${token.error}` : ''}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </article>
+    </Section>
+  )
 }
 
 function GithubConnectPanel({
@@ -424,6 +488,9 @@ function AgentCard({
           {runtimeLabel(job.runtime)}
           {job.repository ? ` · ${job.repository}` : ''}
           {job.branch ? ` · ${job.branch}` : ''}
+          {typeof job.totalTokens === 'number'
+            ? ` · ${job.totalTokens.toLocaleString('ru-RU')} tok`
+            : ''}
         </p>
         {job.cursorUrl && (
           <button
@@ -607,18 +674,6 @@ function ApprovalActions({
   )
 }
 
-function TipCard({ item }: { item: TipItem }) {
-  return (
-    <article className="capability-card tip-card">
-      <div className="card-topline">
-        <strong>{item.title}</strong>
-        <span className="tip-hint">{item.hint}</span>
-      </div>
-      <p>{item.copy}</p>
-    </article>
-  )
-}
-
 function SelfImprovePanel({
   data,
   onSetSelfImprove,
@@ -690,37 +745,6 @@ function SelfImprovePanel({
   )
 }
 
-function TipsMap({
-  data,
-  onSetSelfImprove,
-  showSelfImprove = true,
-}: {
-  data: DashboardSnapshot
-  onSetSelfImprove?: (input: { enabled: boolean; repoUrl?: string | null }) => Promise<void>
-  showSelfImprove?: boolean
-}) {
-  return (
-    <div className="capability-stack">
-      <Section eyebrow="Быстрый старт" title="Как пользоваться">
-        <div className="capability-grid">
-          {FLOW_TIPS.map((item) => (
-            <TipCard key={item.id} item={item} />
-          ))}
-        </div>
-      </Section>
-      <Section eyebrow="Где что" title="Экраны Mini App">
-        <div className="capability-grid">
-          {PLACE_TIPS.map((item) => (
-            <TipCard key={item.id} item={item} />
-          ))}
-        </div>
-      </Section>
-      {showSelfImprove ? (
-        <SelfImprovePanel data={data} onSetSelfImprove={onSetSelfImprove} />
-      ) : null}
-    </div>
-  )
-}
 
 function ApprovalsList({
   approvals,
@@ -1123,7 +1147,7 @@ function Overview({
         </Section>
       )}
 
-      <TipsMap data={data} onSetSelfImprove={onSetSelfImprove} />
+      <SelfImprovePanel data={data} onSetSelfImprove={onSetSelfImprove} />
 
       <Section eyebrow="Лента" title="События прогонов">
         <TimelineList
@@ -1381,7 +1405,6 @@ export function DashboardPanels({
               </div>
             </div>
           )}
-          <TipsMap data={data} showSelfImprove={false} />
         </>
       )}
 
@@ -1389,6 +1412,7 @@ export function DashboardPanels({
         <>
           <RepoPolicyBanner openMode={openMode} allowedCount={allowedRepos.length} />
 
+          <CursorHealthPanel />
           <GithubConnectPanel
             canManage={Boolean(onAddRepository)}
             onPin={(url, branch) => connectRepo(url, branch, { quick: true })}

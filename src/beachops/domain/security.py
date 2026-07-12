@@ -93,8 +93,15 @@ class Job:
     payload_ciphertext: str | None = None
     cursor_agent_id: str | None = None
     cursor_run_id: str | None = None
+    cursor_token_key: str | None = None
+    cursor_last_event_id: str | None = None
+    cursor_run_status: str | None = None
     pr_url: str | None = None
     total_tokens: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
     telegram_chat_id: int | None = None
     telegram_message_id: int | None = None
     idempotency_key: str | None = None
@@ -104,6 +111,7 @@ class Job:
     telegram_updated: bool = False
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    finalized_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

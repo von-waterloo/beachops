@@ -53,6 +53,23 @@ async def agents_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
 
+    if len(args) >= 1 and args[0] == "sync":
+        from beachops.domain.security import Role
+        from beachops.services.agent_cloud_reconciler import AgentCloudReconciler
+
+        if app.settings.role_for(user.id) != Role.OWNER:
+            await update.message.reply_text("Синхронизация доступна только владельцу.")
+            return
+        notes = await AgentCloudReconciler(app).sync_linked_slots()
+        orphans = await AgentCloudReconciler(app).audit_orphans()
+        await update.message.reply_text(
+            "Cursor sync\n"
+            f"· drift/notes: {len(notes)}\n"
+            f"· orphans (remote, not deleted): {len(orphans)}\n"
+            "Автоудаление в Cursor не выполняется."
+        )
+        return
+
     await send_agent_list(
         bot=update.message.get_bot(),
         chat_id=update.message.chat_id,

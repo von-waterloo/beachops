@@ -147,16 +147,27 @@ def _mode_buttons(*, is_admin: bool, current: UserMode) -> list[InlineKeyboardBu
 _MODEL_BUTTONS_PER_ROW = 2
 
 
-def _model_buttons(*, current_model_key: str) -> list[list[InlineKeyboardButton]]:
+def _model_buttons(
+    *,
+    current_model_key: str,
+    model_options: Sequence[tuple[str, str]] | None = None,
+) -> list[list[InlineKeyboardButton]]:
     """Model choices as a 2-per-row grid with versioned labels."""
     buttons: list[InlineKeyboardButton] = []
-    for choice in CURSOR_MODEL_ORDER:
-        label = cursor_model_label(choice.value)
-        prefix = "✓ " if choice.value == current_model_key else ""
+    if model_options:
+        choices = list(model_options)
+    else:
+        choices = [(choice.value, cursor_model_label(choice.value)) for choice in CURSOR_MODEL_ORDER]
+    for key, label in choices:
+        prefix = "✓ " if key == current_model_key else ""
+        # Telegram callback_data max 64 bytes — fingerprints stay short.
+        callback = f"{CB_MODEL_PREFIX}{key}"
+        if len(callback.encode("utf-8")) > 64:
+            continue
         buttons.append(
             InlineKeyboardButton(
-                f"{prefix}{label}",
-                callback_data=f"{CB_MODEL_PREFIX}{choice.value}",
+                f"{prefix}{label}"[:64],
+                callback_data=callback,
             )
         )
     return [
@@ -193,9 +204,15 @@ def status_reply_markup(
     has_repos: bool,
     current_token_key: str | None = None,
     available_token_keys: Sequence[str] | None = None,
+    model_options: Sequence[tuple[str, str]] | None = None,
 ) -> InlineKeyboardMarkup:
     rows = [_mode_buttons(is_admin=is_admin, current=current)]
-    rows.extend(_model_buttons(current_model_key=current_model_key))
+    rows.extend(
+        _model_buttons(
+            current_model_key=current_model_key,
+            model_options=model_options,
+        )
+    )
     rows.extend(
         _token_buttons(
             current_token_key=current_token_key,
@@ -226,15 +243,11 @@ def post_run_keyboard(
     available_token_keys: Sequence[str] | None = None,
     with_retry: bool = False,
     with_build_plan: bool = False,
+    model_options: Sequence[tuple[str, str]] | None = None,
 ) -> InlineKeyboardMarkup:
-    rows = [_mode_buttons(is_admin=is_admin, current=current)]
-    rows.extend(_model_buttons(current_model_key=current_model_key))
-    rows.extend(
-        _token_buttons(
-            current_token_key=current_token_key,
-            available_token_keys=available_token_keys,
-        )
-    )
+    """Compact post-run controls — mode/model/token switch via /status."""
+    del current, current_model_key, current_token_key, available_token_keys, model_options
+    rows: list[list[InlineKeyboardButton]] = []
     if with_build_plan and is_admin:
         rows.append(
             [InlineKeyboardButton("▶️ Выполнить план", callback_data=CB_BUILD_PLAN)]
@@ -253,6 +266,7 @@ def welcome_keyboard(
     current_token_key: str | None = None,
     available_token_keys: Sequence[str] | None = None,
     webapp_url: str | None = None,
+    model_options: Sequence[tuple[str, str]] | None = None,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     url = (webapp_url or "").strip()
@@ -261,7 +275,12 @@ def welcome_keyboard(
             [InlineKeyboardButton("🎛 Агенты", web_app=WebAppInfo(url=url))]
         )
     rows.append(_mode_buttons(is_admin=is_admin, current=current))
-    rows.extend(_model_buttons(current_model_key=current_model_key))
+    rows.extend(
+        _model_buttons(
+            current_model_key=current_model_key,
+            model_options=model_options,
+        )
+    )
     rows.extend(
         _token_buttons(
             current_token_key=current_token_key,

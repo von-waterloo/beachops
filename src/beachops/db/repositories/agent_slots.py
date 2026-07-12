@@ -18,7 +18,8 @@ class AgentSlotRepository:
                 SELECT s.id, s.tg_user_id, s.label, s.cursor_agent_id,
                        s.repo_id, s.active_run_id, s.is_active,
                        s.cursor_token_key, s.runtime, s.local_path,
-                       s.preferred_worker_id, r.alias AS repo_alias
+                       s.preferred_worker_id, s.cloud_status, s.last_cloud_sync_at,
+                       r.alias AS repo_alias
                 FROM user_agent_slots s
                 LEFT JOIN user_repos r ON r.id = s.repo_id
                 WHERE s.tg_user_id = $1
@@ -35,7 +36,8 @@ class AgentSlotRepository:
                 SELECT s.id, s.tg_user_id, s.label, s.cursor_agent_id,
                        s.repo_id, s.active_run_id, s.is_active,
                        s.cursor_token_key, s.runtime, s.local_path,
-                       s.preferred_worker_id, r.alias AS repo_alias
+                       s.preferred_worker_id, s.cloud_status, s.last_cloud_sync_at,
+                       r.alias AS repo_alias
                 FROM user_agent_slots s
                 LEFT JOIN user_repos r ON r.id = s.repo_id
                 WHERE s.tg_user_id = $1 AND s.id = $2
@@ -52,7 +54,8 @@ class AgentSlotRepository:
                 SELECT s.id, s.tg_user_id, s.label, s.cursor_agent_id,
                        s.repo_id, s.active_run_id, s.is_active,
                        s.cursor_token_key, s.runtime, s.local_path,
-                       s.preferred_worker_id, r.alias AS repo_alias
+                       s.preferred_worker_id, s.cloud_status, s.last_cloud_sync_at,
+                       r.alias AS repo_alias
                 FROM user_agent_slots s
                 LEFT JOIN user_repos r ON r.id = s.repo_id
                 WHERE s.tg_user_id = $1 AND s.is_active = TRUE
@@ -333,9 +336,46 @@ class AgentSlotRepository:
         return await self.get_active(tg_user_id)
 
 
+    async def set_cloud_status(
+        self,
+        slot_id: int,
+        *,
+        cloud_status: str,
+    ) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE user_agent_slots
+                SET cloud_status = $2,
+                    last_cloud_sync_at = now(),
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                slot_id,
+                cloud_status,
+            )
+
+    async def clear_cursor_agent(self, slot_id: int) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE user_agent_slots
+                SET cursor_agent_id = NULL,
+                    cursor_token_key = NULL,
+                    active_run_id = NULL,
+                    cloud_status = 'not_found',
+                    last_cloud_sync_at = now(),
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                slot_id,
+            )
+
+
 def _row_to_slot(row: asyncpg.Record) -> AgentSlot:
     keys = row.keys()
     preferred = row["preferred_worker_id"] if "preferred_worker_id" in keys else None
+    sync_at = row["last_cloud_sync_at"] if "last_cloud_sync_at" in keys else None
     return AgentSlot(
         id=row["id"],
         tg_user_id=row["tg_user_id"],
@@ -349,4 +389,10 @@ def _row_to_slot(row: asyncpg.Record) -> AgentSlot:
         runtime=row["runtime"] if "runtime" in keys and row["runtime"] else "cloud",
         local_path=row["local_path"] if "local_path" in keys else None,
         preferred_worker_id=str(preferred) if preferred is not None else None,
+        cloud_status=(
+            str(row["cloud_status"])
+            if "cloud_status" in keys and row["cloud_status"]
+            else "unknown"
+        ),
+        last_cloud_sync_at=str(sync_at) if sync_at is not None else None,
     )

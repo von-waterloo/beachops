@@ -6,13 +6,11 @@ import logging
 import time
 from collections.abc import Sequence
 
-from cursor_sdk import SDKImage
 from telegram.ext import ContextTypes
 
 from beachops.app_context import AppContext
 from beachops.config.settings import Settings
 from beachops.domain.active_run import ActiveRunInfo
-from beachops.domain.cursor_models import resolve_cursor_model
 from beachops.domain.cursor_tokens import normalize_cursor_token_key
 from beachops.domain.models import UserMode
 from beachops.services.agent_slots import RunContext
@@ -30,6 +28,11 @@ from beachops.services.ui_copy import (
     queue_full_message,
     queued_message,
 )
+
+try:
+    from cursor_sdk import SDKImage
+except ImportError:  # pragma: no cover
+    SDKImage = object  # type: ignore[misc, assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -319,11 +322,10 @@ async def _run_job(
     )
     preview_chars = app.settings.stream_thinking_preview_chars
     header = build_run_header(mode, repo.alias)
-    model_key = await app.users.get_cursor_model_key(
-        user_id, default=app.settings.cursor_model
-    )
+    from beachops.services.cursor_model_catalog import resolve_user_model_selection
     from beachops.services.logging_config import bind_log_context
 
+    model_key, cursor_model = await resolve_user_model_selection(app, user_id)
     bind_log_context(
         user_id=user_id,
         job_id=str(durable_job_id) if durable_job_id else None,
@@ -425,8 +427,6 @@ async def _run_job(
         channel=channel,
     )
 
-    cursor_model = resolve_cursor_model(model_key)
-
     from beachops.services.inline_keyboards import post_run_keyboard, status_reply_markup
 
     try:
@@ -478,6 +478,9 @@ async def _run_job(
                 durable_job_id,
                 cursor_agent_id=outcome.state.agent_id or new_agent_id,
                 cursor_run_id=outcome.state.run_id,
+                cursor_token_key=token_key,
+                cursor_last_event_id=outcome.state.last_event_id,
+                cursor_run_status=outcome.state.status,
                 telegram_message_id=message.message_id,
                 telegram_chat_id=message.chat_id,
             )
@@ -488,6 +491,8 @@ async def _run_job(
             error_message=outcome.error_message,
             duration_ms=outcome.state.duration_ms,
             total_tokens=outcome.state.total_tokens,
+            input_tokens=outcome.state.input_tokens,
+            output_tokens=outcome.state.output_tokens,
         )
 
         with_retry = bool(outcome.error_message or outcome.status == "error")

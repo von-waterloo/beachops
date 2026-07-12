@@ -628,27 +628,13 @@ async def _handle_agent_delete_confirm(
         return
 
     deleted_label = slot.label
-    active = await app.agent_slots.get_active(user_id)
-    if active is not None and active.id == slot_id:
-        if (
-            active.active_run_id
-            or app.job_queue.is_active(user_id)
-            or app.job_queue.pending_count(user_id) > 0
-        ):
-            await cancel_user_work(app, user_id)
-
     if peek_pending(context) == slot_id:
         clear_pending(context)
 
-    if slot.cursor_agent_id:
-        token_key = normalize_cursor_token_key(slot.cursor_token_key)
-        await app.cursor.archive_agent(
-            slot.cursor_agent_id,
-            api_key=app.settings.cursor_api_key_for(token_key),
-        )
+    from beachops.services.agent_lifecycle import delete_agent_slot
 
     try:
-        new_active = await app.agent_slots.delete_slot(user_id, slot_id)
+        new_active = await delete_agent_slot(app, user_id, slot_id)
     except AgentSlotLastError:
         await query.answer(agent_delete_last(), show_alert=True)
         return
@@ -827,14 +813,28 @@ async def _handle_mode_select(query, app: AppContext, user_id: int, mode_value: 
 
 
 async def _handle_model_select(query, app: AppContext, user_id: int, model_value: str) -> None:
+    from beachops.services.cursor_model_catalog import CursorModelCatalog
+
     model_key = normalize_cursor_model_key(
         model_value, default=app.settings.cursor_model
     )
-    if model_key not in {item.value for item in CursorModelKey}:
+    known = {item.value for item in CursorModelKey}
+    if model_key.startswith("h:"):
+        token_key = await app.users.get_cursor_token_key(user_id)
+        resolved = await CursorModelCatalog(app).resolve_fingerprint(
+            token_key, model_key[2:]
+        )
+        if not resolved:
+            await query.answer("Модель недоступна, обновите /status", show_alert=True)
+            return
+        # Keep fingerprint as stored UI key so keyboards stay short.
+        await app.users.set_cursor_model_key(user_id, model_key)
+    elif model_key in known or model_key.startswith("dyn:"):
+        await app.users.set_cursor_model_key(user_id, model_key)
+    else:
         await query.answer("Неизвестная модель", show_alert=True)
         return
 
-    await app.users.set_cursor_model_key(user_id, model_key)
     is_admin = app.settings.is_admin(user_id)
     mode = await app.users.get_mode(user_id)
     slot = await app.agent_slots.get_active(user_id)

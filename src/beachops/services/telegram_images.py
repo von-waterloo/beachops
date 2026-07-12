@@ -24,7 +24,7 @@ _COLLECTOR_KEY = "media_group_collector"
 _UNSUPPORTED_MIME = frozenset({"image/svg+xml"})
 _MAX_WEB_IMAGE_BYTES = 4 * 1024 * 1024
 _MAX_WEB_IMAGES_TOTAL_BYTES = 12 * 1024 * 1024
-_MAX_WEB_IMAGES = 8
+_MAX_WEB_IMAGES = 5
 
 
 class UnsupportedImageError(Exception):
