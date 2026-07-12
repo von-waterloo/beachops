@@ -169,8 +169,8 @@ function ControlRoom({
           <span>BeachOps</span>
         </a>
         <div className="top-meta">
-          {activeJob && (
-            <div className="live-badge" title="Идёт стрим задачи">
+          {(activeJob || running > 0) && (
+            <div className={`live-badge${activeJob ? ' is-hot' : ''}`} title="Идёт стрим задачи">
               <span className="live-pulse" />
               Эфир
             </div>

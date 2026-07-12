@@ -155,6 +155,7 @@ async def observe_and_finalize(
         run_id=run_id,
         agent_id=agent_id,
     )
+    keep_alive = False
 
     async def _cancelled() -> bool:
         return app.job_queue.is_cancelled(actor_id) or await app.cancel_store.is_cancelled(
@@ -175,6 +176,9 @@ async def observe_and_finalize(
                 telegram_message_id=message_id,
                 telegram_chat_id=chat_id,
             )
+        from beachops.services.run_executor import _maybe_append_run_progress
+
+        await _maybe_append_run_progress(app, job_id, actor_id, current)
         if current.agent_id:
             await renderer.update(current)
 
@@ -190,6 +194,16 @@ async def observe_and_finalize(
             last_event_id=last_event_id,
             plan_mode=mode == UserMode.PLAN,
         )
+        # Still running after observe — leave job active for reconciler/respawn.
+        if outcome.status in {"", "running", "creating", "in_progress"}:
+            logger.warning(
+                "Observer paused while job %s still %s — keeping RUNNING",
+                job_id,
+                outcome.status or "running",
+            )
+            keep_alive = True
+            await renderer.update(outcome.state)
+            return
         footer = build_run_footer(
             pr_url=outcome.state.pr_url,
             agent_id=outcome.state.agent_id,
@@ -254,6 +268,11 @@ async def observe_and_finalize(
         logger.exception("Observer crashed for job %s", job_id)
         raise
     finally:
-        app.active_runs.pop(actor_id, None)
-        await renderer.shutdown()
-        await app.cancel_store.clear_cancel(actor_id)
+        if not keep_alive:
+            app.active_runs.pop(actor_id, None)
+            await renderer.shutdown()
+            await app.cancel_store.clear_cancel(actor_id)
+        else:
+            # Soft-stop edits only; cron will respawn a fresh observer.
+            await renderer.shutdown()
+            app.active_runs.pop(actor_id, None)

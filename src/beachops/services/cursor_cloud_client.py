@@ -358,7 +358,11 @@ class CursorCloudClient:
         response = await self._request(
             "GET", f"/v1/agents/{agent_id}/runs/{run_id}"
         )
-        return _run_from_payload(response.json(), default_agent_id=agent_id)
+        payload = response.json()
+        run_payload = payload.get("run") if isinstance(payload, dict) else None
+        if isinstance(run_payload, dict):
+            return _run_from_payload(run_payload, default_agent_id=agent_id)
+        return _run_from_payload(payload, default_agent_id=agent_id)
 
     async def cancel_run(self, agent_id: str, run_id: str) -> None:
         await self._request(

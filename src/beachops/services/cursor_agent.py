@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -426,9 +426,15 @@ class CursorAgentService:
             reconnects += 1
             await asyncio.sleep(min(2 ** reconnects, 10))
 
-        snapshot = await self.get_run_snapshot(agent_id, run_id, api_key=api_key)
-        _apply_snapshot(state, snapshot)
-        await on_update(state)
+        # SSE can end with a bare `done` while Cursor is still working — poll
+        # until the run is actually terminal before finalizing.
+        await self._poll_until_terminal(
+            agent_id=agent_id,
+            run_id=run_id,
+            state=state,
+            on_update=on_update,
+            api_key=api_key,
+        )
 
         if plan_mode:
             await self._finalize_plan(agent_id, state, api_key=api_key)
@@ -444,9 +450,40 @@ class CursorAgentService:
             await on_update(state)
 
         status = normalize_run_status(state.status)
+        if status in {"", "running", "creating", "in_progress"}:
+            # Still not terminal after polling — keep observing later via reconciler.
+            logger.warning(
+                "observe_run leaving %s still %s (will reconcile)",
+                run_id,
+                status or "running",
+            )
+            return RunOutcome(state, status or "running")
         if status == "error":
             return RunOutcome(state, status, "Run finished with error status")
         return RunOutcome(state, status)
+
+    async def _poll_until_terminal(
+        self,
+        *,
+        agent_id: str,
+        run_id: str,
+        state: StreamState,
+        on_update: OnStreamUpdate,
+        api_key: str | None,
+        attempts: int = 90,
+        interval_sec: float = 2.0,
+    ) -> None:
+        """Refresh snapshot until Cursor reports a terminal status."""
+        for attempt in range(max(1, attempts)):
+            snapshot = await self.get_run_snapshot(agent_id, run_id, api_key=api_key)
+            _apply_snapshot(state, snapshot)
+            await on_update(state)
+            status = normalize_run_status(state.status)
+            if status in {"finished", "error", "cancelled"}:
+                return
+            if attempt + 1 >= attempts:
+                break
+            await asyncio.sleep(interval_sec)
 
     async def _consume_sse(
         self,
@@ -458,7 +495,7 @@ class CursorAgentService:
         api_key: str | None,
         last_event_id: str | None,
     ) -> bool:
-        """Return True when a terminal result/done was observed."""
+        """Return True when a terminal result was observed (not bare `done`)."""
         terminal = False
         async with self._client(api_key) as client:
             async for event in client.stream_run(
@@ -469,13 +506,15 @@ class CursorAgentService:
                 etype = event.event
                 data = event.data
                 if etype == "assistant":
-                    text = str(data.get("text") or "")
+                    text = _sse_text_payload(data)
                     if text:
                         state.append_assistant(text)
                 elif etype == "thinking":
-                    text = str(data.get("text") or "")
+                    text = _sse_text_payload(data)
                     if text:
                         state.append_thinking(text)
+                elif etype == "interaction_update":
+                    _apply_interaction_update(state, data)
                 elif etype == "tool_call":
                     name = str(data.get("name") or "tool")
                     status = str(data.get("status") or "running")
@@ -492,9 +531,9 @@ class CursorAgentService:
                 elif etype == "result":
                     status = normalize_run_status(str(data.get("status") or "finished"))
                     state.status = status
-                    text = data.get("text")
+                    text = _sse_text_payload(data)
                     if text:
-                        state.final_text = redact_text(str(text))
+                        state.final_text = redact_text(text)
                         if not state.assistant_text:
                             state.assistant_text = state.final_text
                     if data.get("durationMs") is not None:
@@ -521,7 +560,22 @@ class CursorAgentService:
                     state.final_text = redact_text(message)
                     terminal = True
                 elif etype == "done":
-                    terminal = True
+                    # Bare `done` is not enough — Cursor may close the SSE socket
+                    # while the run is still RUNNING. Only treat as terminal when
+                    # we already saw result/error or status flipped.
+                    if normalize_run_status(state.status) in {
+                        "finished",
+                        "error",
+                        "cancelled",
+                    } or state.final_text:
+                        terminal = True
+                    else:
+                        logger.info(
+                            "SSE done for %s while status=%s — will poll",
+                            run_id,
+                            state.status,
+                        )
+                        break
                 await on_update(state)
                 if terminal:
                     break
@@ -748,6 +802,48 @@ def _apply_snapshot(state: StreamState, snapshot: dict[str, Any]) -> None:
         state.duration_ms = int(snapshot["duration_ms"])
     if snapshot.get("total_tokens") is not None:
         state.total_tokens = int(snapshot["total_tokens"])
+
+
+def _sse_text_payload(data: Mapping[str, Any] | None) -> str:
+    if not isinstance(data, Mapping):
+        return ""
+    for key in ("text", "delta", "content", "message"):
+        value = data.get(key)
+        if isinstance(value, str) and value:
+            return value
+        if isinstance(value, list):
+            parts: list[str] = []
+            for item in value:
+                if isinstance(item, str) and item:
+                    parts.append(item)
+                elif isinstance(item, Mapping):
+                    chunk = item.get("text") or item.get("content")
+                    if isinstance(chunk, str) and chunk:
+                        parts.append(chunk)
+            if parts:
+                return "".join(parts)
+    return ""
+
+
+def _apply_interaction_update(state: StreamState, data: Mapping[str, Any] | None) -> None:
+    """Best-effort parse of richer SDK-shaped interaction_update events."""
+    if not isinstance(data, Mapping):
+        return
+    subtype = str(
+        data.get("subtype") or data.get("type") or data.get("kind") or ""
+    ).strip().lower()
+    text = _sse_text_payload(data)
+    if not text and isinstance(data.get("update"), Mapping):
+        text = _sse_text_payload(data["update"])  # type: ignore[index]
+        subtype = subtype or str(
+            data["update"].get("subtype") or data["update"].get("type") or ""
+        ).strip().lower()
+    if not text:
+        return
+    if "think" in subtype:
+        state.append_thinking(text)
+    else:
+        state.append_assistant(text)
 
 
 def _friendly_cursor_error(message: str) -> str:

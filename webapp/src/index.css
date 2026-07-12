@@ -179,6 +179,12 @@ h2 {
   color: var(--accent);
 }
 
+.live-badge.is-hot {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: color-mix(in srgb, var(--accent) 85%, white);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-glass));
+}
+
 .live-pulse {
   width: 7px;
   height: 7px;

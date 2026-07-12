@@ -336,7 +336,19 @@ class TelegramStreamRenderer:
         return text
 
     def _answer_text(self, state: StreamState) -> str:
-        return (state.final_text or state.assistant_text or state.render_body()).strip()
+        text = (state.final_text or state.assistant_text or "").strip()
+        if text:
+            return text
+        # Never promote the empty-stream placeholder into a "final answer".
+        body = state.render_body(
+            thinking_display=self._thinking_display,
+            preview_max=self._thinking_preview_chars,
+        ).strip()
+        from beachops.services.ui_copy import EMPTY_STREAM_HINT
+
+        if body == EMPTY_STREAM_HINT:
+            return ""
+        return body
 
     def _agent_extra(self, state: StreamState) -> str:
         if state.agent_id:
@@ -360,6 +372,16 @@ class TelegramStreamRenderer:
             thinking_display=self._thinking_display,
             preview_max=self._thinking_preview_chars,
         )
+        # On finalize with empty body, avoid leaving "Ожидаю ответ агента…".
+        from beachops.services.ui_copy import EMPTY_STREAM_HINT
+
+        if self._closed and body.strip() == EMPTY_STREAM_HINT:
+            if state.status.lower() in {"finished", "completed"}:
+                body = "Готово."
+            elif state.status.lower() in {"error", "failed"}:
+                body = "Сбой run — смотри лог агента."
+            else:
+                body = "Агент ещё работает — обновлю, когда будет ответ."
         lines = [self._header]
         agent_extra = self._agent_extra(state)
         if agent_extra:

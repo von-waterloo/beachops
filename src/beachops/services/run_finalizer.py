@@ -37,6 +37,14 @@ class RunFinalizer:
         repo_id: int,
     ) -> bool:
         """Apply terminal side-effects once. Returns False if already finalized."""
+        if outcome.status in {"", "running", "creating", "in_progress"}:
+            logger.warning(
+                "Refusing to finalize job %s while Cursor status is %s",
+                job_id,
+                outcome.status or "running",
+            )
+            return False
+
         claimed = await self._app.jobs.mark_finalized(actor_id, job_id)
         if not claimed:
             return False

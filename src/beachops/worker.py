@@ -247,7 +247,44 @@ async def reconcile_jobs(ctx: dict) -> None:
             continue
         if job.telegram_message_id is None or job.finalized_at is not None:
             continue
-        # Leave for RunReconciler polling if observer spawn is skipped.
+        token_key = job.cursor_token_key
+        api_key = app.settings.cursor_api_key_for(token_key)
+        payload: dict = {}
+        try:
+            payload = app.payload_crypto.decrypt_json(job.payload_ciphertext or "")
+        except Exception:
+            logger.warning("Could not decrypt payload for observer respawn %s", job.id)
+        mode = UserMode.ASK
+        prompt = job.summary or ""
+        try:
+            mode = UserMode(str(payload.get("mode") or "ask"))
+            prompt = str(payload.get("prompt") or prompt)
+        except ValueError:
+            pass
+        run_ctx = await app.agent_slots.get_run_context(job.actor_id)
+        repo_id = run_ctx.repo.id if run_ctx else 0
+        repo_alias = run_ctx.repo.alias if run_ctx else "repo"
+        logger.info("Respawning observer for job %s", job.id)
+        await observers.spawn(
+            job.id,
+            observe_and_finalize(
+                app=app,
+                bot=bot,
+                job_id=job.id,
+                actor_id=job.actor_id,
+                mode=mode,
+                prompt=prompt,
+                repo_id=repo_id,
+                repo_alias=repo_alias,
+                agent_id=job.cursor_agent_id,
+                run_id=job.cursor_run_id,
+                api_key=api_key,
+                token_key=token_key or "mt",
+                message_id=job.telegram_message_id,
+                chat_id=job.telegram_chat_id or job.actor_id,
+                last_event_id=job.cursor_last_event_id,
+            ),
+        )
 
 
 async def enqueue_milestone(
