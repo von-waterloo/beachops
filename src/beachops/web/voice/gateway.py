@@ -10,6 +10,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 from openai import AsyncOpenAI
@@ -25,6 +26,53 @@ MIN_COMMIT_AUDIO_BYTES = 24_000 * 2 // 10  # 4800 bytes
 def can_commit_audio_buffer(buffered_bytes: int) -> bool:
     """True when the provider buffer has enough PCM to accept a commit."""
     return buffered_bytes >= MIN_COMMIT_AUDIO_BYTES
+
+
+def build_voice_session_update(
+    *,
+    model: str,
+    transcription_model: str,
+    language: str,
+) -> dict[str, Any]:
+    """Build a valid Realtime ``session.update`` payload.
+
+    Connecting with ``gpt-realtime`` creates a **realtime** conversation socket.
+    Sending ``type: transcription`` there yields ``invalid_parameter``, after which
+    PCM appends never land in the provider buffer and commit fails with
+    ``buffer too small … 0.00ms``.
+
+    Dedicated whisper transcription sockets use ``type: transcription`` instead.
+    """
+    pcm_format = {"type": "audio/pcm", "rate": 24000}
+    if "whisper" in model:
+        return {
+            "type": "transcription",
+            "audio": {
+                "input": {
+                    "format": pcm_format,
+                    "transcription": {
+                        "model": transcription_model or model,
+                        "language": language,
+                    },
+                }
+            },
+        }
+    return {
+        "type": "realtime",
+        "model": model,
+        "output_modalities": ["text"],
+        "audio": {
+            "input": {
+                "format": pcm_format,
+                "transcription": {
+                    "model": transcription_model,
+                    "language": language,
+                },
+                # Manual commit from Mini App (tap to stop) — no server VAD.
+                "turn_detection": None,
+            }
+        },
+    }
 
 
 @dataclass(frozen=True)
@@ -80,22 +128,12 @@ class RealtimeVoiceGateway:
                 self._transcription_model,
                 extra={"action": "voice_provider_ready"},
             )
-            await connection.session.update(
-                session={
-                    "type": "transcription",
-                    "audio": {
-                        "input": {
-                            "format": {"type": "audio/pcm", "rate": 24000},
-                            "noise_reduction": {"type": "near_field"},
-                            "transcription": {
-                                "model": self._transcription_model,
-                                "language": self._language,
-                            },
-                            "turn_detection": None,
-                        }
-                    },
-                }
+            session_payload = build_voice_session_update(
+                model=self._model,
+                transcription_model=self._transcription_model,
+                language=self._language,
             )
+            await connection.session.update(session=session_payload)
             events_task = asyncio.create_task(
                 self._forward_provider_events(connection, websocket)
             )
@@ -191,7 +229,9 @@ class RealtimeVoiceGateway:
                         await connection.input_audio_buffer.clear()
                         buffered_bytes = 0
                     elif event_type == "audio.start":
-                        await connection.input_audio_buffer.clear()
+                        # Reset turn counter; clear only leftover from a prior turn.
+                        if buffered_bytes > 0:
+                            await connection.input_audio_buffer.clear()
                         buffered_bytes = 0
                         await websocket.send_json({"type": "audio.ready"})
                     elif event_type == "plan.request" and on_plan_request is not None:
@@ -244,7 +284,12 @@ class RealtimeVoiceGateway:
         partials: dict[str, str] = {}
         async for event in connection:
             event_type = getattr(event, "type", "")
-            if event_type == "conversation.item.input_audio_transcription.delta":
+            if event_type == "session.updated":
+                logger.info(
+                    "Voice provider session updated",
+                    extra={"action": "voice_session_updated"},
+                )
+            elif event_type == "conversation.item.input_audio_transcription.delta":
                 delta = getattr(event, "delta", None)
                 if delta:
                     item_id = str(getattr(event, "item_id", "current"))
@@ -277,6 +322,7 @@ class RealtimeVoiceGateway:
                 error = getattr(event, "error", None)
                 code = getattr(error, "code", None) or "provider_error"
                 message = getattr(error, "message", None) or "Voice provider error"
+                param = getattr(error, "param", None)
                 message_text = str(message)
                 if "buffer too small" in message_text.lower():
                     code = "empty_audio"
@@ -284,8 +330,16 @@ class RealtimeVoiceGateway:
                         "Слишком коротко — подержите кнопку "
                         "и говорите не меньше секунды."
                     )
+                elif str(code) == "invalid_parameter":
+                    message_text = (
+                        "Голосовой канал не настроен. Попробуйте ещё раз "
+                        "или переоткройте Mini App."
+                    )
                 logger.warning(
-                    "Voice provider error event",
+                    "Voice provider error event code=%s param=%s message=%s",
+                    code,
+                    param,
+                    message,
                     extra={
                         "action": "voice_provider_error",
                         "error_code": str(code),

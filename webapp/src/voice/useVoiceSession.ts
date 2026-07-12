@@ -314,14 +314,26 @@ export function useVoiceSession() {
       if (startingCaptureRef.current) return
       startingCaptureRef.current = true
       stopPlayback()
+      // Create/resume AudioContext in the user-gesture stack before any await —
+      // Telegram WebView otherwise leaves it suspended → 0 PCM → empty commit.
+      const AudioCtx = window.AudioContext
+        ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      if (!AudioCtx) {
+        throw new DOMException('AudioContext unavailable', 'NotSupportedError')
+      }
+      const context = audioContextRef.current && audioContextRef.current.state !== 'closed'
+        ? audioContextRef.current
+        : new AudioCtx({ latencyHint: 'interactive' })
+      audioContextRef.current = context
+      if (context.state === 'suspended') {
+        await context.resume()
+      }
+
       sendJson({ type: 'barge_in' })
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       })
       mediaStreamRef.current = stream
-      const context = new AudioContext({ latencyHint: 'interactive' })
-      audioContextRef.current = context
-      // Suspended context = zero PCM → OpenAI "buffer too small … 0.00ms".
       if (context.state === 'suspended') {
         await context.resume()
       }

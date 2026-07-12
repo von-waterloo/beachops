@@ -94,7 +94,8 @@ class Settings(BaseSettings):
         default=300, alias="WEB_AUTH_CHALLENGE_TTL_SEC", ge=60, le=900
     )
     # WebSocket connect model for Realtime API (not nested STT).
-    # gpt-realtime-whisper connects but rejects session.update on many keys.
+    # Use gpt-realtime + nested gpt-4o-transcribe (session type "realtime").
+    # gpt-realtime-whisper needs session type "transcription" instead.
     voice_realtime_model: str = Field(
         default="gpt-realtime", alias="VOICE_REALTIME_MODEL"
     )
