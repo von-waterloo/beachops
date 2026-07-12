@@ -13,6 +13,20 @@ jobs:
   python:
     name: Python (pytest)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: bot
+          POSTGRES_PASSWORD: ci-migration-password
+          POSTGRES_DB: tg_cursor_bot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bot -d tg_cursor_bot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -24,6 +38,13 @@ jobs:
 
       - name: Install package (dev)
         run: pip install -e ".[dev]"
+
+      - name: Verify Alembic migrations
+        env:
+          DATABASE_URL: postgresql://bot:ci-migration-password@localhost:5432/tg_cursor_bot
+        run: |
+          alembic upgrade head
+          alembic current --check-heads
 
       - name: Pytest
         env:

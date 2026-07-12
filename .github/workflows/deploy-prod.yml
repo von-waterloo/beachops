@@ -1,7 +1,7 @@
 # Prod deploy on self-hosted runner host-185 (185.244.49.94).
 #
 # Triggers:
-#   1) Auto: push to main or dev -> wait for green CI -> deploy that SHA
+#   1) Auto: push to dev -> wait for green CI -> deploy that SHA
 #   2) Manual / bot: workflow_dispatch with input sha (rollback etc.)
 #
 # Secrets: ENV_PROD_BEACHOPS (preferred) or ENV_PROD = full prod .env
@@ -11,7 +11,7 @@ name: Deploy prod
 
 on:
   push:
-    branches: [main, dev]
+    branches: [dev]
   workflow_dispatch:
     inputs:
       sha:
@@ -109,6 +109,24 @@ jobs:
         with:
           ref: ${{ env.DEPLOY_SHA }}
           clean: true
+          fetch-depth: 0
+
+      - name: Validate deployment order
+        working-directory: /home/const/tg-cursor-bot
+        run: |
+          set -euo pipefail
+          previous_sha="$(cat .deployed_sha 2>/dev/null || true)"
+          echo "PREVIOUS_DEPLOY_SHA=$previous_sha" >> "$GITHUB_ENV"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ -z "$previous_sha" ]; then
+            echo "Skipping ancestry check for manual deployment or first deploy"
+            exit 0
+          fi
+          if ! git -C "$GITHUB_WORKSPACE" merge-base --is-ancestor "$previous_sha" "$DEPLOY_SHA"; then
+            echo "Refusing non-monotonic auto-deploy: $DEPLOY_SHA does not contain live $previous_sha." >&2
+            echo "Merge or rebase the live dev history before deploying." >&2
+            exit 1
+          fi
+          echo "Deployment order verified: $previous_sha -> $DEPLOY_SHA"
 
       - name: Sync code into prod directory
         run: |
@@ -116,6 +134,8 @@ jobs:
           mkdir -p "$PROD_DIR"
           rsync -a --delete \
             --exclude '.env' \
+            --exclude '.deployed_sha' \
+            --exclude '.deployed_reason' \
             --exclude '.git/' \
             --exclude 'data/' \
             --exclude '.venv/' \
@@ -127,9 +147,9 @@ jobs:
             --exclude '*.sql' \
             --exclude 'actions-runner/' \
             ./ "$PROD_DIR"/
-          printf '%s\n' "$DEPLOY_SHA" > "$PROD_DIR/.deployed_sha"
-          printf '%s\n' "$DEPLOY_REASON" > "$PROD_DIR/.deployed_reason"
-          echo "Synced $DEPLOY_SHA ($DEPLOY_REASON) -> $PROD_DIR"
+          printf '%s\n' "$DEPLOY_SHA" > "$PROD_DIR/.candidate_sha"
+          printf '%s\n' "$DEPLOY_REASON" > "$PROD_DIR/.candidate_reason"
+          echo "Synced candidate $DEPLOY_SHA ($DEPLOY_REASON) -> $PROD_DIR"
 
       - name: Write .env from secrets
         working-directory: /home/const/tg-cursor-bot
@@ -155,20 +175,11 @@ jobs:
           fi
           python3 -c "import json,pathlib,sys; raw=pathlib.Path('.env').read_text(encoding='utf-8',errors='replace'); val=next((line.split('=',1)[1] for line in raw.splitlines() if line.startswith('REPOSITORY_POLICY_JSON=')), ''); sys.exit('REPOSITORY_POLICY_JSON missing') if not val else None; json.loads(val); print('REPOSITORY_POLICY_JSON ok')"
 
-      - name: Pre-deploy database backup
+      - name: Start deployment prerequisites
         working-directory: /home/const/tg-cursor-bot
         run: |
           set -euo pipefail
-          if ! docker compose -p "$COMPOSE_PROJECT" ps --status running --services 2>/dev/null | grep -qx postgres; then
-            echo "Postgres not running yet - skip pre-deploy backup"
-            exit 0
-          fi
-          stamp="$(date +%Y%m%d-%H%M%S)"
-          backup="/tmp/beachops-predeploy-${stamp}-${DEPLOY_SHA:0:7}.sql"
-          docker compose -p "$COMPOSE_PROJECT" exec -T postgres \
-            pg_dump -U bot tg_cursor_bot > "$backup"
-          ls -lh "$backup"
-          ls -1t /tmp/beachops-predeploy-*.sql 2>/dev/null | tail -n +6 | xargs -r rm -f
+          docker compose -p "$COMPOSE_PROJECT" up -d --wait postgres redis
 
       - name: Free disk if low
         run: |
@@ -183,13 +194,7 @@ jobs:
             echo "Disk OK (${AVAIL_GB}G free)"
           fi
 
-      - name: Stop Telegram poller before recreate
-        working-directory: /home/const/tg-cursor-bot
-        run: |
-          set -euo pipefail
-          docker compose -p "$COMPOSE_PROJECT" stop -t 30 bot || true
-
-      - name: Build and start stack
+      - name: Build candidate images
         working-directory: /home/const/tg-cursor-bot
         env:
           DOCKER_BUILDKIT: "1"
@@ -201,15 +206,50 @@ jobs:
             COMPOSE+=(-f docker-compose.ops.yml)
             echo "Including docker-compose.ops.yml (OPS SSH key mount)"
           fi
-          "${COMPOSE[@]}" up --build -d --remove-orphans
+          "${COMPOSE[@]}" build
+
+      - name: Back up database before migration
+        working-directory: /home/const/tg-cursor-bot
+        run: |
+          set -euo pipefail
+          stamp="$(date +%Y%m%d-%H%M%S)"
+          backup="/tmp/beachops-predeploy-${stamp}-${DEPLOY_SHA:0:7}.sql"
+          docker compose -p "$COMPOSE_PROJECT" exec -T postgres \
+            pg_dump -U bot tg_cursor_bot > "$backup"
+          ls -lh "$backup"
+          ls -1t /tmp/beachops-predeploy-*.sql 2>/dev/null | tail -n +6 | xargs -r rm -f
+
+      - name: Run migration preflight
+        working-directory: /home/const/tg-cursor-bot
+        run: |
+          set -euo pipefail
+          # Do not stop the current app tier until this candidate can migrate the live DB.
+          docker compose -p "$COMPOSE_PROJECT" run --rm --no-deps migrate
+          docker compose -p "$COMPOSE_PROJECT" run --rm --no-deps migrate \
+            alembic current --check-heads
+
+      - name: Cut over application services
+        working-directory: /home/const/tg-cursor-bot
+        run: |
+          set -euo pipefail
+          # The migration preflight completed successfully; a brief bot restart now avoids
+          # running two Telegram long-pollers with the same token.
+          echo "CUTOVER_STARTED=1" >> "$GITHUB_ENV"
+          docker compose -p "$COMPOSE_PROJECT" stop -t 30 bot || true
+          COMPOSE=(docker compose -p "$COMPOSE_PROJECT" -f docker-compose.yml)
+          if [ -f docker-compose.ops.yml ] && grep -qE '^OPS_SSH_KEY_HOST_PATH=.+' .env; then
+            COMPOSE+=(-f docker-compose.ops.yml)
+          fi
+          "${COMPOSE[@]}" up -d --no-deps --force-recreate \
+            --remove-orphans bot worker api webapp
 
       - name: Wait for health
         run: |
           set -euo pipefail
-          echo "Waiting for http://127.0.0.1:8080/health ..."
+          echo "Waiting for http://127.0.0.1:8080/ready ..."
           for i in $(seq 1 60); do
-            if curl -sf http://127.0.0.1:8080/health >/dev/null; then
-              echo "Healthy after ~${i}x5s (sha=$DEPLOY_SHA reason=$DEPLOY_REASON)"
+            if curl -sf http://127.0.0.1:8080/ready >/dev/null; then
+              echo "Ready after ~${i}x5s (sha=$DEPLOY_SHA reason=$DEPLOY_REASON)"
               exit 0
             fi
             sleep 5
@@ -220,6 +260,15 @@ jobs:
           docker compose -p "$COMPOSE_PROJECT" logs --tail=120 bot worker api webapp migrate || true
           exit 1
 
+      - name: Mark deployment successful
+        working-directory: /home/const/tg-cursor-bot
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$DEPLOY_SHA" > .deployed_sha
+          printf '%s\n' "$DEPLOY_REASON" > .deployed_reason
+          rm -f .candidate_sha
+          rm -f .candidate_reason
+
       - name: Show status
         if: success()
         working-directory: /home/const/tg-cursor-bot
@@ -228,6 +277,50 @@ jobs:
           echo "Reason: $(cat .deployed_reason 2>/dev/null || echo unknown)"
           docker compose -p "$COMPOSE_PROJECT" ps
           docker compose -p "$COMPOSE_PROJECT" logs --tail=40 bot worker api
+
+      - name: Restore previous app after failed cutover
+        if: failure() && env.CUTOVER_STARTED == '1' && env.PREVIOUS_DEPLOY_SHA != ''
+        working-directory: /home/const/tg-cursor-bot
+        env:
+          DOCKER_BUILDKIT: "1"
+          COMPOSE_DOCKER_CLI_BUILD: "1"
+        run: |
+          set -euo pipefail
+          echo "Restoring application image from $PREVIOUS_DEPLOY_SHA"
+          git -C "$GITHUB_WORKSPACE" checkout --force "$PREVIOUS_DEPLOY_SHA"
+          rsync -a --delete \
+            --exclude '.env' \
+            --exclude '.deployed_sha' \
+            --exclude '.deployed_reason' \
+            --exclude '.git/' \
+            --exclude 'data/' \
+            --exclude '.venv/' \
+            --exclude 'node_modules/' \
+            --exclude 'webapp/node_modules/' \
+            --exclude 'webapp/dist/' \
+            --exclude '.pytest_cache/' \
+            --exclude '__pycache__/' \
+            --exclude '*.sql' \
+            --exclude 'actions-runner/' \
+            "$GITHUB_WORKSPACE"/ "$PROD_DIR"/
+          docker compose -p "$COMPOSE_PROJECT" build
+          # Do not downgrade the database automatically. Schema changes must remain
+          # expand/contract compatible for this code rollback to be safe.
+          COMPOSE=(docker compose -p "$COMPOSE_PROJECT" -f docker-compose.yml)
+          if [ -f docker-compose.ops.yml ] && grep -qE '^OPS_SSH_KEY_HOST_PATH=.+' .env; then
+            COMPOSE+=(-f docker-compose.ops.yml)
+          fi
+          "${COMPOSE[@]}" up -d --no-deps --force-recreate \
+            --remove-orphans bot worker api webapp
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8080/ready >/dev/null; then
+              echo "Previous application restored after ~${i}x5s"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Previous application did not become ready" >&2
+          exit 1
 
       - name: Dump status on failure
         if: failure()
