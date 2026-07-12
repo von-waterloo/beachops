@@ -22,10 +22,18 @@ class SshHost:
     user: str
     host: str
     port: int = 22
+    # Optional jump host alias (e.g. ru via eu when direct path is firewalled).
+    via: str | None = None
 
 
 def parse_ops_ssh_hosts(raw: str) -> dict[str, SshHost]:
-    """Parse `alias=user@host:port,alias2=user@host` allowlist."""
+    """Parse ``alias=user@host:port`` allowlist.
+
+    Optional jump: ``alias=user@host:port/via=otheralias`` (ProxyCommand via
+    the other allowlisted host). Example for RU behind a reverse tunnel on EU::
+
+        eu=const@185.244.49.94,ru=root@127.0.0.1:2222/via=eu
+    """
     hosts: dict[str, SshHost] = {}
     for chunk in (raw or "").split(","):
         item = chunk.strip()
@@ -36,6 +44,11 @@ def parse_ops_ssh_hosts(raw: str) -> dict[str, SshHost]:
         target = target.strip()
         if not alias or "@" not in target:
             continue
+        via: str | None = None
+        if "/via=" in target:
+            target, via_raw = target.rsplit("/via=", 1)
+            via = via_raw.strip().lower() or None
+            target = target.strip()
         user, hostport = target.split("@", 1)
         host = hostport
         port = 22
@@ -46,7 +59,9 @@ def parse_ops_ssh_hosts(raw: str) -> dict[str, SshHost]:
             except ValueError:
                 continue
         if user and host:
-            hosts[alias] = SshHost(alias=alias, user=user, host=host, port=port)
+            hosts[alias] = SshHost(
+                alias=alias, user=user, host=host, port=port, via=via
+            )
     return hosts
 
 
@@ -77,12 +92,31 @@ class OpsSshService:
     def list_aliases(self) -> list[str]:
         return sorted(self._hosts)
 
+    def _proxy_command(self, jump: SshHost) -> str:
+        """OpenSSH ProxyCommand that dials %h:%p through ``jump``."""
+        parts = [
+            "ssh",
+            "-i",
+            self._key_path,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-W",
+            "%h:%p",
+            "-p",
+            str(jump.port),
+            f"{jump.user}@{jump.host}",
+        ]
+        return " ".join(shlex.quote(p) for p in parts)
+
     async def ssh_exec(self, host_alias: str, command: str) -> str:
         alias = (host_alias or "").strip().lower()
         host = self._hosts.get(alias)
         if host is None:
             raise OpsSshError(
-                f"unknown host alias '{host_alias}'; allowed: {', '.join(self.list_aliases()) or 'none'}"
+                f"unknown host alias '{host_alias}'; "
+                f"allowed: {', '.join(self.list_aliases()) or 'none'}"
             )
         cmd = (command or "").strip()
         if not cmd:
@@ -100,13 +134,23 @@ class OpsSshService:
             "StrictHostKeyChecking=accept-new",
             "-p",
             str(host.port),
-            f"{host.user}@{host.host}",
-            cmd,
         ]
+        if host.via:
+            jump = self._hosts.get(host.via)
+            if jump is None:
+                raise OpsSshError(
+                    f"jump host '{host.via}' for '{alias}' is not in OPS_SSH_HOSTS"
+                )
+            if jump.via:
+                raise OpsSshError(f"nested jumps not supported ({alias} via {host.via})")
+            ssh_cmd.extend(["-o", f"ProxyCommand={self._proxy_command(jump)}"])
+        ssh_cmd.extend([f"{host.user}@{host.host}", cmd])
         return await self._run(ssh_cmd)
 
     async def docker_ps(self, host_alias: str) -> str:
-        return await self.ssh_exec(host_alias, "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'")
+        return await self.ssh_exec(
+            host_alias, "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'"
+        )
 
     async def docker_logs(
         self,

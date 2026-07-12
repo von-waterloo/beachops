@@ -17,6 +17,17 @@ def test_parse_ops_ssh_hosts() -> None:
     assert hosts["eu"].user == "const"
     assert hosts["eu"].host == "185.244.49.94"
     assert hosts["ru"].port == 22
+    assert hosts["ru"].via is None
+
+
+def test_parse_ops_ssh_hosts_with_via_jump() -> None:
+    hosts = parse_ops_ssh_hosts(
+        "eu=const@185.244.49.94,ru=root@127.0.0.1:2222/via=eu"
+    )
+    assert hosts["ru"].host == "127.0.0.1"
+    assert hosts["ru"].port == 2222
+    assert hosts["ru"].via == "eu"
+    assert hosts["eu"].via is None
 
 
 def test_voice_prompt_prefix() -> None:
