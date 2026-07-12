@@ -235,7 +235,7 @@ main {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  margin: 0 4px 14px;
+  margin: 0 4px 10px;
 }
 
 .model-chip {
@@ -282,7 +282,7 @@ main {
 }
 
 .control-room .voice-stage {
-  min-height: 360px;
+  min-height: min(380px, 52svh);
 }
 
 .voice-heading,
@@ -290,7 +290,7 @@ main {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  padding: 10px 4px 18px;
+  padding: 6px 4px 12px;
 }
 
 .eyebrow {
@@ -320,17 +320,18 @@ main {
 }
 
 .voice-stage {
-  min-height: 420px;
-  padding: 52px 16px 18px;
+  min-height: min(400px, 56svh);
+  padding: 12px 14px 14px;
   position: relative;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  gap: 8px;
   border: 1px solid var(--line);
-  border-radius: 31px;
+  border-radius: 28px;
   background:
-    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 32%),
+    radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 34%),
     linear-gradient(150deg, color-mix(in srgb, var(--surface-high) 95%, transparent), var(--surface));
   box-shadow: var(--shadow), inset 0 1px rgba(255, 255, 255, 0.05);
   isolation: isolate;
@@ -347,16 +348,32 @@ main {
     0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
+.voice-stage-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  flex: 0 0 auto;
+  z-index: 2;
+}
+
+.voice-stage-top-spacer {
+  flex: 1 1 auto;
+}
+
 .voice-stage-center {
-  position: absolute;
-  inset: 52px 0 92px;
+  position: relative;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
+  min-height: 200px;
   pointer-events: none;
+  z-index: 1;
 }
 
 .voice-mode-toggle {
@@ -397,21 +414,20 @@ main {
 }
 
 .voice-stage-footer {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 14px;
+  position: relative;
   width: 100%;
-  min-height: 88px;
+  min-height: 48px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
+  flex: 0 0 auto;
   pointer-events: auto;
+  z-index: 2;
 }
 
 .phase-listening .voice-stage-footer {
-  min-height: 40px;
+  min-height: 28px;
 }
 
 .voice-stage::before {
@@ -443,29 +459,27 @@ main {
 
 .connection-chip,
 .job-chip {
-  position: absolute;
+  position: relative;
   gap: 6px;
+  max-width: min(56vw, 210px);
   padding: 5px 8px;
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--muted);
-  background: rgba(0, 0, 0, 0.11);
+  background: rgba(0, 0, 0, 0.18);
   font-size: 0.63rem;
   font-weight: 680;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .connection-chip {
-  top: 16px;
-  right: 16px;
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .job-chip {
-  top: 16px;
-  left: 16px;
-  max-width: min(58vw, 220px);
-  overflow: hidden;
   color: var(--cyan);
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -717,7 +731,7 @@ main {
 }
 
 .voice-status {
-  min-height: 52px;
+  min-height: 0;
   margin-top: 0;
   text-align: center;
 }
@@ -1832,21 +1846,21 @@ button.work-card.is-selected {
 
 @media (max-height: 690px) {
   .voice-stage {
-    min-height: 345px;
-    padding-top: 48px;
+    min-height: min(320px, 48svh);
+    padding: 10px 12px 12px;
   }
 
   .voice-stage-center {
-    inset: 44px 0 72px;
+    min-height: 160px;
+    gap: 8px;
   }
 
   .voice-stage-footer {
-    min-height: 76px;
-    bottom: 10px;
+    min-height: 36px;
   }
 
   .phase-listening .voice-stage-footer {
-    min-height: 36px;
+    min-height: 24px;
   }
 
   .orb-button {
@@ -1878,13 +1892,27 @@ button.work-card.is-selected {
 /* Control Room hero + worker strip */
 .control-room .control-hero {
   position: relative;
-  margin: 12px 14px 8px;
-  padding: 18px 16px 16px;
+  margin: 10px 14px 8px;
+  padding: 14px 14px 12px;
   overflow: hidden;
   border: 1px solid rgba(210, 240, 228, 0.16);
-  border-radius: 22px;
+  border-radius: 20px;
   color: #f2faf6;
   background: linear-gradient(160deg, #1a3a34 0%, #0b1613 100%);
+}
+
+.control-hero-copy h1 {
+  margin: 2px 0 4px;
+  color: #f2faf6;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.control-hero-copy p {
+  margin: 0;
+  color: rgba(210, 240, 228, 0.72);
+  font-size: 0.78rem;
+  line-height: 1.35;
 }
 
 .control-hero-glow {
@@ -1917,7 +1945,7 @@ button.work-card.is-selected {
 
 .control-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-top: 14px;
 }

@@ -239,7 +239,9 @@ function ControlRoom({
         onSelectFilter={selectFilter}
       />
 
-      <TipRail onOpenHelp={() => setGuideMode('help')} />
+      {tab !== 'voice' && (
+        <TipRail onOpenHelp={() => setGuideMode('help')} />
+      )}
 
       <main id="main">
         <AnimatePresence mode="wait" initial={false}>
@@ -251,39 +253,13 @@ function ControlRoom({
             transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
           >
             {tab === 'voice' ? (
-              <>
-                <VoiceConsole
-                  activeJob={activeJob}
-                  latestEvent={stream.latestEvent}
-                  cursorModelKey={cursorModelKey || user.cursorModelKey}
-                  models={user.models ?? []}
-                  onModelChange={setCursorModelKey}
-                />
-                <DashboardPanels
-                  tab="overview"
-                  data={dashboard.data}
-                  loading={dashboard.loading}
-                  error={dashboard.error ?? stream.error}
-                  liveEvents={liveEvents}
-                  runtimeFilter={runtimeFilter}
-                  focusedJobId={focusedJobId}
-                  onRuntimeFilterChange={selectFilter}
-                  onSelectJob={selectJob}
-                  onRefresh={() => void dashboard.refresh()}
-                  onDecision={(approvalId, decision, revision) =>
-                    dashboard.decideApproval(approvalId, decision, revision)
-                  }
-                  onAddRepository={(input) => dashboard.addRepository(input)}
-                  onUpdateRepository={(repoId, input) =>
-                    dashboard.updateRepository(repoId, input)
-                  }
-                  onActivateSelfImprove={() => dashboard.activateSelfImprove()}
-                  onUpdateAgent={(slotId, input) => dashboard.updateAgent(slotId, input)}
-                  onSubmitPrompt={async (input) => {
-                    await dashboard.submitPrompt(input)
-                  }}
-                />
-              </>
+              <VoiceConsole
+                activeJob={activeJob}
+                latestEvent={stream.latestEvent}
+                cursorModelKey={cursorModelKey || user.cursorModelKey}
+                models={user.models ?? []}
+                onModelChange={setCursorModelKey}
+              />
             ) : (
               <DashboardPanels
                 tab={tab}

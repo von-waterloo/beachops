@@ -285,21 +285,23 @@ export function VoiceConsole({
             {Array.from({ length: 12 }, (_, index) => <i key={index} />)}
           </div>
         )}
-        {!isListening && (
-          <>
+
+        <div className="voice-stage-top">
+          {!isListening && activeJob ? (
+            <div className="job-chip" role="status">
+              <Cloud size={12} />
+              <span>{activeJob.title.slice(0, 36)}</span>
+            </div>
+          ) : (
+            <span className="voice-stage-top-spacer" aria-hidden="true" />
+          )}
+          {!isListening && (
             <div className="connection-chip">
               <span className={state.connected ? 'online-dot' : 'offline-dot'} />
               {state.connected ? 'На связи' : 'Переподключаюсь'}
             </div>
-
-            {activeJob && (
-              <div className="job-chip" role="status">
-                <Cloud size={12} />
-                <span>{activeJob.title.slice(0, 42)}</span>
-              </div>
-            )}
-          </>
-        )}
+          )}
+        </div>
 
         <div className="voice-stage-center">
           <div className="voice-mode-toggle" role="toolbar" aria-label="Режим">
