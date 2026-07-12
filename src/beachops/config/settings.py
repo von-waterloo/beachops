@@ -13,10 +13,9 @@ from beachops.domain.cursor_tokens import CursorTokenKey
 from beachops.domain.models import UserMode
 from beachops.domain.security import Role
 
-# Cursor Cloud Agent (Anthropic vision backend): up to 100 images per request.
-# Above 20, max image dimension drops from 8000px to 2000px per provider rules.
-CURSOR_MAX_IMAGES_PER_PROMPT = 100
-DEFAULT_PHOTO_MAX_COUNT = 20
+# Cloud Agents API v1 accepts at most 5 images per prompt.
+CURSOR_MAX_IMAGES_PER_PROMPT = 5
+DEFAULT_PHOTO_MAX_COUNT = 5
 DEFAULT_DOCUMENT_MAX_CHARS = 30_000
 DEFAULT_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024
 
@@ -29,8 +28,10 @@ class Settings(BaseSettings):
     )
 
     tg_bot_token: str = Field(alias="TG_BOT_TOKEN")
+    tg_bot_username: str = Field(default="", alias="TG_BOT_USERNAME")
     cursor_api_key: str = Field(alias="CURSOR_API_KEY")
     cursor_api_key_mt2: str = Field(default="", alias="CURSOR_API_KEY_MT2")
+    cursor_api_key_mt3: str = Field(default="", alias="CURSOR_API_KEY_MT3")
     openai_api_key: str = Field(alias="OPENAI_API_KEY")
     whitelist_user_ids: Annotated[list[int], NoDecode] = Field(
         default_factory=list, alias="WHITELIST_USER_IDS"
@@ -57,6 +58,10 @@ class Settings(BaseSettings):
     webapp_base_url: str = Field(default="", alias="WEBAPP_BASE_URL")
     github_token: str = Field(default="", alias="GITHUB_TOKEN")
     github_repo: str = Field(default="", alias="GITHUB_REPO")
+    github_oauth_client_id: str = Field(default="", alias="GITHUB_OAUTH_CLIENT_ID")
+    github_oauth_client_secret: str = Field(
+        default="", alias="GITHUB_OAUTH_CLIENT_SECRET"
+    )
     github_deploy_workflow: str = Field(
         default="deploy-prod.yml", alias="GITHUB_DEPLOY_WORKFLOW"
     )
@@ -88,18 +93,27 @@ class Settings(BaseSettings):
     web_auth_challenge_ttl_sec: int = Field(
         default=300, alias="WEB_AUTH_CHALLENGE_TTL_SEC", ge=60, le=900
     )
-    # WebSocket connect model for Realtime API (not the nested transcription model).
+    # WebSocket connect model for Realtime API (not nested STT).
+    # gpt-realtime-whisper connects but rejects session.update on many keys.
     voice_realtime_model: str = Field(
         default="gpt-realtime", alias="VOICE_REALTIME_MODEL"
     )
     # Nested audio.input.transcription.model inside the realtime session.
-    voice_transcribe_model: str = Field(
-        default="gpt-4o-transcribe", alias="VOICE_TRANSCRIBE_MODEL"
+    voice_input_transcribe_model: str = Field(
+        default="gpt-4o-transcribe",
+        alias="VOICE_INPUT_TRANSCRIBE_MODEL",
     )
-    voice_tts_model: str = Field(default="gpt-4o-mini-tts", alias="VOICE_TTS_MODEL")
+    # Empty = built-in BeachOps keyword bias (domain/voice_persona.py).
+    voice_input_transcribe_prompt: str = Field(
+        default="", alias="VOICE_INPUT_TRANSCRIBE_PROMPT"
+    )
+    # Pin Dec 2025 TTS snapshot (alias gpt-4o-mini-tts → same; pin for stability).
+    voice_tts_model: str = Field(
+        default="gpt-4o-mini-tts-2025-12-15", alias="VOICE_TTS_MODEL"
+    )
     # marin / cedar = best quality per OpenAI; cedar reads more "commander".
     voice_tts_voice: str = Field(default="cedar", alias="VOICE_TTS_VOICE")
-    # Empty = built-in Spartan orchestrator instructions (domain/voice_persona.py).
+    # Empty = built-in BeachOps orchestrator instructions (domain/voice_persona.py).
     voice_tts_instructions: str = Field(default="", alias="VOICE_TTS_INSTRUCTIONS")
     voice_spoken_max_chars: int = Field(
         default=900, alias="VOICE_SPOKEN_MAX_CHARS", ge=120, le=4000
@@ -107,6 +121,29 @@ class Settings(BaseSettings):
     voice_max_session_sec: int = Field(
         default=300, alias="VOICE_MAX_SESSION_SEC", ge=30, le=900
     )
+    # Mid-run spoken milestones in Mini App voice (off = conversational final only).
+    voice_milestone_tts: bool = Field(default=False, alias="VOICE_MILESTONE_TTS")
+    voice_milestone_min_interval_sec: int = Field(
+        default=15, alias="VOICE_MILESTONE_MIN_INTERVAL_SEC", ge=5, le=120
+    )
+    voice_milestone_max_per_job: int = Field(
+        default=4, alias="VOICE_MILESTONE_MAX_PER_JOB", ge=0, le=20
+    )
+    # After /plan finishes, wait for owner Approve (then enqueue DO).
+    auto_approve_plans: bool = Field(default=False, alias="AUTO_APPROVE_PLANS")
+    # HTTP MCP for cloud agents (SSH / docker logs on owner servers).
+    mcp_enabled: bool = Field(default=False, alias="MCP_ENABLED")
+    mcp_public_url: str = Field(default="", alias="MCP_PUBLIC_URL")
+    mcp_bearer_token: str = Field(default="", alias="MCP_BEARER_TOKEN")
+    # Comma-separated host aliases: name=user@host:port (keys via OPS_SSH_KEY_PATH).
+    ops_ssh_hosts: str = Field(default="", alias="OPS_SSH_HOSTS")
+    ops_ssh_key_path: str = Field(default="", alias="OPS_SSH_KEY_PATH")
+    ops_ssh_timeout_sec: int = Field(default=30, alias="OPS_SSH_TIMEOUT_SEC", ge=5, le=120)
+    ops_ssh_max_output_chars: int = Field(
+        default=12_000, alias="OPS_SSH_MAX_OUTPUT_CHARS", ge=500, le=100_000
+    )
+    # Telegram + Mini App voice: confirm transcript before dispatch.
+    voice_require_confirm: bool = Field(default=False, alias="VOICE_REQUIRE_CONFIRM")
     callback_token_ttl_sec: int = Field(
         default=600, alias="CALLBACK_TOKEN_TTL_SEC", ge=30, le=86_400
     )
@@ -117,8 +154,13 @@ class Settings(BaseSettings):
         default=60, alias="CALLBACK_RATE_WINDOW_SEC", ge=1, le=3_600
     )
     workspace_path: Path = Field(default=Path("./data/workspace"), alias="WORKSPACE_PATH")
+    cursor_api_base_url: str = Field(
+        default="https://api.cursor.com", alias="CURSOR_API_BASE_URL"
+    )
     cursor_model: str = Field(default="composer-2.5", alias="CURSOR_MODEL")
-    transcribe_model: str = Field(default="gpt-4o-mini-transcribe", alias="TRANSCRIBE_MODEL")
+    transcribe_model: str = Field(
+        default="gpt-4o-mini-transcribe-2025-12-15", alias="TRANSCRIBE_MODEL"
+    )
     embedding_model: str = Field(default="text-embedding-3-small", alias="EMBEDDING_MODEL")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     default_branch: str = Field(default="dev", alias="DEFAULT_BRANCH")
@@ -165,16 +207,6 @@ class Settings(BaseSettings):
     forward_context_max_items: int = Field(default=25, alias="FORWARD_CONTEXT_MAX_ITEMS")
     agent_slots_max: int = Field(default=8, alias="AGENT_SLOTS_MAX", ge=5, le=10)
 
-    # Опциональный SSH-доступ Cursor-агента к серверу для read-only docker-диагностики.
-    # ВНИМАНИЕ: приватный ключ отдаётся в песочницу cloud-агента (см. docs/THREAT_MODEL.md).
-    # Выключено по умолчанию — заполните все agent_ssh_* сразу, иначе фича не активна.
-    agent_ssh_host: str = Field(default="", alias="AGENT_SSH_HOST")
-    agent_ssh_port: int = Field(default=22, alias="AGENT_SSH_PORT", ge=1, le=65_535)
-    agent_ssh_user: str = Field(default="", alias="AGENT_SSH_USER")
-    agent_ssh_private_key_b64: str = Field(default="", alias="AGENT_SSH_PRIVATE_KEY_B64")
-    agent_ssh_label: str = Field(default="сервер", alias="AGENT_SSH_LABEL")
-    agent_ssh_remote_dir: str = Field(default="", alias="AGENT_SSH_REMOTE_DIR")
-
     @field_validator(
         "whitelist_user_ids",
         "admin_user_ids",
@@ -209,21 +241,9 @@ class Settings(BaseSettings):
     def parse_path(cls, value: object) -> Path:
         return Path(str(value))
 
-    def self_improve_repo_url_resolved(self) -> str:
-        """HTTPS URL for self-improve: explicit env, else derived from GITHUB_REPO."""
-        raw = self.self_improve_repo_url.strip()
-        if raw:
-            return raw
-        github_repo = self.github_repo.strip().removesuffix(".git").strip("/")
-        if github_repo.count("/") == 1:
-            return f"https://github.com/{github_repo}"
-        return ""
-
     def self_improve_repo_normalized(self) -> str | None:
-        """Canonical HTTPS URL of the self-improve repo, or None if disabled/unset."""
-        if not self.self_improve_enabled:
-            return None
-        raw = self.self_improve_repo_url_resolved()
+        """Canonical HTTPS URL of the self-improve fork, if configured in env."""
+        raw = self.self_improve_repo_url.strip()
         if not raw:
             return None
         from beachops.services.repository_policy import (
@@ -274,9 +294,6 @@ class Settings(BaseSettings):
     def can_approve(self, user_id: int) -> bool:
         return self.role_for(user_id) == Role.OWNER
 
-    def can_panic(self, user_id: int) -> bool:
-        return self.role_for(user_id) == Role.OWNER
-
     def can_use_mode(self, user_id: int, mode: UserMode) -> bool:
         if mode == UserMode.ASK:
             return self.is_whitelisted(user_id)
@@ -288,42 +305,16 @@ class Settings(BaseSettings):
     def has_cursor_token(self, token_key: str) -> bool:
         if token_key == CursorTokenKey.MT2.value:
             return bool(self.cursor_api_key_mt2.strip())
+        if token_key == CursorTokenKey.MT3.value:
+            return bool(self.cursor_api_key_mt3.strip())
         return bool(self.cursor_api_key.strip())
 
     def cursor_api_key_for(self, token_key: str) -> str:
         if token_key == CursorTokenKey.MT2.value and self.cursor_api_key_mt2.strip():
             return self.cursor_api_key_mt2
+        if token_key == CursorTokenKey.MT3.value and self.cursor_api_key_mt3.strip():
+            return self.cursor_api_key_mt3
         return self.cursor_api_key
-
-    def agent_ssh_configured(self) -> bool:
-        """True only if host/user/key are all set — partial config stays inert."""
-        return bool(
-            self.agent_ssh_host.strip()
-            and self.agent_ssh_user.strip()
-            and self.agent_ssh_private_key_b64.strip()
-        )
-
-    def agent_ssh_cloud_env_vars(self) -> dict[str, str]:
-        """Env vars injected into the Cursor cloud sandbox for SSH diagnostics.
-
-        Empty dict when not configured — callers should still gate via
-        `agent_ssh_configured()` / `can_use_server_ssh()` before calling.
-        """
-        if not self.agent_ssh_configured():
-            return {}
-        env = {
-            "AGENT_SSH_HOST": self.agent_ssh_host.strip(),
-            "AGENT_SSH_PORT": str(self.agent_ssh_port),
-            "AGENT_SSH_USER": self.agent_ssh_user.strip(),
-            "AGENT_SSH_PRIVATE_KEY_B64": self.agent_ssh_private_key_b64.strip(),
-        }
-        if self.agent_ssh_remote_dir.strip():
-            env["AGENT_SSH_REMOTE_DIR"] = self.agent_ssh_remote_dir.strip()
-        return env
-
-    def can_use_server_ssh(self, user_id: int) -> bool:
-        """Same trust tier as write-mode: operator/owner only."""
-        return self.role_for(user_id) in {Role.OPERATOR, Role.OWNER}
 
 
 @lru_cache

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Sequence
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
@@ -50,6 +51,7 @@ class TelegramStreamRenderer:
         mode: UserMode,
         current_model_key: str,
         current_token_key: str | None = None,
+        available_token_keys: Sequence[str] | None = None,
         min_edit_interval: float = 1.0,
         placeholder_animation: AnimatedStatus | None = None,
         thinking_display: ThinkingDisplay = "none",
@@ -61,6 +63,7 @@ class TelegramStreamRenderer:
         self._mode = mode
         self._current_model_key = current_model_key
         self._current_token_key = current_token_key
+        self._available_token_keys = available_token_keys
         self._thinking_display = thinking_display
         self._thinking_preview_chars = thinking_preview_chars
         self._min_edit_interval = min_edit_interval
@@ -71,7 +74,6 @@ class TelegramStreamRenderer:
         self._placeholder_animation = placeholder_animation
         self._activity_frame = 0
         self._run_started_at = time.monotonic()
-        self._last_draft_at = 0.0
         self._flush_lock = asyncio.Lock()
         self._activity_task = asyncio.create_task(self._activity_loop())
 
@@ -136,7 +138,7 @@ class TelegramStreamRenderer:
             return
         self._activity_task = None
         task.cancel()
-        # In-flight pulse flush may raise (draft/network); never abort finalize.
+        # In-flight pulse flush may raise (network); never abort finalize.
         with suppress(asyncio.CancelledError, Exception):
             await task
 
@@ -221,6 +223,7 @@ class TelegramStreamRenderer:
                     current=self._mode,
                     current_model_key=self._current_model_key,
                     current_token_key=self._current_token_key,
+                    available_token_keys=self._available_token_keys,
                     with_retry=False,
                 )
             else:
@@ -306,29 +309,7 @@ class TelegramStreamRenderer:
             return None
 
         self._last_edit_at = time.monotonic()
-        if not force and not self._closed:
-            await self._maybe_send_draft(plain_text)
         return None
-
-    async def _maybe_send_draft(self, plain_text: str) -> None:
-        if not plain_text or self._closed:
-            return
-        now = time.monotonic()
-        if now - self._last_draft_at < 2.0:
-            return
-        bot = self._message.get_bot()
-        send_draft = getattr(bot, "send_message_draft", None)
-        if send_draft is None:
-            return
-        try:
-            await send_draft(
-                chat_id=self._message.chat_id,
-                draft_id=self._message.message_id,
-                text=plain_text[:4096],
-            )
-            self._last_draft_at = now
-        except Exception:
-            logger.debug("send_message_draft failed", exc_info=True)
 
     def _compose_readable_stream(self, state: StreamState, footer: str) -> str:
         answer = self._answer_text(state)

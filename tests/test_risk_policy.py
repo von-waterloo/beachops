@@ -38,6 +38,28 @@ def test_deploy_and_prod_db_writes_require_approval() -> None:
     assert database.approval_kind == ApprovalKind.PROD_DB
 
 
+def test_negated_merge_and_deploy_are_not_high_risk() -> None:
+    for prompt in (
+        "Do NOT merge to main/master. Just commit to dev.",
+        "No production release. Commit and push to branch dev.",
+        "Поменяй цвет. Деплой не делай. Без merge в main.",
+        "не надо мержить в main — только push в dev",
+    ):
+        assessment = assess_risk(prompt, job_kind=JobKind.CHANGE, write=True)
+        assert assessment.level == RiskLevel.MEDIUM, prompt
+        assert not assessment.blocked, prompt
+
+
+def test_real_merge_request_still_high() -> None:
+    assessment = assess_risk(
+        "Please merge the PR to main after tests",
+        job_kind=JobKind.CHANGE,
+        write=True,
+    )
+    assert assessment.requires_approval
+    assert assessment.approval_kind == ApprovalKind.MERGE
+
+
 def test_protected_branch_write_is_blocked() -> None:
     assessment = assess_risk(
         "Update the configuration",

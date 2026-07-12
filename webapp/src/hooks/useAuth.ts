@@ -1,42 +1,40 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   currentUser,
-  loginWithPasskey,
+  loginWithTelegramWidget,
   logoutBrowserSession,
-  passkeysSupported,
-  registerPasskey,
+  mintSessionFromTelegram,
   type AuthenticatedUser,
-} from '../lib/passkeys'
+  type TelegramLoginUser,
+} from '../lib/auth'
+import { ApiError } from '../lib/api'
 import {
   getTelegramInitData,
   isTelegramWebApp,
   waitForTelegramInitData,
 } from '../lib/telegram'
 import { feedback } from '../lib/feedback'
-import { ApiError } from '../lib/api'
 
-function passkeyErrorMessage(cause: unknown, registering: boolean): string {
-  if (cause instanceof DOMException) {
-    if (cause.name === 'NotAllowedError') {
-      return registering
-        ? 'Создание ключа отменено или недоступно в этом WebView.'
-        : 'Вход отменён или ключ на этом устройстве не найден.'
+function authErrorMessage(err: unknown, insideTelegram: boolean): string | null {
+  if (!insideTelegram) return null
+  if (err instanceof ApiError) {
+    const detail = err.message.toLowerCase()
+    if (
+      err.status === 403
+      || detail.includes('allowlist')
+      || detail.includes('not allowlisted')
+    ) {
+      return 'Нет доступа для этого Telegram-аккаунта.'
     }
-    if (cause.name === 'NotSupportedError' || cause.name === 'InvalidStateError') {
-      return 'Passkey недоступен в Telegram WebView. Откройте beachops.marketolog.tech в Chrome/Safari.'
+    if (err.status >= 500) {
+      return 'Сервер временно недоступен. Нажмите «Повторить вход».'
     }
+    if (err.status === 401) {
+      return 'Не удалось подтвердить Telegram-сессию. Откройте Mini App заново из бота (/dashboard).'
+    }
+    return 'Не удалось войти. Нажмите «Повторить вход».'
   }
-  if (cause instanceof ApiError) {
-    return cause.message
-  }
-  if (isTelegramWebApp()) {
-    return registering
-      ? 'В Telegram Android/iOS WebView Passkey часто не работает. Откройте сайт в браузере и привяжите ключ там, либо продолжайте вход через Telegram.'
-      : 'Ключ не найден. Привяжите Passkey в браузере (не в WebView Telegram), затем войдите.'
-  }
-  return registering
-    ? 'Не удалось создать ключ доступа'
-    : 'Ключ не найден. Откройте Mini App в Telegram и привяжите Passkey, затем повторите вход.'
+  return 'Нет связи с сервером. Проверьте сеть и нажмите «Повторить вход».'
 }
 
 export function useAuth() {
@@ -52,15 +50,22 @@ export function useAuth() {
       if (!getTelegramInitData()) {
         await waitForTelegramInitData()
       }
-      setInsideTelegram(isTelegramWebApp())
-      setUser(await currentUser())
+      const inTg = isTelegramWebApp()
+      setInsideTelegram(inTg)
+      const next = await currentUser()
+      setUser(next)
       setError(null)
-    } catch {
+      // Best-effort: Mini App also gets the shared session cookie for WS/API.
+      if (getTelegramInitData()) {
+        try {
+          await mintSessionFromTelegram()
+        } catch {
+          // Cookie mint is optional when initData Authorization already works.
+        }
+      }
+    } catch (err) {
       setUser(null)
-      // Inside Telegram, a failed /api/me after a real initData means the
-      // account is not whitelisted. Outside Telegram it just means "not signed
-      // in yet" — the passkey login button handles that, no error needed.
-      setError(isTelegramWebApp() ? 'Нет доступа для этого Telegram-аккаунта.' : null)
+      setError(authErrorMessage(err, isTelegramWebApp()))
     } finally {
       setChecking(false)
     }
@@ -70,49 +75,15 @@ export function useAuth() {
     void refresh()
   }, [refresh])
 
-  const login = useCallback(async () => {
+  const loginWithTelegram = useCallback(async (payload: TelegramLoginUser) => {
     setBusy(true)
     setError(null)
     try {
-      await loginWithPasskey()
+      await loginWithTelegramWidget(payload)
       await refresh()
       feedback('success')
-    } catch (cause) {
-      setError(passkeyErrorMessage(cause, false))
-      feedback('error')
-    } finally {
-      setBusy(false)
-    }
-  }, [refresh])
-
-  const register = useCallback(async () => {
-    setBusy(true)
-    setError(null)
-    if (!passkeysSupported()) {
-      setError('Passkey не поддерживается в этом окружении. Откройте сайт в Chrome/Safari.')
-      feedback('error')
-      setBusy(false)
-      return
-    }
-    try {
-      // Telegram Android WebView often reports PublicKeyCredential but cannot complete UVPA.
-      if (typeof PublicKeyCredential !== 'undefined'
-        && 'isUserVerifyingPlatformAuthenticatorAvailable' in PublicKeyCredential) {
-        const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
-        if (!available && isTelegramWebApp()) {
-          setError(
-            'Отпечаток/Face ID в Telegram WebView недоступен. Откройте https://beachops.marketolog.tech в Chrome, войдите через Telegram один раз… или просто продолжайте в Mini App без Passkey.',
-          )
-          feedback('warning')
-          setBusy(false)
-          return
-        }
-      }
-      await registerPasskey()
-      await refresh()
-      feedback('success')
-    } catch (cause) {
-      setError(passkeyErrorMessage(cause, true))
+    } catch {
+      setError('Вход через Telegram не удался. Проверьте, что аккаунт в allowlist.')
       feedback('error')
     } finally {
       setBusy(false)
@@ -135,10 +106,8 @@ export function useAuth() {
     checking,
     busy,
     error,
-    supported: passkeysSupported(),
     insideTelegram,
-    login,
-    register,
+    loginWithTelegram,
     logout,
     refresh,
   }

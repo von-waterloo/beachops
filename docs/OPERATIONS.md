@@ -23,7 +23,13 @@ Volumes:
 |--------|------------|
 | `postgres-data` | данные PostgreSQL |
 | `redis-data` | ARQ queue, idempotency, rate limits, hot cache |
-| `bot-data` | workspace cursor-sdk (`/data/workspace`) |
+| `bot-data` | workspace (`/data/workspace`) |
+
+После деплоя с новой схемой (например migration `018` — SSE/usage/model params/cloud status) миграции запускать **вручную** на проде, если compose `migrate` не в вашем пайплайне:
+
+```powershell
+echo y | plink ... "cd /home/const/tg-cursor-bot && docker compose -p tg-cursor-bot run --rm migrate"
+```
 
 ### Миграции
 
@@ -33,8 +39,6 @@ Volumes:
 **Локально без Docker:** миграции вручную (см. [DEVELOPMENT.md](./DEVELOPMENT.md)).
 
 ### Windows worker (локальные Cursor-агенты)
-
-Продуктовый сценарий (привязка слота, Mini App): [KNOWLEDGE_BASE.md](./KNOWLEDGE_BASE.md#windows-агент).
 
 На Windows 11 ПК с **Docker Desktop** (рекомендуется):
 
@@ -69,28 +73,6 @@ auto-deploy на runner [self-hosted, host-185]. Rollback и ручной деп
 workflow_dispatch (бот /rollback или Actions UI). Secret: ENV_PROD_BEACHOPS
 или ENV_PROD. Бот не использует SSH для выката.
 
-### Opt-in: SSH-диагностика для Cursor-агента
-
-По умолчанию бот **не** держит SSH-ключи. Опционально (`AGENT_SSH_*` в
-серверном `.env`, см. [CONFIGURATION.md](./CONFIGURATION.md)) worker передаёт
-ограниченный ключ в cloud-песочницу агента для read-only `docker ps/logs/inspect`.
-
-На 185 уже заведено:
-
-- пользователь `beachops-agent` (группа `docker`, без sudo);
-- forced command `/usr/local/bin/beachops-agent-ssh` (скрипт в репо:
-  `scripts/beachops-agent-ssh.sh`) — только `docker ps|logs|inspect|stats
-  --no-stream` и `docker compose ps|logs`;
-- `AllowUsers` в `/etc/ssh/sshd_config.d/99-disable-root.conf` включает
-  `beachops-agent`;
-- ACL: `beachops-agent` может `cd` в `/home/const/tg-cursor-bot` (чтение compose).
-
-Переустановка wrapper после правок:
-
-```bash
-sudo cp scripts/beachops-agent-ssh.sh /usr/local/bin/beachops-agent-ssh
-sudo chmod 0755 /usr/local/bin/beachops-agent-ssh
-```
 
 ### Деплой с Windows (legacy)
 
@@ -135,6 +117,10 @@ echo y | plink -ssh -l const -i "C:\Users\vonwa\.ssh\const.ppk" 185.244.49.94 "c
 - Self-improve (`SELF_IMPROVE_*`) по умолчанию выключен. Включение только в вашем `.env`
   добавляет ваш форк BeachOps в allowlist; откат прода — `/rollback` (нужен
   `GITHUB_DEPLOY_DISPATCH`).
+- **MCP ops** (`MCP_ENABLED`, `OPS_SSH_*`): optional; see English guide
+  [OPS_MCP.md](./OPS_MCP.md). Use `docker-compose.ops.yml` + `OPS_SSH_KEY_HOST_PATH`
+  (never commit private keys). Suggested aliases: `eu` (BeachOps), `mt-dev` (app DEV),
+  `ru` (app PROD, often `/via=eu` through a reverse tunnel).
 - На проде: docker `webapp` слушает host port `8080`; host nginx + Let's Encrypt
   проксируют `https://beachops.marketolog.tech` → `127.0.0.1:8080`
   (конфиг `/etc/nginx/sites-available/beachops-marketolog.conf`, шаблон в
@@ -185,8 +171,10 @@ docker compose exec -T postgres psql -U bot tg_cursor_bot < backup.sql
 | plan/do/task недоступны | пользователь в `OPERATOR_USER_IDS` или `OWNER_USER_IDS` |
 | Бот не стартует | Postgres/Redis, encryption key, repository policy, миграции |
 | Mini App не открывается | нужен `WEBAPP_BASE_URL` с HTTPS, HTTP/IP Telegram не принимает |
-| Mini App: шторм `/api/voice/ws` или dashboard 401 | открывать только из Telegram (нужен `initData`); вне TG реконнект не должен крутиться |
-| Voice WS рвётся / «Переподключаюсь» | на проде проверить `VOICE_REALTIME_MODEL=gpt-realtime` и `VOICE_TRANSCRIBE_MODEL=gpt-4o-transcribe` (не `gpt-realtime-whisper` — invalid_model); `docker compose logs api` — auth fail → 4401, rate limit → 4429 |
+| Mini App: шторм `/api/voice/ws` или dashboard 401 | из TG — `initData`; из браузера — Login Widget → session cookie; вне сессии реконнект не должен крутиться |
+| Login Widget не появляется / 401 | BotFather `/setdomain` = host `WEBAPP_BASE_URL`; аккаунт в allowlist; кнопка «Открыть вход Telegram» — same-window OAuth с `#tgAuthResult` |
+| Mini App API 502 после recreate api | webapp nginx резолвит `api` через Docker DNS (`resolver 127.0.0.11`); если старый образ — `docker compose restart webapp` |
+| Voice WS рвётся без причины в UI | `docker compose logs api webapp` — искать JSON с `"action":"voice_session"` / `"error_code"` / `exception`; auth fail → 4401, rate limit → 4429 |
 | Нет JSON-логов у api/worker | `configure_logging` на старте; `LOG_LEVEL`; ротация `json-file` 50m×5 в compose |
 | Conflict: terminated by other getUpdates | второй инстанс с тем же токеном |
 | Cursor error | `CURSOR_API_KEY`, GitHub подключён в dashboard |

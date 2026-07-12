@@ -9,7 +9,7 @@ from beachops.app_context import AppContext
 from beachops.domain.models import UserMode
 from beachops.services.agent_slots import AgentSlotsFullError
 from beachops.services.cancel_service import cancel_user_work
-from beachops.services.cursor_token_ui import current_token_key_for_ui
+from beachops.services.cursor_token_ui import token_ui_pair
 from beachops.services.forward_context import clear_forward_context
 from beachops.services.inline_keyboards import status_reply_markup
 from beachops.services.ui_copy import agent_new_from_command, agent_slots_full
@@ -39,7 +39,7 @@ async def new_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         user.id, default=app.settings.cursor_model
     )
     repos = await app.repos.list_repos(user.id)
-    token_key = await current_token_key_for_ui(app, user.id)
+    token_key, available_tokens = await token_ui_pair(app, user.id)
     await update.message.reply_text(
         agent_new_from_command(slot.label),
         reply_markup=status_reply_markup(
@@ -48,5 +48,6 @@ async def new_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             current_model_key=model_key,
             has_repos=bool(repos),
             current_token_key=token_key,
+            available_token_keys=available_tokens,
         ),
     )

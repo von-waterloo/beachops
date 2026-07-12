@@ -14,13 +14,13 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
+from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from beachops.app_context import AppContext
 from beachops.config.settings import Settings, get_settings
 from beachops.domain.cursor_models import (
-    CURSOR_MODEL_ORDER,
     CursorModelKey,
     cursor_model_label,
     normalize_cursor_model_key,
@@ -30,11 +30,9 @@ from beachops.domain.runtime import cursor_agent_url
 from beachops.domain.security import (
     ApprovalDecision,
     ApprovalKind,
-    JobKind,
     JobStatus,
     Role,
 )
-from beachops.services.agent_slots import RunContext
 from beachops.services.approval_actions import approve_job, reject_job, request_revision
 from beachops.services.durable_dispatch import dispatch_prompt
 from beachops.services.logging_config import (
@@ -48,14 +46,16 @@ from beachops.web.passkey_auth import (
     resolve_websocket_principal,
     router as passkey_auth_router,
 )
+from beachops.web.mcp_server import router as mcp_router
 from beachops.web.schemas import (
+    AgentCreateRequest,
     AgentUpdateRequest,
     DecisionRequest,
     DeployDispatchRequest,
-    PanicRequest,
     PromptRequest,
     RepoCreateRequest,
     RepoUpdateRequest,
+    SelfImproveRequest,
 )
 from beachops.web.telegram_auth import (
     TelegramInitDataError,
@@ -120,6 +120,7 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(RequestLogMiddleware)
     app.include_router(passkey_auth_router)
+    app.include_router(mcp_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -142,17 +143,18 @@ def create_app() -> FastAPI:
         model_key = await context.users.get_cursor_model_key(
             principal.user_id, default=context.settings.cursor_model
         )
+        token_key = await context.users.get_cursor_token_key(principal.user_id)
+        from beachops.services.cursor_model_catalog import CursorModelCatalog
+
+        models = await CursorModelCatalog(context).options_for_ui(token_key)
         return {
             "userId": principal.user_id,
             "role": role.value if role else "none",
-            "writesEnabled": not await context.system_state.is_panic_enabled(),
+            "writesEnabled": True,
             "authMethod": principal.auth_method,
             "hasPasskey": await context.passkeys.has_any(principal.user_id),
             "cursorModelKey": model_key,
-            "models": [
-                {"key": choice.value, "label": cursor_model_label(choice.value)}
-                for choice in CURSOR_MODEL_ORDER
-            ],
+            "models": models,
         }
 
     @app.put("/api/me/model")
@@ -166,9 +168,30 @@ def create_app() -> FastAPI:
         model_key = normalize_cursor_model_key(
             raw_key, default=context.settings.cursor_model
         )
-        if model_key not in {item.value for item in CursorModelKey}:
+        known = {item.value for item in CursorModelKey}
+        if not (
+            model_key in known
+            or model_key.startswith("dyn:")
+            or model_key.startswith("h:")
+        ):
             raise HTTPException(status_code=400, detail="unknown model")
-        await context.users.set_cursor_model_key(principal.user_id, model_key)
+        if model_key.startswith("h:"):
+            from beachops.services.cursor_model_catalog import CursorModelCatalog
+
+            token_key = await context.users.get_cursor_token_key(principal.user_id)
+            resolved = await CursorModelCatalog(context).resolve_fingerprint(
+                token_key, model_key[2:]
+            )
+            if not resolved:
+                raise HTTPException(status_code=400, detail="unknown model fingerprint")
+        params = body.get("params")
+        if params is not None and not isinstance(params, dict):
+            raise HTTPException(status_code=400, detail="params must be an object")
+        await context.users.set_cursor_model_key(
+            principal.user_id,
+            model_key,
+            params=params if isinstance(params, dict) else None,
+        )
         logger.info(
             "Cursor model updated",
             extra={
@@ -180,6 +203,26 @@ def create_app() -> FastAPI:
             "cursorModelKey": model_key,
             "label": cursor_model_label(model_key),
         }
+
+    @app.get("/api/cursor/health")
+    async def cursor_health(
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+        refresh: bool = False,
+    ) -> dict:
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        if role is None:
+            raise HTTPException(status_code=403, detail="forbidden")
+        repo = await context.repos.get_active_repo(principal.user_id)
+        from beachops.services.cursor_health import CursorHealthService
+
+        return await CursorHealthService(context).snapshot_for_user(
+            principal.user_id,
+            is_owner=role == Role.OWNER,
+            force_refresh=refresh,
+            active_repo_url=repo.github_url if repo else None,
+        )
 
     @app.get("/api/dashboard")
     async def dashboard(
@@ -193,7 +236,12 @@ def create_app() -> FastAPI:
             if role == Role.OWNER
             else f"actor:{principal.user_id}"
         )
-        cached = await context.hot_cache.get_dashboard(cache_scope)
+        # Pin generation for the whole build so a concurrent bump cannot make
+        # this request write a stale snapshot into the new cache key.
+        cache_generation = await context.hot_cache.dashboard_generation()
+        cached = await context.hot_cache.get_dashboard(
+            cache_scope, generation=cache_generation
+        )
         if cached is not None:
             return cached
 
@@ -207,23 +255,23 @@ def create_app() -> FastAPI:
             if role == Role.OWNER
             else []
         )
+        approval_payload = []
+        for item in approvals:
+            job = await context.jobs.get_internal(item.job_id)
+            approval_payload.append(_approval_json(item, job=job))
         events = await _recent_events(context, principal.user_id, role)
         total_tokens = sum(job.total_tokens or 0 for job in jobs)
         user_repos = await context.repos.list_repos(principal.user_id)
         slots = await context.agent_slots.list_slots(principal.user_id)
+        from beachops.services.self_improve import resolve_self_improve_state
+
+        self_improve = await resolve_self_improve_state(context)
         snapshot = {
             "jobs": [_job_json(job) for job in jobs],
             "events": events,
-            "approvals": [_approval_json(item) for item in approvals],
-            "repositories": [
-                {
-                    **_repo_json(repo),
-                    "selfImprove": context.settings.is_self_improve_repo(repo.github_url),
-                }
-                for repo in user_repos
-            ],
+            "approvals": approval_payload,
+            "repositories": [_repo_json(repo) for repo in user_repos],
             "agents": [_agent_slot_json(slot) for slot in slots],
-            "selfImprove": _self_improve_json(context.settings, user_repos),
             "usage": {
                 "period": "current",
                 "voiceMinutes": 0,
@@ -231,16 +279,19 @@ def create_app() -> FastAPI:
                 "limitPercent": 0,
                 "totalTokens": total_tokens,
             },
-            "panic": await context.system_state.is_panic_enabled(),
             "role": role.value if role else "none",
             "defaultBranch": context.settings.default_branch,
+            "repositoryPolicy": context.repository_policy.to_public_dict(),
             "workers": [
                 _worker_json(node)
                 for node in await context.worker_nodes.list_online()
             ],
             "queue": _queue_stats(jobs),
+            "selfImprove": self_improve,
         }
-        await context.hot_cache.set_dashboard(cache_scope, snapshot)
+        await context.hot_cache.set_dashboard(
+            cache_scope, snapshot, generation=cache_generation
+        )
         return snapshot
 
     @app.post("/api/repos")
@@ -287,11 +338,109 @@ def create_app() -> FastAPI:
         )
         if make_active:
             await context.agent_slots.sync_active_slot_repo(principal.user_id, repo)
-        await context.hot_cache.bump_dashboard_generation()
-        return {
-            **_repo_json(repo),
-            "selfImprove": context.settings.is_self_improve_repo(repo.github_url),
-        }
+        return _repo_json(repo)
+
+    @app.get("/api/auth/github/status")
+    async def github_oauth_status(
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        from beachops.web.github_oauth import connection_status
+
+        return await connection_status(_context(request), user_id=principal.user_id)
+
+    @app.get("/api/auth/github/start")
+    async def github_oauth_start(
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> RedirectResponse:
+        from beachops.web.github_oauth import (
+            GithubOAuthError,
+            GithubOAuthNotConfigured,
+            begin_oauth,
+        )
+
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        if role not in {Role.OPERATOR, Role.OWNER}:
+            raise HTTPException(status_code=403, detail="operator role required")
+        try:
+            url = await begin_oauth(context, user_id=principal.user_id)
+        except GithubOAuthNotConfigured as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="GitHub OAuth не настроен (GITHUB_OAUTH_CLIENT_ID/SECRET)",
+            ) from exc
+        except GithubOAuthError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return RedirectResponse(url, status_code=302)
+
+    @app.get("/api/auth/github/callback")
+    async def github_oauth_callback(
+        request: Request,
+        code: str = "",
+        state: str = "",
+        error: str = "",
+    ) -> RedirectResponse:
+        from beachops.web.github_oauth import GithubOAuthError, complete_oauth
+
+        context = _context(request)
+        base = context.settings.webapp_base_url.rstrip("/") or "/"
+        if error:
+            return RedirectResponse(f"{base}/?tab=repos&github=denied", status_code=302)
+        try:
+            user_id = await complete_oauth(context, code=code, state=state)
+            await context.audit.append(
+                actor_id=user_id,
+                event_type="auth.github_oauth",
+                action="connect",
+                outcome="success",
+                details={},
+            )
+        except GithubOAuthError:
+            return RedirectResponse(f"{base}/?tab=repos&github=error", status_code=302)
+        return RedirectResponse(f"{base}/?tab=repos&github=connected", status_code=302)
+
+    @app.delete("/api/auth/github")
+    async def github_oauth_disconnect(
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        from beachops.web.github_oauth import disconnect
+
+        await disconnect(_context(request), user_id=principal.user_id)
+        return {"connected": False}
+
+    @app.get("/api/github/repos")
+    async def github_list_repos(
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+        page: int = 1,
+    ) -> dict:
+        from beachops.web.github_oauth import (
+            GithubOAuthError,
+            GithubOAuthNotConnected,
+            list_repositories,
+        )
+
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        if role not in {Role.OPERATOR, Role.OWNER}:
+            raise HTTPException(status_code=403, detail="operator role required")
+        try:
+            repos = await list_repositories(
+                context, user_id=principal.user_id, page=page
+            )
+        except GithubOAuthNotConnected as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+        except GithubOAuthError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.warning("GitHub repos list failed: %s", exc)
+            raise HTTPException(
+                status_code=502, detail="Не удалось получить репозитории GitHub"
+            ) from exc
+        return {"repositories": repos}
 
     @app.patch("/api/repos/{repo_id}")
     async def update_repo(
@@ -330,93 +479,99 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="repository not found")
         if repo.is_active:
             await context.agent_slots.sync_active_slot_repo(principal.user_id, repo)
-        await context.hot_cache.bump_dashboard_generation()
-        return {
-            **_repo_json(repo),
-            "selfImprove": context.settings.is_self_improve_repo(repo.github_url),
-        }
+        return _repo_json(repo)
 
-    @app.post("/api/self-improve/activate")
-    async def activate_self_improve(
+    @app.post("/api/agents")
+    async def create_agent(
+        body: AgentCreateRequest,
         request: Request,
         principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
     ) -> dict:
-        """Owner: link BeachOps fork and make it the active repo for self-improve."""
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        if role not in {Role.OPERATOR, Role.OWNER}:
+            raise HTTPException(status_code=403, detail="operator role required")
+        from beachops.services.agent_slots import AgentSlotsFullError
+
+        try:
+            slot = await context.agent_slots.create_new_slot(principal.user_id)
+        except AgentSlotsFullError:
+            raise HTTPException(status_code=409, detail="agent slots full") from None
+        if body.label and body.label.strip():
+            renamed = await context.agent_slots.rename_slot(
+                principal.user_id, slot.id, body.label.strip()
+            )
+            if renamed is not None:
+                slot = renamed
+        if body.makeActive:
+            activated = await context.agent_slots.activate_slot(
+                principal.user_id, slot.id
+            )
+            if activated is not None:
+                slot = activated
+        await context.hot_cache.bump_dashboard_generation()
+        return _agent_slot_json(slot)
+
+    @app.delete("/api/agents/{slot_id}")
+    async def delete_agent(
+        slot_id: int,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        context = _context(request)
+        role = context.settings.role_for(principal.user_id)
+        if role not in {Role.OPERATOR, Role.OWNER}:
+            raise HTTPException(status_code=403, detail="operator role required")
+        slots = await context.agent_slots.list_slots(principal.user_id)
+        if len(slots) <= 1:
+            raise HTTPException(status_code=409, detail="cannot delete the last agent")
+        from beachops.services.agent_lifecycle import delete_agent_slot
+        from beachops.services.agent_slots import AgentSlotLastError
+
+        try:
+            deleted = await delete_agent_slot(context, principal.user_id, slot_id)
+        except AgentSlotLastError:
+            raise HTTPException(status_code=409, detail="cannot delete the last agent")
+        if deleted is None:
+            raise HTTPException(status_code=404, detail="agent slot not found")
+        await context.hot_cache.bump_dashboard_generation()
+        active = await context.agent_slots.get_active(principal.user_id)
+        return {
+            "deleted": True,
+            "active": _agent_slot_json(active) if active else None,
+        }
+
+    @app.post("/api/agents/{slot_id}/archive")
+    async def archive_agent(
+        slot_id: int,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
         context = _context(request)
         if context.settings.role_for(principal.user_id) != Role.OWNER:
             raise HTTPException(status_code=403, detail="owner role required")
-        if not context.settings.self_improve_enabled:
-            raise HTTPException(
-                status_code=400,
-                detail="Самосовершенствование выключено на сервере (SELF_IMPROVE_ENABLED)",
-            )
-        target_url = context.settings.self_improve_repo_normalized()
-        if not target_url:
-            raise HTTPException(
-                status_code=400,
-                detail="SELF_IMPROVE_REPO_URL или GITHUB_REPO не заданы",
-            )
-        from beachops.services.repo_parse import (
-            MAX_ALIAS_LEN,
-            alias_from_github_url,
-        )
-        from beachops.services.repository_policy import (
-            RepositoryNotAllowedError,
-            RepositoryPolicyError,
-        )
+        from beachops.services.agent_lifecycle import archive_slot_agent
 
-        branches = list(context.settings.self_improve_branches) or ["dev"]
-        branch = branches[0]
-        try:
-            context.repository_policy.require_allowed(target_url, branch, write=False)
-        except (RepositoryNotAllowedError, RepositoryPolicyError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        slot = await archive_slot_agent(context, principal.user_id, slot_id)
+        if slot is None:
+            raise HTTPException(status_code=404, detail="agent slot not found")
+        return _agent_slot_json(slot)
 
-        existing = await context.repos.list_repos(principal.user_id)
-        matched = next(
-            (
-                repo
-                for repo in existing
-                if context.settings.is_self_improve_repo(repo.github_url)
-            ),
-            None,
-        )
-        if matched is None:
-            alias = alias_from_github_url(target_url).strip()[:MAX_ALIAS_LEN] or "beachops"
-            repo = await context.repos.add_repo(
-                principal.user_id,
-                alias=alias,
-                github_url=target_url,
-                default_branch=branch,
-                make_active=True,
-            )
-        else:
-            repo = await context.repos.update_repo(
-                principal.user_id,
-                matched.id,
-                default_branch=branch if matched.default_branch != branch else None,
-                make_active=True,
-            )
-            if repo is None:
-                raise HTTPException(status_code=404, detail="repository not found")
+    @app.post("/api/agents/{slot_id}/unarchive")
+    async def unarchive_agent(
+        slot_id: int,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> dict:
+        context = _context(request)
+        if context.settings.role_for(principal.user_id) != Role.OWNER:
+            raise HTTPException(status_code=403, detail="owner role required")
+        from beachops.services.agent_lifecycle import unarchive_slot_agent
 
-        await context.agent_slots.sync_active_slot_repo(principal.user_id, repo)
-        await context.hot_cache.bump_dashboard_generation()
-        logger.info(
-            "Self-improve activated",
-            extra={
-                "user_id": principal.user_id,
-                "action": "self_improve_activate",
-            },
-        )
-        user_repos = await context.repos.list_repos(principal.user_id)
-        return {
-            "repository": {
-                **_repo_json(repo),
-                "selfImprove": True,
-            },
-            "selfImprove": _self_improve_json(context.settings, user_repos),
-        }
+        slot = await unarchive_slot_agent(context, principal.user_id, slot_id)
+        if slot is None:
+            raise HTTPException(status_code=404, detail="agent slot not found")
+        return _agent_slot_json(slot)
 
     @app.patch("/api/agents/{slot_id}")
     async def update_agent(
@@ -425,41 +580,53 @@ def create_app() -> FastAPI:
         request: Request,
         principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
     ) -> dict:
-        """Owner/operator: switch a slot between cloud and Windows runtimes."""
         context = _context(request)
         role = context.settings.role_for(principal.user_id)
         if role not in {Role.OPERATOR, Role.OWNER}:
             raise HTTPException(status_code=403, detail="operator role required")
-
-        current = await context.agent_slots.get_slot(principal.user_id, slot_id)
-        if current is None:
+        slot = await context.agent_slots.get_slot(principal.user_id, slot_id)
+        if slot is None:
             raise HTTPException(status_code=404, detail="agent slot not found")
 
         fields = body.model_fields_set
-        local_path = body.localPath.strip() if body.localPath else body.localPath
-        try:
-            slot = await context.agent_slots.configure_execution(
+        if "runtime" in fields and body.runtime and body.runtime != "cloud":
+            raise HTTPException(
+                status_code=400, detail="only cloud runtime is supported"
+            )
+        if "label" in fields and body.label is not None:
+            renamed = await context.agent_slots.rename_slot(
+                principal.user_id, slot_id, body.label
+            )
+            if renamed is None:
+                raise HTTPException(status_code=400, detail="invalid label")
+            slot = renamed
+        if "makeActive" in fields and body.makeActive:
+            activated = await context.agent_slots.activate_slot(
+                principal.user_id, slot_id
+            )
+            if activated is None:
+                raise HTTPException(status_code=404, detail="agent slot not found")
+            slot = activated
+
+        if {"localPath", "preferredWorkerId"} & fields:
+            # Cloud-only: clear legacy windows fields if sent.
+            updated = await context.agent_slots.update_runtime_config(
                 principal.user_id,
                 slot_id,
-                runtime=body.runtime,
-                local_path=local_path if "localPath" in fields else ...,
-                preferred_worker_id=(
-                    body.preferredWorkerId if "preferredWorkerId" in fields else ...
-                ),
-                make_active=bool(body.makeActive),
+                runtime="cloud",
+                local_path=None,
+                clear_local_path=True,
+                preferred_worker_id=None,
+                clear_preferred_worker=True,
             )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if slot is None:
-            raise HTTPException(status_code=404, detail="agent slot not found")
+            if updated is not None:
+                slot = updated
+        else:
+            slot = await context.agent_slots.get_slot(principal.user_id, slot_id)
+            if slot is None:
+                raise HTTPException(status_code=404, detail="agent slot not found")
+
         await context.hot_cache.bump_dashboard_generation()
-        logger.info(
-            "Agent slot execution updated",
-            extra={
-                "user_id": principal.user_id,
-                "action": "update_agent",
-            },
-        )
         return _agent_slot_json(slot)
 
     @app.post("/api/prompts")
@@ -469,70 +636,77 @@ def create_app() -> FastAPI:
         principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> dict:
-        """Operator/owner: dispatch an ask/plan/do prompt from the Mini App."""
         context = _context(request)
         role = context.settings.role_for(principal.user_id)
-        if role not in {Role.OPERATOR, Role.OWNER}:
-            raise HTTPException(status_code=403, detail="operator role required")
-        if not idempotency_key or not await context.idempotency.claim(
-            "prompt", idempotency_key, ttl_sec=3600
-        ):
-            raise HTTPException(status_code=409, detail="duplicate or missing idempotency key")
-
         try:
             mode = UserMode(body.mode)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail="invalid mode") from exc
-        if mode == UserMode.DO and role != Role.OWNER:
-            raise HTTPException(status_code=403, detail="owner role required for /do")
+            raise HTTPException(status_code=400, detail="unknown mode") from exc
+        if not context.settings.can_use_mode(principal.user_id, mode):
+            raise HTTPException(status_code=403, detail="mode not allowed for role")
 
-        if body.slotId is not None:
-            slot = await context.agent_slots.get_slot(principal.user_id, body.slotId)
-            if slot is None:
-                raise HTTPException(status_code=404, detail="agent slot not found")
-            if slot.is_active:
-                run_context = await context.agent_slots.get_run_context(principal.user_id)
-            else:
-                repo = (
-                    await context.repos.get_by_id(principal.user_id, slot.repo_id)
-                    if slot.repo_id is not None
-                    else None
-                )
-                if repo is None:
-                    repo = await context.repos.resolve_active_repo(
-                        principal.user_id, context.settings
-                    )
-                run_context = (
-                    RunContext(slot=slot, repo=repo) if repo is not None else None
-                )
-        else:
-            run_context = await context.agent_slots.get_run_context(principal.user_id)
-        if run_context is None:
-            raise HTTPException(status_code=400, detail="no repository configured")
-
-        if run_context.slot.runtime == "windows" and not run_context.slot.local_path:
-            raise HTTPException(
-                status_code=400,
-                detail="local_path is required for the windows runtime",
+        if body.slotId:
+            try:
+                slot_id = int(body.slotId)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="invalid slotId") from exc
+            activated = await context.agent_slots.activate_slot(
+                principal.user_id, slot_id
             )
+            if activated is None:
+                raise HTTPException(status_code=404, detail="agent slot not found")
 
+        run_context = await context.agent_slots.get_run_context(principal.user_id)
+        if run_context is None:
+            raise HTTPException(status_code=409, detail="repository is not selected")
+
+        from beachops.services.situation_brief import (
+            build_situation_brief,
+            with_situation,
+        )
+        from beachops.services.telegram_images import (
+            WebImageError,
+            encode_images_for_payload,
+        )
+
+        user_prompt = body.resolved_prompt()
+        if not user_prompt:
+            raise HTTPException(status_code=400, detail="prompt or images required")
+
+        try:
+            image_payload = encode_images_for_payload(
+                [
+                    {"mimeType": item.mimeType, "data": item.data}
+                    for item in (body.images or [])
+                ]
+            )
+        except WebImageError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        situation = await build_situation_brief(
+            context,
+            actor_id=principal.user_id,
+            run_context=run_context,
+            role=role,
+        )
+        prompt = with_situation(user_prompt, situation)
+        key = idempotency_key or f"web:{principal.user_id}:{uuid4()}"
         dispatched = await dispatch_prompt(
             context,
             actor_id=principal.user_id,
-            prompt=body.prompt,
+            prompt=prompt,
             mode=mode,
             run_context=run_context,
-            idempotency_key=idempotency_key,
+            idempotency_key=key,
+            display_summary=user_prompt,
+            images=image_payload or None,
         )
-        await context.agent_slots.maybe_autoname_active(principal.user_id, body.prompt)
         await context.hot_cache.bump_dashboard_generation()
-        if not dispatched.enqueued:
-            return {
-                "job": _job_json(dispatched.job),
-                "enqueued": False,
-                "reason": dispatched.reason,
-            }
-        return {"job": _job_json(dispatched.job), "enqueued": True}
+        return {
+            "job": _job_json(dispatched.job),
+            "enqueued": dispatched.enqueued,
+            "reason": dispatched.reason,
+        }
 
     @app.get("/api/jobs/{job_id}/events")
     async def job_events(
@@ -568,9 +742,7 @@ def create_app() -> FastAPI:
         job_id: UUID,
         request: Request,
         principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
-        after: int = 0,
     ) -> dict:
-        """Transcript of a run assembled from `beachops_run_events`."""
         context = _context(request)
         job = await context.jobs.get(principal.user_id, job_id)
         if job is None and context.settings.role_for(principal.user_id) != Role.OWNER:
@@ -579,8 +751,36 @@ def create_app() -> FastAPI:
             job = await context.jobs.get_internal(job_id)
             if job is None:
                 raise HTTPException(status_code=404, detail="job not found")
-        events = await context.run_events.list_for_job(job_id, after_id=max(0, after))
-        return _assemble_transcript(job, events)
+        rows = await context.run_events.list_for_job(job_id, limit=300)
+        return _assemble_transcript(job, rows)
+
+    @app.get("/api/jobs/{job_id}/artifacts")
+    async def job_artifacts(
+        job_id: UUID,
+        request: Request,
+        principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
+    ) -> list[dict]:
+        context = _context(request)
+        job = await context.jobs.get(principal.user_id, job_id)
+        if job is None and context.settings.role_for(principal.user_id) != Role.OWNER:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job is None:
+            job = await context.jobs.get_internal(job_id)
+            if job is None:
+                raise HTTPException(status_code=404, detail="job not found")
+        rows = await context.jobs.list_artifacts(job.actor_id, job_id)
+        return [
+            {
+                "id": str(row.get("id") or ""),
+                "kind": row.get("artifact_kind") or row.get("kind"),
+                "uri": row.get("uri"),
+                "metadata": row.get("metadata") or {},
+                "createdAt": row["created_at"].isoformat()
+                if row.get("created_at")
+                else None,
+            }
+            for row in rows
+        ]
 
     @app.post("/api/approvals/{approval_id}/decision")
     async def decide_approval(
@@ -605,12 +805,6 @@ def create_app() -> FastAPI:
         job = await context.jobs.get_internal(approval.job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="job not found")
-        if (
-            body.decision == "approve"
-            and approval.kind == ApprovalKind.PLAN_EXECUTION
-            and await context.system_state.is_panic_enabled()
-        ):
-            raise HTTPException(status_code=409, detail="write actions disabled by panic")
 
         if body.decision == "approve":
             decided = await context.approvals.decide(
@@ -654,9 +848,9 @@ def create_app() -> FastAPI:
         await context.hot_cache.bump_dashboard_generation()
         return result
 
-    @app.post("/api/panic")
-    async def panic(
-        body: PanicRequest,
+    @app.post("/api/self-improve")
+    async def set_self_improve(
+        body: SelfImproveRequest,
         request: Request,
         principal: Annotated[TelegramPrincipal, Depends(_current_principal)],
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
@@ -665,24 +859,47 @@ def create_app() -> FastAPI:
         if context.settings.role_for(principal.user_id) != Role.OWNER:
             raise HTTPException(status_code=403, detail="owner role required")
         if not idempotency_key or not await context.idempotency.claim(
-            "panic", idempotency_key, ttl_sec=3600
+            "self_improve", idempotency_key, ttl_sec=60
         ):
-            raise HTTPException(status_code=409, detail="duplicate or missing idempotency key")
-        await context.system_state.set_panic(
+            raise HTTPException(
+                status_code=409, detail="duplicate or missing idempotency key"
+            )
+
+        from beachops.services.repository_policy import (
+            RepositoryPolicyError,
+            normalize_github_url,
+        )
+        from beachops.services.self_improve import resolve_self_improve_state
+
+        repo_url = body.repoUrl
+        if repo_url:
+            try:
+                repo_url = normalize_github_url(repo_url)
+            except RepositoryPolicyError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        elif body.enabled:
+            repo_url = context.settings.self_improve_repo_normalized()
+            if not repo_url:
+                active = await context.repos.get_active_repo(principal.user_id)
+                if active is not None:
+                    repo_url = active.github_url
+            if not repo_url:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Укажите GitHub URL форка BeachOps или сделайте "
+                        "его активным в «Репо»"
+                    ),
+                )
+
+        await context.system_state.set_self_improve(
             body.enabled,
             actor_id=principal.user_id,
             actor_role=Role.OWNER,
+            repo_url=repo_url,
         )
-        if body.enabled:
-            await _cancel_write_jobs(context)
-        await context.audit.append(
-            actor_id=principal.user_id,
-            event_type="system.panic",
-            action="enable" if body.enabled else "disable",
-            outcome="success",
-            details={},
-        )
-        return {"panic": body.enabled}
+        await context.hot_cache.bump_dashboard_generation()
+        return await resolve_self_improve_state(context)
 
     @app.post("/api/deploy/dispatch")
     async def deploy_dispatch(
@@ -754,16 +971,7 @@ def create_app() -> FastAPI:
                 "Voice WS auth failed",
                 extra={"action": "voice_auth", "error_code": "4401"},
             )
-            with suppress(Exception):
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "code": "unauthorized",
-                        "message": "Session expired or invalid",
-                    }
-                )
-            with suppress(Exception):
-                await websocket.close(code=4401)
+            await websocket.close(code=4401)
             clear_log_context()
             bind_log_context(service="api")
             return
@@ -772,6 +980,8 @@ def create_app() -> FastAPI:
         limit = await context.rate_limiter.check(
             subject=str(principal.user_id),
             action="voice_session",
+            # Mini App remounts / tab switches open a new WS; 5/min was too
+            # tight and surfaced as «слишком много сессий» during normal use.
             limit=30,
             window_sec=60,
         )
@@ -784,16 +994,7 @@ def create_app() -> FastAPI:
                     "error_code": "4429",
                 },
             )
-            with suppress(Exception):
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "code": "rate_limited",
-                        "message": "Voice session rate limited — try again shortly",
-                    }
-                )
-            with suppress(Exception):
-                await websocket.close(code=4429)
+            await websocket.close(code=4429)
             clear_log_context()
             bind_log_context(service="api")
             return
@@ -802,12 +1003,20 @@ def create_app() -> FastAPI:
             "Voice WS session ready",
             extra={"user_id": principal.user_id, "action": "voice_session"},
         )
-        await websocket.send_json({"type": "session.ready"})
+        await websocket.send_json(
+            {
+                "type": "session.ready",
+                "voiceRequireConfirm": bool(context.settings.voice_require_confirm),
+            }
+        )
 
         gateway = RealtimeVoiceGateway(
             api_key=context.settings.openai_api_key,
             model=context.settings.voice_realtime_model,
-            transcription_model=context.settings.voice_transcribe_model,
+            input_transcribe_model=context.settings.voice_input_transcribe_model,
+            transcription_prompt=(
+                context.settings.voice_input_transcribe_prompt or None
+            ),
             limits=VoiceGatewayLimits(
                 max_session_bytes=24_000
                 * 2
@@ -816,7 +1025,7 @@ def create_app() -> FastAPI:
         )
         result_tasks: set[asyncio.Task] = set()
 
-        async def on_plan_request(transcript: str) -> str:
+        async def on_plan_request(transcript: str, mode: UserMode = UserMode.PLAN) -> str:
             run_context = await context.agent_slots.get_run_context(principal.user_id)
             if run_context is None:
                 logger.warning(
@@ -828,13 +1037,30 @@ def create_app() -> FastAPI:
                     },
                 )
                 raise ValueError("repository is not selected")
+            if not context.settings.can_use_mode(principal.user_id, mode):
+                raise ValueError("mode not allowed for role")
+            from beachops.services.situation_brief import (
+                build_situation_brief,
+                with_situation,
+            )
+
+            situation = await build_situation_brief(
+                context,
+                actor_id=principal.user_id,
+                run_context=run_context,
+                role=context.settings.role_for(principal.user_id),
+                channel="voice",
+            )
+            prompt = with_situation(transcript, situation)
             dispatched = await dispatch_prompt(
                 context,
                 actor_id=principal.user_id,
-                prompt=transcript,
-                mode=UserMode.PLAN,
+                prompt=prompt,
+                mode=mode,
                 run_context=run_context,
                 idempotency_key=f"voice:{principal.user_id}:{uuid4()}",
+                display_summary=transcript,
+                channel="voice",
             )
             if not dispatched.enqueued:
                 logger.warning(
@@ -856,6 +1082,7 @@ def create_app() -> FastAPI:
                     "action": "voice_plan_request",
                 },
             )
+            await context.hot_cache.bump_dashboard_generation()
             task = asyncio.create_task(
                 _speak_job_result(context, websocket, dispatched.job.id)
             )
@@ -1038,6 +1265,7 @@ def create_app() -> FastAPI:
                 "modelKey": model_key,
                 "memoryBlock": memory_block,
                 "runtime": job.runtime,
+                "images": payload.get("images") if isinstance(payload.get("images"), list) else [],
             }
         }
 
@@ -1245,6 +1473,9 @@ async def _current_principal(
     try:
         return await resolve_request_principal(request, authorization)
     except TelegramInitDataError as exc:
+        detail = str(exc)
+        if "allowlisted" in detail:
+            raise HTTPException(status_code=403, detail="user is not allowlisted") from exc
         raise HTTPException(status_code=401, detail="invalid session") from exc
 
 
@@ -1272,29 +1503,53 @@ async def _recent_events(
     actor_id: int,
     role: Role | None,
 ) -> list[dict]:
-    where = "" if role == Role.OWNER else "WHERE actor_id = $1"
+    where = "" if role == Role.OWNER else "WHERE e.actor_id = $1"
     args = () if role == Role.OWNER else (actor_id,)
     async with context.pool.acquire() as conn:
         rows = await conn.fetch(
             f"""
-            SELECT id, job_id, event_type, to_status, created_at
-            FROM beachops_job_events
+            SELECT
+                e.id,
+                e.job_id,
+                e.event_type,
+                e.to_status,
+                e.created_at,
+                j.summary AS job_summary,
+                j.kind AS job_kind,
+                j.repository_url,
+                j.runtime,
+                j.branch
+            FROM beachops_job_events AS e
+            LEFT JOIN beachops_jobs AS j ON j.id = e.job_id
             {where}
-            ORDER BY id DESC
+            ORDER BY e.id DESC
             LIMIT 100
             """,
             *args,
         )
-    return [
-        {
-            "id": str(row["id"]),
-            "kind": row["event_type"],
-            "summary": str(row["to_status"] or row["event_type"]),
-            "createdAt": row["created_at"].isoformat(),
-            "jobId": str(row["job_id"]),
-        }
-        for row in rows
-    ]
+    payload: list[dict] = []
+    for row in rows:
+        repo_url = row["repository_url"]
+        repo_name = repo_url.rsplit("/", 1)[-1] if repo_url else None
+        title = (row["job_summary"] or "").strip() or (
+            str(row["job_kind"]) if row["job_kind"] else None
+        )
+        to_status = row["to_status"]
+        payload.append(
+            {
+                "id": str(row["id"]),
+                "kind": row["event_type"],
+                "summary": str(to_status or row["event_type"]),
+                "toStatus": str(to_status) if to_status else None,
+                "title": title,
+                "repository": repo_name,
+                "runtime": row["runtime"] or None,
+                "branch": row["branch"] or None,
+                "createdAt": row["created_at"].isoformat(),
+                "jobId": str(row["job_id"]),
+            }
+        )
+    return payload
 
 
 def _job_json(job) -> dict:
@@ -1318,6 +1573,11 @@ def _job_json(job) -> dict:
         "cursorAgentId": agent_id,
         "cursorUrl": cursor_agent_url(agent_id),
         "branch": getattr(job, "branch", None),
+        "totalTokens": getattr(job, "total_tokens", None),
+        "inputTokens": getattr(job, "input_tokens", None),
+        "outputTokens": getattr(job, "output_tokens", None),
+        "cacheReadTokens": getattr(job, "cache_read_tokens", None),
+        "cacheWriteTokens": getattr(job, "cache_write_tokens", None),
     }
 
 
@@ -1332,28 +1592,6 @@ def _repo_json(repo) -> dict:
     }
 
 
-def _self_improve_json(settings: Settings, repos) -> dict:
-    url = settings.self_improve_repo_normalized()
-    branches = list(settings.self_improve_branches) or ["dev"]
-    linked = False
-    active = False
-    if url:
-        for repo in repos:
-            if settings.is_self_improve_repo(repo.github_url):
-                linked = True
-                if repo.is_active:
-                    active = True
-                break
-    return {
-        "enabled": bool(settings.self_improve_enabled),
-        "available": bool(settings.self_improve_enabled and url),
-        "repoUrl": url,
-        "branches": branches,
-        "linked": linked,
-        "active": active,
-    }
-
-
 def _agent_slot_json(slot) -> dict:
     return {
         "id": str(slot.id),
@@ -1361,60 +1599,72 @@ def _agent_slot_json(slot) -> dict:
         "runtime": slot.runtime or "cloud",
         "active": bool(slot.is_active),
         "repository": slot.repo_alias,
-        "cursorAgentId": slot.cursor_agent_id,
-        "cursorUrl": cursor_agent_url(slot.cursor_agent_id),
         "localPath": slot.local_path,
         "preferredWorkerId": slot.preferred_worker_id,
+        "cursorAgentId": slot.cursor_agent_id,
+        "cursorUrl": cursor_agent_url(slot.cursor_agent_id),
     }
 
 
+def _payload_dict(raw) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
 def _run_stream_event_json(row: dict) -> dict:
-    payload = row.get("payload") or {}
-    if isinstance(payload, str):
-        payload = json.loads(payload)
+    payload = _payload_dict(row.get("payload"))
     text = (
         payload.get("finalText")
+        or payload.get("final_text")
         or payload.get("assistantText")
+        or payload.get("assistant_text")
         or payload.get("text")
-        or None
+        or payload.get("tool")
     )
+    if isinstance(text, str):
+        text = text.strip() or None
+    else:
+        text = None
+    created = row.get("created_at")
     return {
         "id": str(row["id"]),
         "eventType": row["event_type"],
         "text": text,
-        "createdAt": row["created_at"].isoformat(),
+        "createdAt": created.isoformat() if created else None,
     }
 
 
-_TERMINAL_STREAM_EVENTS = {
-    "run.finished",
-    "run.failed",
-    "worker.finished",
-    "worker.failed",
-}
-
-
-def _assemble_transcript(job, events: list[dict]) -> dict:
-    """Build a job transcript snapshot from raw `beachops_run_events` rows."""
-    stream_events = [_run_stream_event_json(row) for row in events]
-    with_text = [event for event in stream_events if event["text"]]
-    final_event = next(
-        (
-            event
-            for event in reversed(with_text)
-            if event["eventType"] in _TERMINAL_STREAM_EVENTS
-        ),
-        None,
-    )
-    latest_event = with_text[-1] if with_text else None
-    status = job.status.value if hasattr(job.status, "value") else str(job.status)
+def _assemble_transcript(job, rows: list[dict]) -> dict:
+    events = [_run_stream_event_json(row) for row in rows]
+    with_text = [event for event in events if event.get("text")]
+    latest = with_text[-1]["text"] if with_text else None
+    final = None
+    for event in reversed(events):
+        if event["eventType"] in {"run.finished", "worker.finished"} and event.get("text"):
+            final = event["text"]
+            break
+    last_id = str(rows[-1]["id"]) if rows else "0"
+    status_map = {
+        JobStatus.SUCCEEDED: "succeeded",
+        JobStatus.ACCEPTED: "accepted",
+        JobStatus.AWAITING_APPROVAL: "awaiting_approval",
+        JobStatus.REVIEW_REQUIRED: "review_required",
+    }
+    mapped = status_map.get(job.status, job.status.value)
     return {
         "jobId": str(job.id),
-        "status": status,
-        "events": stream_events,
-        "lastEventId": stream_events[-1]["id"] if stream_events else "0",
-        "latestText": latest_event["text"] if latest_event else None,
-        "finalText": final_event["text"] if final_event else None,
+        "status": mapped,
+        "events": events,
+        "lastEventId": last_id,
+        "latestText": latest,
+        "finalText": final,
     }
 
 
@@ -1465,38 +1715,55 @@ def _queue_stats(jobs) -> dict[str, int]:
     }
 
 
-def _approval_json(approval) -> dict:
+def _approval_json(approval, *, job=None) -> dict:
+    summary = (getattr(job, "summary", None) or "").strip()
+    kind_label = {
+        ApprovalKind.PLAN_EXECUTION: "План → выполнить",
+        ApprovalKind.HIGH_RISK: "Высокий риск",
+        ApprovalKind.RESULT_REVIEW: "Ревью результата",
+        ApprovalKind.DEPLOY: "Деплой",
+        ApprovalKind.MERGE: "Merge",
+    }.get(approval.kind, approval.kind.value)
+    title = summary[:120] if summary else kind_label
+    repo_url = getattr(job, "repository_url", None) or ""
     return {
         "id": str(approval.id),
-        "title": f"{approval.kind.value} · {approval.job_id}",
+        "title": title,
         "risk": "high" if approval.kind != ApprovalKind.PLAN_EXECUTION else "medium",
         "requestedAt": (
             approval.requested_at or datetime.now(timezone.utc)
         ).isoformat(),
+        "repository": repo_url.rsplit("/", 1)[-1] if repo_url else None,
+        "kind": kind_label,
     }
 
 
-async def _cancel_write_jobs(context: AppContext) -> None:
-    jobs = await context.jobs.list_by_status_internal(
-        [
-            JobStatus.QUEUED,
-            JobStatus.APPROVED,
-            JobStatus.RUNNING,
-            JobStatus.REVISION_REQUESTED,
-        ]
+async def _stream_voice_pcm(
+    context: AppContext,
+    websocket: WebSocket,
+    text: str,
+    *,
+    kind: str,
+) -> None:
+    """Push audio.started + PCM + audio.ended for Mini App playback."""
+    from beachops.domain.voice_persona import to_spoken_briefing
+
+    briefing = to_spoken_briefing(
+        text,
+        max_chars=context.settings.voice_spoken_max_chars,
     )
-    for job in jobs:
-        if job.kind != JobKind.CHANGE:
-            continue
-        if job.cursor_agent_id and job.cursor_run_id:
-            await context.cursor.cancel_run(job.cursor_agent_id, job.cursor_run_id)
-        await context.jobs.transition(
-            job.actor_id,
-            job.id,
-            from_statuses=[job.status],
-            to_status=JobStatus.CANCELLED,
-            event_type="panic.cancelled",
-        )
+    if not briefing:
+        return
+    await websocket.send_json(
+        {
+            "type": "audio.started",
+            "caption": briefing[:500],
+            "kind": kind,
+        }
+    )
+    async for chunk in context.speech.stream_pcm(text):
+        await websocket.send_bytes(chunk)
+    await websocket.send_json({"type": "audio.ended", "kind": kind})
 
 
 async def _speak_job_result(
@@ -1504,10 +1771,57 @@ async def _speak_job_result(
     websocket: WebSocket,
     job_id: UUID,
 ) -> None:
+    from beachops.domain.voice_persona import (
+        MilestoneGate,
+        milestone_line,
+        spoken_ack,
+        to_spoken_briefing,
+    )
+
     logger.info(
         "Voice speak poll started",
         extra={"job_id": str(job_id), "action": "voice_speak"},
     )
+    milestones_enabled = bool(context.settings.voice_milestone_tts)
+    gate = MilestoneGate(
+        min_interval_sec=context.settings.voice_milestone_min_interval_sec,
+        max_per_job=context.settings.voice_milestone_max_per_job,
+    )
+    last_caption = ""
+    after_event_id = 0
+    previous_status: str | None = None
+
+    job = await context.jobs.get_internal(job_id)
+    if job is None:
+        logger.warning(
+            "Voice speak: job missing",
+            extra={
+                "job_id": str(job_id),
+                "action": "voice_speak",
+                "error_code": "job_missing",
+            },
+        )
+        with suppress(Exception):
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "job_missing",
+                    "message": "Задача исчезла",
+                }
+            )
+        return
+
+    previous_status = job.status.value
+    try:
+        ack = spoken_ack()
+        await _stream_voice_pcm(context, websocket, ack, kind="milestone")
+        gate.mark(time.monotonic(), ack, count=False)
+    except Exception:
+        logger.exception(
+            "Voice speak ack failed",
+            extra={"job_id": str(job_id), "action": "voice_speak"},
+        )
+
     for _ in range(1800):
         await asyncio.sleep(2)
         job = await context.jobs.get_internal(job_id)
@@ -1525,10 +1839,74 @@ async def _speak_job_result(
                     {
                         "type": "error",
                         "code": "job_missing",
-                        "message": "Task disappeared",
+                        "message": "Задача исчезла",
                     }
                 )
             return
+
+        status_value = job.status.value
+        progress_for_milestone: str | None = None
+
+        # Live awareness: push run progress captions while the agent works.
+        rows = await context.run_events.list_for_job(
+            job_id, after_id=after_event_id, limit=50
+        )
+        for row in rows:
+            after_event_id = max(after_event_id, int(row["id"]))
+            event = _run_stream_event_json(row)
+            text = (event.get("text") or "").strip()
+            if not text or text == last_caption:
+                continue
+            last_caption = text
+            progress_for_milestone = text
+            with suppress(Exception):
+                await websocket.send_json(
+                    {
+                        "type": "job.progress",
+                        "jobId": str(job_id),
+                        "text": text[:500],
+                        "eventType": event["eventType"],
+                        "status": status_value,
+                    }
+                )
+
+        if milestones_enabled and job.status not in {
+            JobStatus.SUCCEEDED,
+            JobStatus.AWAITING_APPROVAL,
+            JobStatus.APPROVED,
+            JobStatus.REVIEW_REQUIRED,
+            JobStatus.FAILED,
+            JobStatus.BLOCKED,
+            JobStatus.CANCELLED,
+        }:
+            line = milestone_line(
+                status=status_value,
+                previous_status=previous_status,
+                progress_text=(
+                    None
+                    if status_value != previous_status
+                    else progress_for_milestone
+                ),
+            )
+            now = time.monotonic()
+            if gate.allow(now, line) and line:
+                try:
+                    await _stream_voice_pcm(
+                        context, websocket, line, kind="milestone"
+                    )
+                    gate.mark(now, line, count=True)
+                except Exception:
+                    logger.exception(
+                        "Voice speak milestone failed",
+                        extra={
+                            "job_id": str(job_id),
+                            "action": "voice_speak",
+                        },
+                    )
+
+        if status_value != previous_status:
+            previous_status = status_value
+
         if job.status in {JobStatus.FAILED, JobStatus.BLOCKED, JobStatus.CANCELLED}:
             logger.warning(
                 "Voice speak: job %s",
@@ -1543,12 +1921,13 @@ async def _speak_job_result(
                 {
                     "type": "error",
                     "code": job.status.value,
-                    "message": f"Task {job.status.value}",
+                    "message": f"Задача: {job.status.value}",
                 }
             )
             return
         if job.status not in {
             JobStatus.AWAITING_APPROVAL,
+            JobStatus.APPROVED,
             JobStatus.SUCCEEDED,
             JobStatus.REVIEW_REQUIRED,
         }:
@@ -1567,7 +1946,7 @@ async def _speak_job_result(
                     {
                         "type": "error",
                         "code": "missing_run_id",
-                        "message": "Task finished without a run id",
+                        "message": "Задача завершилась без run id",
                     }
                 )
             return
@@ -1587,24 +1966,27 @@ async def _speak_job_result(
                     {
                         "type": "error",
                         "code": "memory_missing",
-                        "message": "Task result is not ready yet",
+                        "message": "Результат задачи ещё не готов",
                     }
                 )
             return
-        from beachops.domain.voice_persona import to_spoken_briefing
 
         briefing = to_spoken_briefing(
             result.body,
             max_chars=context.settings.voice_spoken_max_chars,
         )
-        await websocket.send_json(
-            {"type": "audio.started", "caption": briefing[:500] or result.body[:500]}
+        await _stream_voice_pcm(
+            context,
+            websocket,
+            briefing or result.body,
+            kind="final",
         )
-        async for chunk in context.speech.stream_pcm(result.body):
-            await websocket.send_bytes(chunk)
-        await websocket.send_json({"type": "audio.ended"})
         logger.info(
             "Voice speak completed",
-            extra={"job_id": str(job_id), "action": "voice_speak"},
+            extra={
+                "job_id": str(job_id),
+                "action": "voice_speak",
+                "caption_chars": len(briefing),
+            },
         )
         return

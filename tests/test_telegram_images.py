@@ -52,5 +52,5 @@ def test_limit_sdk_images_no_op_when_within_limit():
 
 
 def test_cursor_image_limits():
-    assert DEFAULT_PHOTO_MAX_COUNT == 20
-    assert CURSOR_MAX_IMAGES_PER_PROMPT == 100
+    assert DEFAULT_PHOTO_MAX_COUNT == 5
+    assert CURSOR_MAX_IMAGES_PER_PROMPT == 5

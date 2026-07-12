@@ -121,6 +121,19 @@ class RepositoryPolicyService:
     def policies(self) -> tuple[RepositoryPolicy, ...]:
         return tuple(self._by_url.values())
 
+    def to_public_dict(self) -> dict[str, object]:
+        """Shape for Mini App dashboard — no secrets, only connect hints."""
+        return {
+            "openMode": self._open,
+            "repositories": [
+                {
+                    "url": policy.repository_url,
+                    "branches": list(policy.allowed_branches),
+                }
+                for policy in self._by_url.values()
+            ],
+        }
+
     def policy_for(self, repository_url: str) -> RepositoryPolicy | None:
         try:
             normalized = normalize_github_url(repository_url)
@@ -160,16 +173,32 @@ class RepositoryPolicyService:
             raise RepositoryNotAllowedError(str(exc)) from exc
 
         if write and validated_branch.lower() in _PROTECTED_WRITE_BRANCHES:
-            raise RepositoryNotAllowedError("writes to protected branches are not allowed")
+            raise RepositoryNotAllowedError(
+                f"Запись в защищённую ветку «{validated_branch}» запрещена. "
+                "Выберите другую базовую ветку (например, dev)."
+            )
 
         if self._open:
             return self.policy_for(normalized)
 
         policy = self.policy_for(normalized)
-        if policy is None or validated_branch not in policy.allowed_branches:
-            raise RepositoryNotAllowedError("repository or branch is not allowlisted")
+        if policy is None:
+            raise RepositoryNotAllowedError(
+                f"Репозиторий {normalized} не разрешён на этом сервере. "
+                "Выберите репо из списка разрешённых или попросите владельца "
+                "открыть режим (пустой список репозиториев)."
+            )
+        if validated_branch not in policy.allowed_branches:
+            allowed = ", ".join(policy.allowed_branches)
+            raise RepositoryNotAllowedError(
+                f"Ветка «{validated_branch}» не разрешена для {normalized}. "
+                f"Разрешены: {allowed}."
+            )
         if write and validated_branch in policy.protected_branches:
-            raise RepositoryNotAllowedError("writes to protected branches are not allowed")
+            raise RepositoryNotAllowedError(
+                f"Запись в защищённую ветку «{validated_branch}» запрещена. "
+                "Выберите другую базовую ветку (например, dev)."
+            )
         return policy
 
 

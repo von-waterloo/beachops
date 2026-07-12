@@ -68,7 +68,6 @@ def test_operator_can_write_but_cannot_approve() -> None:
     assert settings.can_use_mode(20, UserMode.PLAN)
     assert not settings.can_approve(20)
     assert settings.can_approve(30)
-    assert settings.can_panic(30)
 
 
 def test_owner_only_control_actions() -> None:

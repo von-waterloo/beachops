@@ -110,10 +110,15 @@ class AgentSlotService:
         return RunContext(slot=slot, repo=repo)
 
     async def sync_active_slot_repo(self, tg_user_id: int, repo: RepoConfig) -> None:
-        """After manual repo switch: update empty active slot to new repo."""
+        """After manual repo switch: bind active slot to the new repo.
+
+        Cursor agents are repo-scoped — if the slot already had an agent on
+        another repo, clear it so the next run creates a fresh agent.
+        """
         slot = await self.ensure_default_slot(tg_user_id)
-        if slot.cursor_agent_id is None:
-            await self._slots.update_repo_id(slot.id, repo.id)
+        if slot.repo_id == repo.id:
+            return
+        await self._slots.rebind_repo(slot.id, repo.id)
 
     async def update_cursor_agent(
         self,
@@ -128,6 +133,12 @@ class AgentSlotService:
 
     async def set_active_run(self, slot_id: int, run_id: str | None) -> None:
         await self._slots.set_active_run(slot_id, run_id)
+
+    async def set_cloud_status(self, slot_id: int, *, cloud_status: str) -> None:
+        await self._slots.set_cloud_status(slot_id, cloud_status=cloud_status)
+
+    async def clear_cursor_agent(self, slot_id: int) -> None:
+        await self._slots.clear_cursor_agent(slot_id)
 
     async def clear_stale_active_runs(self) -> None:
         await self._slots.clear_all_active_runs()
@@ -201,6 +212,36 @@ class AgentSlotService:
         if not new_label:
             return
         await self._slots.update_label(tg_user_id, slot.id, new_label)
+
+    async def update_runtime_config(
+        self,
+        tg_user_id: int,
+        slot_id: int,
+        *,
+        runtime: str | None = None,
+        local_path: str | None = None,
+        clear_local_path: bool = False,
+        preferred_worker_id: str | None = None,
+        clear_preferred_worker: bool = False,
+    ) -> AgentSlot | None:
+        if runtime is not None and runtime not in {"cloud", "windows"}:
+            raise ValueError("runtime must be cloud or windows")
+        if runtime == "windows" and not clear_local_path:
+            current = await self._slots.get_by_id(tg_user_id, slot_id)
+            path = local_path if local_path is not None else (
+                current.local_path if current else None
+            )
+            if not (path or "").strip():
+                raise ValueError("local_path is required for Windows runtime")
+        return await self._slots.update_runtime_config(
+            tg_user_id,
+            slot_id,
+            runtime=runtime,
+            local_path=local_path,
+            clear_local_path=clear_local_path,
+            preferred_worker_id=preferred_worker_id,
+            clear_preferred_worker=clear_preferred_worker,
+        )
 
     async def delete_slot(self, tg_user_id: int, slot_id: int) -> AgentSlot | None:
         slot = await self._slots.get_by_id(tg_user_id, slot_id)

@@ -33,10 +33,6 @@ def can_approve(role: Role | None) -> bool:
     return role == Role.OWNER
 
 
-def can_panic(role: Role | None) -> bool:
-    return role == Role.OWNER
-
-
 def can_use_mode(role: Role | None, mode: UserMode) -> bool:
     if mode == UserMode.ASK:
         return can_read(role)

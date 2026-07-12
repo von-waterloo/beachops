@@ -16,7 +16,7 @@ from beachops.domain.models import UserMode
 from beachops.domain.security import ApprovalDecision, ApprovalKind, JobStatus, Role
 from beachops.services.approval_actions import approve_job, reject_job, request_revision
 from beachops.services.cancel_service import cancel_user_work, cancel_was_successful
-from beachops.services.cursor_token_ui import current_token_key_for_ui
+from beachops.services.cursor_token_ui import available_token_keys_for_ui, token_ui_pair
 from beachops.services.forward_context import clear_forward_context, get_forward_context_buffer
 from beachops.services.prompt_coalesce import clear_prompt_coalesce, get_prompt_coalesce
 from beachops.bot.handlers.agent_list_ui import (
@@ -52,7 +52,6 @@ from beachops.services.inline_keyboards import (
     CB_RETRY_LAST,
     CB_RETRY_PREFIX,
     CB_TOKEN_PREFIX,
-    CB_UNPANIC_PREFIX,
     CB_ROLLBACK_PREFIX,
     CB_VOICE_CANCEL_PREFIX,
     CB_VOICE_CONFIRM_PREFIX,
@@ -122,11 +121,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if data.startswith(CB_JOB_REVISION_PREFIX):
         await _handle_job_action(
             query, app, user.id, data[len(CB_JOB_REVISION_PREFIX) :], "revision"
-        )
-        return
-    if data.startswith(CB_UNPANIC_PREFIX):
-        await _handle_unpanic(
-            query, app, user.id, data[len(CB_UNPANIC_PREFIX) :]
         )
         return
     if data.startswith(CB_ROLLBACK_PREFIX):
@@ -329,13 +323,6 @@ async def _handle_job_action(
     if approval is None:
         await query.answer("Подтверждение не найдено.", show_alert=True)
         return
-    if (
-        action == "approve"
-        and approval_kind == ApprovalKind.PLAN_EXECUTION
-        and await app.system_state.is_panic_enabled()
-    ):
-        await query.answer("PANIC активен: write-действия отключены.", show_alert=True)
-        return
 
     if action == "approve":
         decision = ApprovalDecision.APPROVED
@@ -374,53 +361,6 @@ async def _handle_job_action(
         toast = "Отклонено"
 
     await query.answer(toast)
-    if query.message:
-        try:
-            await query.message.edit_reply_markup(reply_markup=None)
-        except BadRequest:
-            pass
-
-
-async def _handle_unpanic(
-    query,
-    app: AppContext,
-    user_id: int,
-    token: str,
-) -> None:
-    if app.settings.role_for(user_id) != Role.OWNER:
-        await query.answer("Только владелец может отключить PANIC.", show_alert=True)
-        return
-    job_id = await app.callback_tokens.consume_opaque(
-        token,
-        actor_id=user_id,
-        action="unpanic",
-    )
-    if job_id is None:
-        await query.answer("Подтверждение устарело.", show_alert=True)
-        return
-    await app.system_state.set_panic(
-        False,
-        actor_id=user_id,
-        actor_role=Role.OWNER,
-    )
-    job = await app.jobs.get(user_id, job_id)
-    if job is not None:
-        await app.jobs.transition(
-            user_id,
-            job_id,
-            from_statuses=[JobStatus.DRAFT],
-            to_status=JobStatus.ACCEPTED,
-            event_type="panic.disabled",
-        )
-    await app.audit.append(
-        actor_id=user_id,
-        job_id=job_id,
-        event_type="system.panic",
-        action="disable",
-        outcome="success",
-        details={},
-    )
-    await query.answer("Write-действия снова доступны.", show_alert=True)
     if query.message:
         try:
             await query.message.edit_reply_markup(reply_markup=None)
@@ -536,7 +476,7 @@ async def _handle_cancel(query, context, app: AppContext, user_id: int) -> None:
         model_key = await app.users.get_cursor_model_key(
             user_id, default=app.settings.cursor_model
         )
-        token_key = await current_token_key_for_ui(app, user_id)
+        token_key, available_tokens = await token_ui_pair(app, user_id)
         repos = await app.repos.list_repos(user_id)
         try:
             await query.message.edit_reply_markup(
@@ -546,6 +486,7 @@ async def _handle_cancel(query, context, app: AppContext, user_id: int) -> None:
                     current_model_key=model_key,
                     has_repos=bool(repos),
                     current_token_key=token_key,
+                    available_token_keys=available_tokens,
                 ),
             )
         except BadRequest:
@@ -687,27 +628,13 @@ async def _handle_agent_delete_confirm(
         return
 
     deleted_label = slot.label
-    active = await app.agent_slots.get_active(user_id)
-    if active is not None and active.id == slot_id:
-        if (
-            active.active_run_id
-            or app.job_queue.is_active(user_id)
-            or app.job_queue.pending_count(user_id) > 0
-        ):
-            await cancel_user_work(app, user_id)
-
     if peek_pending(context) == slot_id:
         clear_pending(context)
 
-    if slot.cursor_agent_id:
-        token_key = normalize_cursor_token_key(slot.cursor_token_key)
-        await app.cursor.archive_agent(
-            slot.cursor_agent_id,
-            api_key=app.settings.cursor_api_key_for(token_key),
-        )
+    from beachops.services.agent_lifecycle import delete_agent_slot
 
     try:
-        new_active = await app.agent_slots.delete_slot(user_id, slot_id)
+        new_active = await delete_agent_slot(app, user_id, slot_id)
     except AgentSlotLastError:
         await query.answer(agent_delete_last(), show_alert=True)
         return
@@ -820,7 +747,7 @@ async def _handle_agent_new(query, app: AppContext, user_id: int) -> None:
     model_key = await app.users.get_cursor_model_key(
         user_id, default=app.settings.cursor_model
     )
-    token_key = await current_token_key_for_ui(app, user_id)
+    token_key, available_tokens = await token_ui_pair(app, user_id)
     repos = await app.repos.list_repos(user_id)
     await query.message.reply_text(
         agent_created(slot.label),
@@ -830,6 +757,7 @@ async def _handle_agent_new(query, app: AppContext, user_id: int) -> None:
             current_model_key=model_key,
             has_repos=bool(repos),
             current_token_key=token_key,
+            available_token_keys=available_tokens,
         ),
     )
 
@@ -863,7 +791,7 @@ async def _handle_mode_select(query, app: AppContext, user_id: int, mode_value: 
     toast = mode_set_next(mode) if has_work else mode_set(mode)
     await query.answer(toast)
 
-    token_key = await current_token_key_for_ui(app, user_id)
+    token_key, available_tokens = await token_ui_pair(app, user_id)
     if active_run and active_run.message_id == query.message.message_id:
         markup = run_activity_keyboard(
             is_admin=is_admin,
@@ -879,19 +807,34 @@ async def _handle_mode_select(query, app: AppContext, user_id: int, mode_value: 
             current_model_key=model_key,
             has_repos=bool(repos),
             current_token_key=token_key,
+            available_token_keys=available_tokens,
         )
     await query.message.edit_reply_markup(reply_markup=markup)
 
 
 async def _handle_model_select(query, app: AppContext, user_id: int, model_value: str) -> None:
+    from beachops.services.cursor_model_catalog import CursorModelCatalog
+
     model_key = normalize_cursor_model_key(
         model_value, default=app.settings.cursor_model
     )
-    if model_key not in {item.value for item in CursorModelKey}:
+    known = {item.value for item in CursorModelKey}
+    if model_key.startswith("h:"):
+        token_key = await app.users.get_cursor_token_key(user_id)
+        resolved = await CursorModelCatalog(app).resolve_fingerprint(
+            token_key, model_key[2:]
+        )
+        if not resolved:
+            await query.answer("Модель недоступна, обновите /status", show_alert=True)
+            return
+        # Keep fingerprint as stored UI key so keyboards stay short.
+        await app.users.set_cursor_model_key(user_id, model_key)
+    elif model_key in known or model_key.startswith("dyn:"):
+        await app.users.set_cursor_model_key(user_id, model_key)
+    else:
         await query.answer("Неизвестная модель", show_alert=True)
         return
 
-    await app.users.set_cursor_model_key(user_id, model_key)
     is_admin = app.settings.is_admin(user_id)
     mode = await app.users.get_mode(user_id)
     slot = await app.agent_slots.get_active(user_id)
@@ -905,7 +848,7 @@ async def _handle_model_select(query, app: AppContext, user_id: int, model_value
     toast = model_set_next(model_key) if has_work else model_set(model_key)
     await query.answer(toast)
 
-    token_key = await current_token_key_for_ui(app, user_id)
+    token_key, available_tokens = await token_ui_pair(app, user_id)
     if active_run and active_run.message_id == query.message.message_id:
         markup = run_activity_keyboard(
             is_admin=is_admin,
@@ -921,6 +864,7 @@ async def _handle_model_select(query, app: AppContext, user_id: int, model_value
             current_model_key=model_key,
             has_repos=bool(repos),
             current_token_key=token_key,
+            available_token_keys=available_tokens,
         )
     await query.message.edit_reply_markup(reply_markup=markup)
 
@@ -961,12 +905,14 @@ async def _handle_token_select(query, app: AppContext, user_id: int, token_value
         )
     else:
         repos = await app.repos.list_repos(user_id)
+        available_tokens = available_token_keys_for_ui(app.settings)
         markup = status_reply_markup(
             is_admin=is_admin,
             current=mode,
             current_model_key=model_key,
             has_repos=bool(repos),
             current_token_key=token_value,
+            available_token_keys=available_tokens,
         )
     try:
         await query.message.edit_reply_markup(reply_markup=markup)

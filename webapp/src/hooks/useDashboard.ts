@@ -1,6 +1,24 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiFetch } from '../lib/api'
-import { isActiveJobStatus, type DashboardSnapshot } from '../types/api'
+import { isActiveJobStatus, type AgentSlot, type DashboardSnapshot } from '../types/api'
+
+export function mergeAgentSlot(
+  slots: AgentSlot[],
+  slotId: string,
+  updated: AgentSlot,
+  makeActive?: boolean,
+): AgentSlot[] {
+  return slots.map((slot) => {
+    if (slot.id !== slotId) {
+      return makeActive ? { ...slot, active: false } : slot
+    }
+    return {
+      ...slot,
+      ...updated,
+      active: makeActive ? true : updated.active ?? slot.active,
+    }
+  })
+}
 
 const emptySnapshot: DashboardSnapshot = {
   jobs: [],
@@ -8,13 +26,13 @@ const emptySnapshot: DashboardSnapshot = {
   approvals: [],
   repositories: [],
   agents: [],
-  selfImprove: null,
   usage: null,
-  panic: false,
   role: 'Operator',
   defaultBranch: 'dev',
   workers: [],
   queue: { pending: 0, running: 0, active: 0, queued: 0, blocked: 0, total: 0 },
+  repositoryPolicy: { openMode: true, repositories: [] },
+  selfImprove: { enabled: false, branches: ['dev'], canToggle: true, needsRepo: true },
 }
 
 function normalize(snapshot: Partial<DashboardSnapshot>): DashboardSnapshot {
@@ -28,12 +46,23 @@ function normalize(snapshot: Partial<DashboardSnapshot>): DashboardSnapshot {
     approvals: snapshot.approvals ?? [],
     repositories: snapshot.repositories ?? [],
     agents: snapshot.agents ?? [],
-    selfImprove: snapshot.selfImprove ?? null,
     workers: snapshot.workers ?? [],
     usage: snapshot.usage ?? null,
-    panic: Boolean(snapshot.panic),
     role: snapshot.role ?? 'Operator',
     defaultBranch: snapshot.defaultBranch ?? 'dev',
+    repositoryPolicy: {
+      openMode: snapshot.repositoryPolicy?.openMode ?? true,
+      repositories: snapshot.repositoryPolicy?.repositories ?? [],
+    },
+    selfImprove: {
+      enabled: Boolean(snapshot.selfImprove?.enabled),
+      repoUrl: snapshot.selfImprove?.repoUrl ?? null,
+      branches: snapshot.selfImprove?.branches?.length
+        ? snapshot.selfImprove.branches
+        : ['dev'],
+      canToggle: snapshot.selfImprove?.canToggle ?? true,
+      needsRepo: Boolean(snapshot.selfImprove?.needsRepo),
+    },
     queue: {
       pending: queue?.pending ?? queue?.queued ?? 0,
       running: queue?.running ?? queue?.active ?? 0,
@@ -49,16 +78,22 @@ export function useDashboard(pollMs = 15_000) {
   const [data, setData] = useState(emptySnapshot)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Drop in-flight /api/dashboard responses that started before a mutation
+  // (or a newer refresh). Otherwise a slow poll can overwrite Cloud←Windows.
+  const refreshEpoch = useRef(0)
 
   const refresh = useCallback(async () => {
+    const epoch = ++refreshEpoch.current
     try {
       const snapshot = await apiFetch<Partial<DashboardSnapshot>>('/api/dashboard')
+      if (epoch !== refreshEpoch.current) return
       setData(normalize(snapshot))
       setError(null)
     } catch {
+      if (epoch !== refreshEpoch.current) return
       setError(navigator.onLine ? 'BeachOps временно недоступен' : 'Нет сети')
     }
-    setLoading(false)
+    if (epoch === refreshEpoch.current) setLoading(false)
   }, [])
 
   const decideApproval = useCallback(async (
@@ -104,24 +139,46 @@ export function useDashboard(pollMs = 15_000) {
     await refresh()
   }, [refresh])
 
-  const activateSelfImprove = useCallback(async () => {
-    await apiFetch('/api/self-improve/activate', { method: 'POST' })
-    await refresh()
-  }, [refresh])
-
   const updateAgent = useCallback(async (
     slotId: string,
     input: {
+      label?: string
       runtime?: string
       localPath?: string | null
       preferredWorkerId?: string | null
       makeActive?: boolean
     },
   ) => {
-    await apiFetch(`/api/agents/${slotId}`, {
+    const updated = await apiFetch<AgentSlot>(`/api/agents/${slotId}`, {
       method: 'PATCH',
-      body: JSON.stringify(input),
+      body: JSON.stringify({
+        label: input.label,
+        runtime: input.runtime === 'cloud' ? 'cloud' : undefined,
+        makeActive: input.makeActive,
+      }),
     })
+    refreshEpoch.current += 1
+    setData((prev) => ({
+      ...prev,
+      agents: mergeAgentSlot(prev.agents, slotId, updated, input.makeActive),
+    }))
+    await refresh()
+    setData((prev) => ({
+      ...prev,
+      agents: mergeAgentSlot(prev.agents, slotId, updated, input.makeActive),
+    }))
+  }, [refresh])
+
+  const createAgent = useCallback(async (label?: string) => {
+    await apiFetch<AgentSlot>('/api/agents', {
+      method: 'POST',
+      body: JSON.stringify({ label, makeActive: true }),
+    })
+    await refresh()
+  }, [refresh])
+
+  const deleteAgent = useCallback(async (slotId: string) => {
+    await apiFetch(`/api/agents/${slotId}`, { method: 'DELETE' })
     await refresh()
   }, [refresh])
 
@@ -129,21 +186,39 @@ export function useDashboard(pollMs = 15_000) {
     prompt: string
     mode?: 'ask' | 'plan' | 'do'
     slotId?: string
+    images?: Array<{ mimeType: string; data: string }>
   }) => {
-    const result = await apiFetch<{ job: { id: string }; enqueued: boolean; reason?: string }>(
-      '/api/prompts',
-      {
-        method: 'POST',
-        headers: { 'Idempotency-Key': crypto.randomUUID() },
-        body: JSON.stringify({
-          prompt: input.prompt,
-          mode: input.mode ?? 'ask',
-          slotId: input.slotId ? Number(input.slotId) : undefined,
-        }),
-      },
-    )
+    const result = await apiFetch<{
+      job: { id: string }
+      enqueued: boolean
+      reason?: string
+    }>('/api/prompts', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify({
+        prompt: input.prompt,
+        mode: input.mode ?? 'ask',
+        slotId: input.slotId,
+        images: input.images?.length ? input.images : undefined,
+      }),
+    })
     await refresh()
     return result
+  }, [refresh])
+
+  const setSelfImprove = useCallback(async (input: {
+    enabled: boolean
+    repoUrl?: string | null
+  }) => {
+    await apiFetch('/api/self-improve', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify({
+        enabled: input.enabled,
+        repoUrl: input.repoUrl || undefined,
+      }),
+    })
+    await refresh()
   }, [refresh])
 
   const hasActive = data.jobs.some((job) => isActiveJobStatus(job.status))
@@ -181,8 +256,10 @@ export function useDashboard(pollMs = 15_000) {
     decideApproval,
     addRepository,
     updateRepository,
-    activateSelfImprove,
     updateAgent,
+    createAgent,
+    deleteAgent,
     submitPrompt,
+    setSelfImprove,
   }
 }

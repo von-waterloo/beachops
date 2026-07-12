@@ -43,13 +43,36 @@ def test_allows_only_exact_repo_and_branch() -> None:
     assert not policy.is_allowed("https://github.com/acme/beachops-extra", "dev")
     assert not policy.is_allowed("https://github.com/acme/beachops", "Dev")
 
+    with pytest.raises(RepositoryNotAllowedError, match="не разрешён"):
+        policy.require_allowed("https://github.com/acme/other", "dev")
+    with pytest.raises(RepositoryNotAllowedError, match="не разрешена"):
+        policy.require_allowed("https://github.com/acme/beachops", "feature")
+
+
+def test_to_public_dict_reports_open_and_allowlist() -> None:
+    open_policy = RepositoryPolicyService.from_json('{"repositories":[]}')
+    assert open_policy.to_public_dict() == {
+        "openMode": True,
+        "repositories": [],
+    }
+
+    strict = _policy()
+    payload = strict.to_public_dict()
+    assert payload["openMode"] is False
+    assert payload["repositories"] == [
+        {
+            "url": "https://github.com/acme/beachops",
+            "branches": ["dev", "main"],
+        }
+    ]
+
 
 def test_empty_policy_is_open_mode() -> None:
     policy = RepositoryPolicyService.from_json('{"repositories":[]}')
     assert policy.open_mode is True
     assert policy.is_allowed("https://github.com/acme/app", "dev")
     policy.require_allowed("https://github.com/acme/app", "dev", write=True)
-    with pytest.raises(RepositoryNotAllowedError):
+    with pytest.raises(RepositoryNotAllowedError, match="защищённую ветку"):
         policy.require_allowed("https://github.com/acme/app", "main", write=True)
 
 
@@ -67,7 +90,7 @@ def test_protected_branches_are_readable_but_not_writable() -> None:
     policy = _policy()
 
     policy.require_allowed("https://github.com/acme/beachops", "main")
-    with pytest.raises(RepositoryNotAllowedError):
+    with pytest.raises(RepositoryNotAllowedError, match="защищённую ветку"):
         policy.require_allowed(
             "https://github.com/acme/beachops",
             "main",

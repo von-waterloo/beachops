@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from io import BytesIO
+from typing import Any
 
 from cursor_sdk import SDKImage
 from telegram import Message
@@ -19,10 +22,17 @@ logger = logging.getLogger(__name__)
 
 _COLLECTOR_KEY = "media_group_collector"
 _UNSUPPORTED_MIME = frozenset({"image/svg+xml"})
+_MAX_WEB_IMAGE_BYTES = 4 * 1024 * 1024
+_MAX_WEB_IMAGES_TOTAL_BYTES = 12 * 1024 * 1024
+_MAX_WEB_IMAGES = 5
 
 
 class UnsupportedImageError(Exception):
     """Raised when a message has no supported raster image."""
+
+
+class WebImageError(ValueError):
+    """Invalid image payload from Mini App / API."""
 
 
 def is_supported_image_mime(mime_type: str | None) -> bool:
@@ -54,6 +64,78 @@ def limit_sdk_images(
         return items, 0
     dropped = len(items) - max_count
     return items[:max_count], dropped
+
+
+def encode_images_for_payload(
+    items: Sequence[Mapping[str, Any]],
+) -> list[dict[str, str]]:
+    """Validate Mini App image payloads and return serializable ``{mime, b64}`` list."""
+    if not items:
+        return []
+    if len(items) > _MAX_WEB_IMAGES:
+        raise WebImageError(f"Слишком много изображений (макс. {_MAX_WEB_IMAGES})")
+
+    encoded: list[dict[str, str]] = []
+    total = 0
+    for index, item in enumerate(items):
+        mime = str(item.get("mimeType") or item.get("mime") or "").strip().lower()
+        raw_b64 = str(item.get("data") or item.get("b64") or "").strip()
+        if raw_b64.startswith("data:") and "," in raw_b64:
+            header, raw_b64 = raw_b64.split(",", 1)
+            if ";base64" not in header.lower():
+                raise WebImageError(f"Изображение #{index + 1}: нужен base64 data URL")
+            if ":" in header:
+                declared = header.split(":", 1)[1].split(";", 1)[0].strip().lower()
+                if declared and not mime:
+                    mime = declared
+        if not is_supported_image_mime(mime):
+            raise WebImageError(
+                f"Изображение #{index + 1}: поддерживаются PNG, JPEG, WebP, GIF"
+            )
+        try:
+            data = base64.b64decode(raw_b64, validate=False)
+        except (binascii.Error, ValueError) as exc:
+            raise WebImageError(f"Изображение #{index + 1}: битый base64") from exc
+        if not data:
+            raise WebImageError(f"Изображение #{index + 1}: пустой файл")
+        if len(data) > _MAX_WEB_IMAGE_BYTES:
+            raise WebImageError(
+                f"Изображение #{index + 1}: больше "
+                f"{_MAX_WEB_IMAGE_BYTES // (1024 * 1024)} МБ"
+            )
+        total += len(data)
+        if total > _MAX_WEB_IMAGES_TOTAL_BYTES:
+            raise WebImageError("Суммарный размер скринов слишком большой")
+        encoded.append(
+            {
+                "mime": mime,
+                "b64": base64.b64encode(data).decode("ascii"),
+            }
+        )
+    return encoded
+
+
+def decode_payload_images(raw: object) -> list[SDKImage]:
+    """Rebuild SDK images from encrypted job payload."""
+    if not raw:
+        return []
+    if not isinstance(raw, list):
+        raise WebImageError("invalid images payload")
+    images: list[SDKImage] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        mime = str(item.get("mime") or item.get("mimeType") or "").strip().lower()
+        b64 = str(item.get("b64") or item.get("data") or "").strip()
+        if not is_supported_image_mime(mime) or not b64:
+            continue
+        try:
+            data = base64.b64decode(b64, validate=False)
+        except (binascii.Error, ValueError):
+            continue
+        if data:
+            images.append(bytes_to_sdk_image(data, mime))
+    return images
 
 
 def _guess_photo_mime(message: Message) -> str:

@@ -35,7 +35,9 @@ def test_speech_output_hides_code_and_urls() -> None:
     )
     assert "print" not in safe
     assert "github.com" not in safe
-    assert "экране" in safe
+    assert "```" not in safe
+    assert "https://" not in safe
+    assert "Готово" in safe
 
 
 def test_control_plane_contains_approval_states() -> None:

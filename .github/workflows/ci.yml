@@ -71,7 +71,6 @@ jobs:
           DATA_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
           REPOSITORY_POLICY_JSON: '{"repositories":[]}'
         run: |
-          # Services declare env_file; create stubs so `config` works in CI.
           touch .env .env.windows-worker
           docker compose -f docker-compose.yml config --quiet
           docker compose -f docker-compose.windows-worker.yml config --quiet

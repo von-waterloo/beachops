@@ -16,48 +16,37 @@ from beachops.services.repository_policy import (
 )
 
 
-def _settings(**kwargs: object) -> SimpleNamespace:
-    base = {
-        "repository_policy_json": '{"repositories":[]}',
-        "self_improve_enabled": False,
-        "self_improve_repo_url": "",
-        "self_improve_branches": ["dev"],
-        "github_repo": "",
-    }
-    base.update(kwargs)
-    settings = SimpleNamespace(**base)
-
-    def resolved() -> str:
-        raw = str(settings.self_improve_repo_url).strip()
-        if raw:
-            return raw
-        github_repo = str(settings.github_repo).strip().removesuffix(".git").strip("/")
-        if github_repo.count("/") == 1:
-            return f"https://github.com/{github_repo}"
-        return ""
-
-    settings.self_improve_repo_url_resolved = resolved  # type: ignore[attr-defined]
-    return settings
-
-
-def test_self_improve_off_leaves_policy_unchanged() -> None:
-    policy = build_repository_policy(
-        _settings(
-            self_improve_enabled=False,
-            self_improve_repo_url="https://github.com/acme/beachops",
-        )
+def test_self_improve_off_without_url_leaves_policy_unchanged() -> None:
+    settings = SimpleNamespace(
+        repository_policy_json='{"repositories":[]}',
+        self_improve_enabled=False,
+        self_improve_repo_url="",
+        self_improve_branches=["dev"],
     )
+    policy = build_repository_policy(settings)
     assert policy.policies == ()
 
 
-def test_self_improve_merges_fork_into_allowlist() -> None:
-    policy = build_repository_policy(
-        _settings(
-            self_improve_enabled=True,
-            self_improve_repo_url="https://github.com/Acme/BeachOps",
-            self_improve_branches=["dev", "feat/x"],
-        )
+def test_self_improve_url_allowlisted_even_when_toggle_off() -> None:
+    """URL in env is allowlisted so Mini App can toggle without restart."""
+    settings = SimpleNamespace(
+        repository_policy_json='{"repositories":[]}',
+        self_improve_enabled=False,
+        self_improve_repo_url="https://github.com/acme/beachops",
+        self_improve_branches=["dev"],
     )
+    policy = build_repository_policy(settings)
+    assert policy.is_allowed("https://github.com/acme/beachops", "dev")
+
+
+def test_self_improve_merges_fork_into_allowlist() -> None:
+    settings = SimpleNamespace(
+        repository_policy_json='{"repositories":[]}',
+        self_improve_enabled=True,
+        self_improve_repo_url="https://github.com/Acme/BeachOps",
+        self_improve_branches=["dev", "feat/x"],
+    )
+    policy = build_repository_policy(settings)
     assert policy.open_mode is True
     assert policy.is_allowed("https://github.com/acme/beachops", "dev")
     assert policy.is_allowed("https://github.com/acme/beachops", "feat/x")
@@ -70,27 +59,15 @@ def test_self_improve_merges_fork_into_allowlist() -> None:
         )
 
 
-def test_self_improve_uses_github_repo_fallback() -> None:
-    policy = build_repository_policy(
-        _settings(
-            self_improve_enabled=True,
-            self_improve_repo_url="",
-            github_repo="von-waterloo/beachops",
-            self_improve_branches=["dev"],
-        )
-    )
-    assert policy.is_allowed("https://github.com/von-waterloo/beachops", "dev")
-
-
 def test_self_improve_enabled_without_url_fails_closed() -> None:
+    settings = SimpleNamespace(
+        repository_policy_json='{"repositories":[]}',
+        self_improve_enabled=True,
+        self_improve_repo_url="",
+        self_improve_branches=["dev"],
+    )
     with pytest.raises(RepositoryPolicyError):
-        build_repository_policy(
-            _settings(
-                self_improve_enabled=True,
-                self_improve_repo_url="",
-                github_repo="",
-            )
-        )
+        build_repository_policy(settings)
 
 
 def test_self_improve_prompt_guards_owner_access() -> None:

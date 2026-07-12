@@ -18,7 +18,8 @@ class AgentSlotRepository:
                 SELECT s.id, s.tg_user_id, s.label, s.cursor_agent_id,
                        s.repo_id, s.active_run_id, s.is_active,
                        s.cursor_token_key, s.runtime, s.local_path,
-                       s.preferred_worker_id, r.alias AS repo_alias
+                       s.preferred_worker_id, s.cloud_status, s.last_cloud_sync_at,
+                       r.alias AS repo_alias
                 FROM user_agent_slots s
                 LEFT JOIN user_repos r ON r.id = s.repo_id
                 WHERE s.tg_user_id = $1
@@ -35,7 +36,8 @@ class AgentSlotRepository:
                 SELECT s.id, s.tg_user_id, s.label, s.cursor_agent_id,
                        s.repo_id, s.active_run_id, s.is_active,
                        s.cursor_token_key, s.runtime, s.local_path,
-                       s.preferred_worker_id, r.alias AS repo_alias
+                       s.preferred_worker_id, s.cloud_status, s.last_cloud_sync_at,
+                       r.alias AS repo_alias
                 FROM user_agent_slots s
                 LEFT JOIN user_repos r ON r.id = s.repo_id
                 WHERE s.tg_user_id = $1 AND s.id = $2
@@ -52,7 +54,8 @@ class AgentSlotRepository:
                 SELECT s.id, s.tg_user_id, s.label, s.cursor_agent_id,
                        s.repo_id, s.active_run_id, s.is_active,
                        s.cursor_token_key, s.runtime, s.local_path,
-                       s.preferred_worker_id, r.alias AS repo_alias
+                       s.preferred_worker_id, s.cloud_status, s.last_cloud_sync_at,
+                       r.alias AS repo_alias
                 FROM user_agent_slots s
                 LEFT JOIN user_repos r ON r.id = s.repo_id
                 WHERE s.tg_user_id = $1 AND s.is_active = TRUE
@@ -185,6 +188,23 @@ class AgentSlotRepository:
                 repo_id,
             )
 
+    async def rebind_repo(self, slot_id: int, repo_id: int) -> None:
+        """Point slot at a different repo; drop Cursor agent (repo-bound)."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE user_agent_slots
+                SET repo_id = $2,
+                    cursor_agent_id = NULL,
+                    cursor_token_key = NULL,
+                    active_run_id = NULL,
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                slot_id,
+                repo_id,
+            )
+
     async def update_label(self, tg_user_id: int, slot_id: int, label: str) -> bool:
         async with self._pool.acquire() as conn:
             result = await conn.execute(
@@ -199,45 +219,61 @@ class AgentSlotRepository:
             )
         return result.endswith("1")
 
-    async def update_execution(
+    async def update_runtime_config(
         self,
         tg_user_id: int,
         slot_id: int,
         *,
         runtime: str | None = None,
-        local_path: str | None | object = ...,
-        preferred_worker_id: str | None | object = ...,
+        local_path: str | None = None,
+        clear_local_path: bool = False,
+        preferred_worker_id: str | None = None,
+        clear_preferred_worker: bool = False,
     ) -> AgentSlot | None:
-        """Update runtime/local_path/preferred_worker_id for a slot.
-
-        `...` (Ellipsis) for `local_path`/`preferred_worker_id` means "leave
-        unchanged"; `None` explicitly clears the column. Switching to cloud
-        always clears both, since they only make sense for a Windows slot.
-        """
-        if runtime == "cloud":
-            local_path = None
-            preferred_worker_id = None
-
+        """Patch runtime / Windows path / preferred worker for a slot."""
         async with self._pool.acquire() as conn:
-            result = await conn.execute(
+            row = await conn.fetchrow(
+                """
+                SELECT runtime, local_path, preferred_worker_id
+                FROM user_agent_slots
+                WHERE tg_user_id = $1 AND id = $2
+                """,
+                tg_user_id,
+                slot_id,
+            )
+            if row is None:
+                return None
+
+            next_runtime = runtime if runtime is not None else row["runtime"]
+            if clear_local_path:
+                next_path = None
+            elif local_path is not None:
+                next_path = local_path.strip() or None
+            else:
+                next_path = row["local_path"]
+
+            if clear_preferred_worker:
+                next_worker = None
+            elif preferred_worker_id is not None:
+                next_worker = preferred_worker_id.strip() or None
+            else:
+                next_worker = row["preferred_worker_id"]
+
+            await conn.execute(
                 """
                 UPDATE user_agent_slots
                 SET runtime = COALESCE($3, runtime),
-                    local_path = CASE WHEN $4 THEN $5 ELSE local_path END,
-                    preferred_worker_id = CASE WHEN $6 THEN $7::uuid ELSE preferred_worker_id END,
+                    local_path = $4,
+                    preferred_worker_id = $5::uuid,
                     updated_at = now()
-                WHERE id = $1 AND tg_user_id = $2
+                WHERE tg_user_id = $1 AND id = $2
                 """,
-                slot_id,
                 tg_user_id,
-                runtime,
-                local_path is not ...,
-                None if local_path is ... else local_path,
-                preferred_worker_id is not ...,
-                None if preferred_worker_id is ... else preferred_worker_id,
+                slot_id,
+                next_runtime,
+                next_path,
+                next_worker,
             )
-        if not result.endswith("1"):
-            return None
         return await self.get_by_id(tg_user_id, slot_id)
 
     async def delete_slot(self, tg_user_id: int, slot_id: int) -> AgentSlot | None:
@@ -300,9 +336,46 @@ class AgentSlotRepository:
         return await self.get_active(tg_user_id)
 
 
+    async def set_cloud_status(
+        self,
+        slot_id: int,
+        *,
+        cloud_status: str,
+    ) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE user_agent_slots
+                SET cloud_status = $2,
+                    last_cloud_sync_at = now(),
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                slot_id,
+                cloud_status,
+            )
+
+    async def clear_cursor_agent(self, slot_id: int) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE user_agent_slots
+                SET cursor_agent_id = NULL,
+                    cursor_token_key = NULL,
+                    active_run_id = NULL,
+                    cloud_status = 'not_found',
+                    last_cloud_sync_at = now(),
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                slot_id,
+            )
+
+
 def _row_to_slot(row: asyncpg.Record) -> AgentSlot:
     keys = row.keys()
     preferred = row["preferred_worker_id"] if "preferred_worker_id" in keys else None
+    sync_at = row["last_cloud_sync_at"] if "last_cloud_sync_at" in keys else None
     return AgentSlot(
         id=row["id"],
         tg_user_id=row["tg_user_id"],
@@ -316,4 +389,10 @@ def _row_to_slot(row: asyncpg.Record) -> AgentSlot:
         runtime=row["runtime"] if "runtime" in keys and row["runtime"] else "cloud",
         local_path=row["local_path"] if "local_path" in keys else None,
         preferred_worker_id=str(preferred) if preferred is not None else None,
+        cloud_status=(
+            str(row["cloud_status"])
+            if "cloud_status" in keys and row["cloud_status"]
+            else "unknown"
+        ),
+        last_cloud_sync_at=str(sync_at) if sync_at is not None else None,
     )

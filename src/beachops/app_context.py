@@ -22,6 +22,7 @@ from beachops.db.repositories.orchestration import (
     RunEventRepository,
     WorkerNodeRepository,
 )
+from beachops.db.repositories.github_tokens import GithubTokenRepository
 from beachops.db.repositories.passkeys import PasskeyRepository
 from beachops.db.repositories.repos import RepoRepository
 from beachops.db.repositories.system_state import SystemStateRepository
@@ -59,6 +60,7 @@ class AppContext:
     approvals: ApprovalRepository
     callback_tokens: CallbackTokenRepository
     passkeys: PasskeyRepository
+    github_tokens: GithubTokenRepository
     audit: AuditRepository
     system_state: SystemStateRepository
     redis: Redis
@@ -122,6 +124,7 @@ class AppContext:
             approvals=ApprovalRepository(pool),
             callback_tokens=CallbackTokenRepository(pool),
             passkeys=PasskeyRepository(pool),
+            github_tokens=GithubTokenRepository(pool),
             audit=AuditRepository(pool),
             system_state=SystemStateRepository(pool, cache=hot_cache),
             redis=redis,
@@ -139,10 +142,15 @@ class AppContext:
                 api_key=settings.cursor_api_key,
                 model=settings.cursor_model,
                 workspace=workspace,
+                mcp_enabled=settings.mcp_enabled,
+                mcp_public_url=settings.mcp_public_url,
+                mcp_bearer_token=settings.mcp_bearer_token,
+                api_base_url=settings.cursor_api_base_url,
             ),
             transcription=TranscriptionService(
                 api_key=settings.openai_api_key,
                 model=settings.transcribe_model,
+                prompt=settings.voice_input_transcribe_prompt or None,
             ),
             speech=SpeechService(
                 api_key=settings.openai_api_key,

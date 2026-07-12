@@ -8,6 +8,7 @@ from enum import Enum
 class CursorTokenKey(str, Enum):
     MT = "mt"
     MT2 = "mt2"
+    MT3 = "mt3"
 
 
 DEFAULT_CURSOR_TOKEN_KEY = CursorTokenKey.MT.value
@@ -15,11 +16,13 @@ DEFAULT_CURSOR_TOKEN_KEY = CursorTokenKey.MT.value
 CURSOR_TOKEN_LABELS: dict[str, str] = {
     CursorTokenKey.MT.value: "mt",
     CursorTokenKey.MT2.value: "mt2",
+    CursorTokenKey.MT3.value: "mt3",
 }
 
 CURSOR_TOKEN_ORDER: tuple[CursorTokenKey, ...] = (
     CursorTokenKey.MT,
     CursorTokenKey.MT2,
+    CursorTokenKey.MT3,
 )
 
 

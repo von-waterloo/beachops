@@ -78,13 +78,43 @@ class UserRepository:
             return normalize_cursor_model_key(None, default=default)
         return normalize_cursor_model_key(row["cursor_model_key"], default=default)
 
-    async def set_cursor_model_key(self, tg_user_id: int, model_key: str) -> None:
+    async def get_cursor_model_params(self, tg_user_id: int) -> dict:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT cursor_model_params FROM users WHERE tg_user_id = $1",
+                tg_user_id,
+            )
+        if row is None or row.get("cursor_model_params") is None:
+            return {}
+        value = row["cursor_model_params"]
+        return dict(value) if isinstance(value, dict) else {}
+
+    async def set_cursor_model_key(
+        self,
+        tg_user_id: int,
+        model_key: str,
+        *,
+        params: dict | None = None,
+    ) -> None:
+        import json
+
         normalized = normalize_cursor_model_key(model_key, default=model_key)
+        encoded = (
+            json.dumps(params, separators=(",", ":"), sort_keys=True)
+            if params is not None
+            else None
+        )
         async with self._pool.acquire() as conn:
             await conn.execute(
-                "UPDATE users SET cursor_model_key = $1 WHERE tg_user_id = $2",
+                """
+                UPDATE users
+                SET cursor_model_key = $1,
+                    cursor_model_params = COALESCE($3::jsonb, cursor_model_params)
+                WHERE tg_user_id = $2
+                """,
                 normalized,
                 tg_user_id,
+                encoded,
             )
 
     async def get_cursor_token_key(self, tg_user_id: int) -> str:

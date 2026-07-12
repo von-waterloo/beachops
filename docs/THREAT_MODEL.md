@@ -10,8 +10,10 @@
 ## Trust boundaries
 
 - Telegram update and Mini App `initData` are untrusted until server validation;
-- browser Passkey assertions are untrusted until WebAuthn challenge, RP ID, origin,
-  user verification, signature and sign counter checks pass;
+- Telegram Login Widget payloads are untrusted until HMAC (SHA256 bot token) and
+  `auth_date` checks pass;
+- legacy browser Passkey assertions remain untrusted until WebAuthn challenge, RP ID,
+  origin, user verification, signature and sign counter checks pass;
 - Cursor/OpenAI/GitHub outputs are untrusted and pass redaction/policy;
 - browser receives no provider keys;
 - browser sessions use opaque Redis-backed tokens in `Secure`, `HttpOnly`,
@@ -40,8 +42,7 @@
 - Redis rate limits/idempotency and one active run per actor;
 - output redaction before Telegram, memory, audit, API, GitHub diff and TTS;
 - append-only database audit trigger;
-- `/panic` cancels durable/active work and blocks new writes; `/unpanic`
-  requires a separate one-time owner callback.
+- `/cancel` stops active runs; owner `/rollback` for prod SHA recovery.
 
 ## Residual risks
 
@@ -56,17 +57,17 @@
   forced-command-restricted key/user — never the operator's own admin key.
 - Full Mini App operation requires HTTPS. Until `WEBAPP_BASE_URL` is configured,
   `/dashboard` remains disabled.
-- Passkey enrollment is owner-only and requires a fresh signed Telegram Mini App
-  session; there is no public password/bootstrap endpoint.
+- Browser login uses Telegram Login Widget (or Mini App session mint); there is no
+  public password endpoint. Domain must be registered in BotFather `/setdomain`.
+- Legacy Passkey enrollment remains owner-only behind TMA session.
 - Telegram polling bot is intentionally single-instance; worker/API may scale,
   but distributed tests are required before increasing worker count.
 - Existing legacy media queue is in-process; write mode is never allowed there.
 
 ## Incident response
 
-1. Owner runs `/panic`.
-2. Verify `system_state.panic.enabled=true`, ARQ queue and Cursor run cancellation.
-3. Rotate affected external key in its provider; update server `.env`.
-4. Review append-only `audit_events` and redacted container logs.
-5. Restore DB from the pre-deploy dump if schema/data integrity is affected.
-6. Use `/unpanic` only after root cause and policy are corrected.
+1. Owner runs `/cancel` for active actors and reviews `/jobs` / `/approvals`.
+2. Rotate affected external key in its provider; update server `.env`.
+3. Review append-only `audit_events` and redacted container logs.
+4. Restore DB from the pre-deploy dump if schema/data integrity is affected.
+5. Use `/rollback` only after root cause is understood and a safe SHA is chosen.

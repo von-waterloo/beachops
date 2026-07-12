@@ -3,14 +3,13 @@
 ## Контекст системы
 
 - **Telegram Bot API** — long polling, один инстанс (конфликт при нескольких).
-- **Cursor Cloud Agents** — через `cursor-sdk` (bridge + cloud repos).
-- **Windows local agents** — outbound worker на ПК (`beachops.windows_worker`) с `LocalAgentOptions(cwd=...)`.
-- **PostgreSQL 16 + pgvector** — пользователи, репозитории, сессии агентов, семантическая память.
+- **Cursor Cloud Agents** — единственный execution plane продукта (Cloud Agents API **v1**: REST create/follow-up + SSE stream; legacy Windows SDK — только локальный worker).
+- **PostgreSQL 16 + pgvector** — пользователи, репозитории, сессии агентов, семантическая память, durable jobs / usage / SSE cursors.
 - **Redis + ARQ** — durable jobs, distributed actor locks, rate limits, replay protection,
-  short-lived hot cache (dashboard, auth bootstrap, panic write-through, embeddings).
-- **FastAPI + React Mini App** — dashboard, approvals, realtime voice, Windows worker.
+  short-lived hot cache (dashboard, auth bootstrap, embeddings, models/me/repos).
+- **FastAPI + React Mini App** — dashboard, approvals, realtime voice.
 - **OpenAI API** — realtime STT, streaming TTS, эмбеддинги.
-- **Workspace volume** — локальная рабочая директория для cursor-sdk bridge (`WORKSPACE_PATH`).
+- **Workspace volume** — локальная рабочая директория (`WORKSPACE_PATH`); cloud runs не требуют локального checkout репозитория.
 
 ```
 ┌─────────────┐     long polling      ┌──────────────────┐
@@ -22,8 +21,8 @@
                     ┌──────────────────────────┼──────────────────────────┐
                     ▼                          ▼                          ▼
             ┌───────────────┐          ┌───────────────┐          ┌───────────────┐
-            │  PostgreSQL   │          │  cursor-sdk   │          │   OpenAI API  │
-            │  + pgvector   │          │  Cloud Agents │          │ transcribe +  │
+            │  PostgreSQL   │          │ Cursor API v1 │          │   OpenAI API  │
+            │  + pgvector   │          │ REST + SSE    │          │ transcribe +  │
             └───────────────┘          └───────────────┘          │  embeddings   │
                                                                   └───────────────┘
 ```
@@ -47,7 +46,7 @@
 
 - `pool` — asyncpg
 - `users`, `repos`, `agent_slots`, `jobs`, `approvals`, `audit`, `system_state`, `passkeys`
-- `run_events`, `notification_outbox`, `worker_nodes` — orchestration / Windows workers
+- `run_events`, `notification_outbox`, `worker_nodes` — orchestration / legacy Windows registry
 - `redis`, `arq`, `hot_cache`, AES-GCM crypto, repository/risk policy
 - `memory` — индексация и recall
 - `cursor` — CursorAgentService
@@ -55,24 +54,26 @@
 - `job_queue` — legacy media path; text/voice jobs идут через ARQ
 - `active_runs`, `last_prompts` — in-memory состояние
 
-## Аутентификация Mini App
+## Аутентификация Mini App / сайта
 
-- Внутри Telegram сервер проверяет HMAC-подпись и возраст `initData`, затем RBAC allowlist.
-- В обычном браузере owner входит через WebAuthn Passkey: Face ID, Android-биометрия,
-  Windows Hello или системный PIN.
-- Первый Passkey регистрируется только из уже подтверждённой owner-сессии Telegram.
-- Публичный ключ и счётчик хранятся в `webauthn_credentials`; приватный ключ устройство
-  не покидает. Challenge одноразовый и живёт в Redis.
-- После успешной проверки сервер создаёт случайную Redis-сессию и выдаёт cookie
-  `Secure`, `HttpOnly`, `SameSite=Strict`. Для изменяющих запросов и WebSocket
-  дополнительно проверяется `Origin`.
+- Единый IdP: Telegram user id + RBAC allowlist (`OWNER` / `OPERATOR` / `VIEWER`).
+- Mini App: HMAC-подпись и возраст `initData` (`Authorization: tma …`); после успеха
+  клиент может запросить `POST /api/auth/session` → та же browser cookie.
+- Браузер с любого устройства: Telegram Login Widget → `POST /api/auth/telegram/login`
+  (подпись Login Widget: `HMAC-SHA256(data, SHA256(bot_token))`) → Redis session.
+  Публичный `GET /api/auth/telegram/config` отдаёт `botUsername` / `botId` / `origin`.
+- Домен сайта должен быть задан в BotFather (`/setdomain` = host из `WEBAPP_BASE_URL`).
+- Session cookie: opaque Redis token, `Secure` / `HttpOnly` / `SameSite=Strict`
+  (`__Host-beachops_session`). Unsafe HTTP methods и WebSocket дополнительно
+  проверяют `Origin`.
+- GitHub OAuth (опционально): `GET /api/auth/github/start` → callback → encrypted
+  token в `user_github_tokens` → `GET /api/github/repos` → pin через `POST /api/repos`.
+- Passkey/WebAuthn endpoints оставлены как legacy; в UI не используются.
 
 ## Поток обработки промпта
 
 ```
-text/voice → policy + encrypted beachops_jobs
-              ├─ runtime=cloud   → ARQ worker → Cursor Cloud
-              └─ runtime=windows → claim API → Windows worker → LocalAgentOptions
+text/voice → policy + encrypted beachops_jobs → ARQ worker → Cursor Cloud
 photo      → validate_prompt_request (legacy media path)
 forward          → ForwardContextBuffer (ждёт триггер или timeout)
                  → job_queue.submit
@@ -83,8 +84,9 @@ forward          → ForwardContextBuffer (ждёт триггер или timeou
                       → memory.index_run
 ```
 
-Runtime выбирает `services/runtime_router.choose_runtime` (slot → payload → default `cloud`).
+Все jobs идут в **cloud** (`services/runtime_router` игнорирует legacy `runtime=windows`).
 Cloud agent id: префикс `bc-` (`domain/runtime.is_cloud_agent_id`).
+
 ### Режимы (UserMode)
 
 | Режим | Cursor mode | Git / PR | Память в промпт | Кто может |
@@ -108,7 +110,29 @@ GitHub URL). Непустой allowlist по-прежнему ограничив
 **Cloud-чаты:** dashboard отдаёт `cursorUrl` (`https://cursor.com/agents/{bc-…}`)
 для слотов и jobs — открытие чата на компьютере.
 
-**Project skills** (`.cursor/skills/`, индекс `project-skills`): `add-bot-feature`, `telegram-ui`, `db-migrations`, `bot-testing`, `agent-run-pipeline`, `github-branches`, `deploy-prod`. В plan/do промптах агенту сказано читать нужный skill перед нетривиальной работой.
+**Mini App:** вкладки **Работа** / **Голос** / **Лента** / **Апрувы** / **Репо**.
+`POST /api/prompts` (ask/plan/do, опционально `images[]` base64), `GET /api/jobs/{id}/stream`
+(транскрипт `beachops_run_events`). CRUD слотов: `POST /api/agents`, `PATCH /api/agents/{id}`,
+`DELETE /api/agents/{id}`. Cloud worker пишет throttled `run.progress`; голос шлёт
+`job.progress` captions и (если `VOICE_MILESTONE_TTS=true`) редкие mid-run TTS-вехи,
+затем финальный разговорный брифинг (`kind=final`).
+
+**Voice channel** (`channel=voice` в `build_prompt`): отдельные префиксы
+`VOICE_ASK_PREFIX` / `VOICE_PLAN_PREFIX` / `VOICE_DO_GUIDANCE` — короче и без технарщины,
+чем Telegram-текст. TOV: `domain/voice_persona.py`.
+
+**Situation brief** (`services/situation_brief.py`): перед Cursor-run в промпт
+добавляется снимок очереди, approve, слота/репо/модели — для агента, не для TTS.
+По умолчанию `AUTO_APPROVE_PLANS=false`: после plan — `awaiting_approval` и owner-кнопки;
+`AUTO_APPROVE_PLANS=true` сразу enqueue DO.
+
+**HTTP MCP `beachops-ops`:** when `MCP_ENABLED` + `MCP_PUBLIC_URL` + `MCP_BEARER_TOKEN`
+are set, `CursorAgentService` injects `HttpMcpServerConfig` with tools
+`ssh_exec`, `docker_ps`, `docker_logs` (`web/mcp_server.py` → `OpsSshService`).
+Ask/plan/do prompts map aliases: `eu` (BeachOps), `mt-dev` (app DEV), `ru` (app PROD).
+Setup guide: [OPS_MCP.md](./OPS_MCP.md). Independent of Cursor key presets (`mt`/`mt2`/`mt3`).
+
+**Project skills** (`.cursor/skills/`, index `project-skills`): `add-bot-feature`, `telegram-ui`, `db-migrations`, `bot-testing`, `agent-run-pipeline`, `github-branches`, `deploy-prod`. Plan/do prompts tell the agent to read the right skill before non-trivial work.
 
 У каждого режима свой системный префикс в `domain/prompts.py`:
 
@@ -116,42 +140,44 @@ GitHub URL). Непустой allowlist по-прежнему ограничив
 - **plan** (`PLAN_SYSTEM_PREFIX`) — исследовать код, переиспользовать существующее, опираться на skills; объём плана = задаче; до 3 A/B/C при критичных развилках; план под Telegram (без mermaid/таблиц), напоминание про миграции.
 - **do** (`DO_GUIDANCE` + git safety) — сразу правки в базовой ветке; без лишних уточнений; без merge/deploy в main.
 
-### CursorAgentService
+### CursorAgentService (Cloud Agents API v1)
 
-1. `AsyncClient.launch_bridge(workspace=WORKSPACE_PATH)`
-2. `agents.create` или `agents.resume(cursor_agent_id)`
-3. `agent.send(prompt, SendOptions(mode=...))`
-4. Стрим `run.messages()` → `StreamState` (assistant, thinking, tool_call, status)
-5. `run.wait()` → финальный текст, PR URL, duration
+1. `POST /v1/agents` или follow-up `POST /v1/agents/{id}/runs` (`cursor_cloud_client`)
+2. Persist `agent_id` / `run_id` / `Last-Event-ID` в `beachops_jobs`
+3. Фоновый observer читает `GET .../stream` (SSE) → `StreamState`
+4. При disconnect / `410 stream_expired` / рестарте worker — `GET run` + reconciler
+5. Terminal: `GET .../usage?runId=` → footer/Telegram/Mini App; artifacts → Telegram (без presigned URL в БД)
+
+ARQ `execute_job` только **запускает** run и освобождает slot; долгий SSE не занимает `max_jobs`. Busy-gate в БД не даёт следующему job того же actor стартовать до `finalized_at`.
 
 Финальный результат длиннее ~3000 символов дополнительно отправляется полным
 `.md`-файлом: Telegram-сообщение с шапкой и футером ограничено 4096 символами.
 
-### Токены Cursor (mt / mt2)
+### Токены Cursor (mt / mt2 / mt3)
 
-- Два API key: `CURSOR_API_KEY` (`mt`) и опциональный `CURSOR_API_KEY_MT2` (`mt2`); ключ передаётся per-run в `run_prompt(api_key=...)` / `cancel_run(api_key=...)`.
-- Выбор пользователя — `users.cursor_token_key` (кнопки 🔑 mt / 🔑 mt2 в клавиатурах, только если mt2 настроен).
+- API keys: `CURSOR_API_KEY` (`mt`), опционально `CURSOR_API_KEY_MT2` (`mt2`) и `CURSOR_API_KEY_MT3` (`mt3`); ключ передаётся per-run в `run_prompt(api_key=...)` / `cancel_run(api_key=...)`.
+- Выбор пользователя — `users.cursor_token_key` (кнопки 🔑 mt / mt2 / mt3, только заполненные; ряд скрыт, если нет ни mt2, ни mt3).
 - При первом run токен **фиксируется на слоте** (`user_agent_slots.cursor_token_key`): агента, созданного под одним ключом, нельзя резюмить другим. Переключение действует для новых агентов (`/new`).
 - Резолв: `run_executor.resolve_run_token_key` — токен слота (если агент уже создан), иначе выбор пользователя; ключи — `domain/cursor_tokens.py`.
 
 ### Plan-режим: перехват плана
 
-Cursor в `mode="plan"` возвращает в `result.result` только короткую вводную фразу, а сам план:
+Cursor в `mode="plan"` возвращает в result часто только короткую вводную, а сам план:
 
-- передаёт tool-вызовом **`create_plan`** (полный markdown в `args["plan"]`) — перехватывается в `_consume_message` → `StreamState.set_plan`;
-- сохраняет артефактом `artifacts/plans/*.plan.md` (с YAML frontmatter) — fallback через `agent.list_artifacts()` / `download_artifact()`, только если `create_plan` был вызван в этом run (защита от чужого плана при resume).
+- передаёт tool-вызовом **`create_plan`** (полный markdown в args) — перехватывается в SSE `tool_call` → `StreamState.set_plan`;
+- сохраняет артефактом `artifacts/plans/*.plan.md` — fallback через REST list/download, только если `create_plan` был в этом run.
 
-`_finalize_plan` подставляет plan artifact в `final_text`. Worker создаёт
-`PLAN_EXECUTION` approval и отдельные одноразовые owner callback tokens. Статическая
-кнопка `CB_BUILD_PLAN` считается legacy и execution не запускает.
+`_finalize_plan` подставляет plan artifact в `final_text`. Finalizer создаёт
+`PLAN_EXECUTION` approval и одноразовые owner callback tokens. Статическая
+кнопка `CB_BUILD_PLAN` — legacy.
 
 ### Durable jobs
 
 `beachops_jobs` хранит encrypted payload и state machine; ARQ получает только UUID.
-Redis lock гарантирует один run на actor. После plan — `awaiting_approval` (owner
-approve запускает do-follow-up). Прямой `/do` и ask завершаются как `succeeded`
-без лишнего Telegram-approval; review — через PR в GitHub. Worker восстанавливает
-stale planning/running jobs после рестарта.
+Короткий Redis lock на actor при launch; observer живёт вне ARQ.
+После plan при `AUTO_APPROVE_PLANS=true` — сразу do-follow-up; иначе `awaiting_approval`.
+Worker на startup rehydrate observers для RUNNING/PLANNING с Cursor IDs; иначе
+возвращает в QUEUED. Периодический reconciler + agent inventory sync (без auto-DELETE).
 
 ### Семантическая память
 
@@ -174,7 +200,7 @@ stale planning/running jobs после рестарта.
 
 - Поддержка photo, image document, media groups (альбомы)
 - Текст и фото склеиваются через `PromptCoalesceBuffer` (`PROMPT_COALESCE_SEC`, по умолчанию 5 с) — один run после тишины
-- До `PHOTO_MAX_COUNT` изображений → `SDKImage` в Cursor
+- До `PHOTO_MAX_COUNT` изображений → REST images (лимит Cloud Agents API v1 = **5**)
 - Без caption/текста — дефолтный промпт «Разбери скриншот…»
 
 ### Пересланный контекст
@@ -192,46 +218,40 @@ stale planning/running jobs после рестарта.
 - `/new` и «+ Новый агент» создают новый слот и делают его активным; старые слоты сохраняются
 - Run идёт в активный слот и его `repo_id`; при activate слота синхронизируется активное репо в `user_repos`
 - Смена репо через `/repo` не сбрасывает контекст; у пустого слота (без `cursor_agent_id`) обновляется `repo_id`
-- Слот может иметь `runtime` (`cloud`\|`windows`) и `local_path` для Windows worker
+- Слот может хранить legacy `runtime`/`local_path` в БД; продуктовая поверхность — только cloud
 
-### Windows worker API
+### Windows worker API (legacy)
 
-| Endpoint | Auth | Назначение |
-|----------|------|------------|
-| `POST /api/workers/register` | owner TMA или bootstrap token | выдать node id + worker token |
-| `POST /api/workers/heartbeat` | worker token (SHA256 → `token_hash`) | liveness + capabilities / IDE discovery |
-| `POST /api/workers/claim` | worker token | атомарный claim `runtime=windows` job |
-| `POST /api/workers/runs/{job_id}/events` | worker token | ingest progress / finished |
-| `GET /api/workers` | owner TMA | список nodes |
-
-Daemon: Docker на Windows ПК (`scripts/install-windows-worker.ps1` →
-`docker-compose.windows-worker.yml`) или `python -m beachops.windows_worker`.
+Endpoints `/api/workers/*` и пакет `beachops.windows_worker` остаются в коде для
+совместимости, но **сняты с продукта**: `runtime_router` всегда выбирает cloud.
+Новые интеграции не используют Windows worker.
 ## Схема БД
 
 | Таблица | Ключевые поля |
 |---------|---------------|
 | `users` | `tg_user_id`, `current_mode`, `is_admin`, `cursor_model_key`, `cursor_token_key` |
 | `user_repos` | `alias`, `github_url`, `default_branch`, `is_active` |
+| `user_github_tokens` | encrypted OAuth token per `tg_user_id` (GitHub connect) |
 | `user_agent_slots` | `label`, `cursor_agent_id`, `repo_id`, `active_run_id`, `is_active`, `cursor_token_key`, `runtime`, `local_path` |
 | `memory_entries` | `kind`, `title`, `body`, `embedding vector(1536)`, метаданные run |
 | `beachops_jobs`, `beachops_job_events`, `beachops_artifacts` | durable state machine (`runtime`, `worker_node_id`) |
 | `beachops_run_events`, `beachops_notification_outbox` | stream milestones + idempotent Telegram notifier |
 | `beachops_worker_nodes` | Windows worker registry / heartbeat |
 | `approvals`, `callback_tokens` | owner decisions, digest+TTL+single-use |
-| `audit_events`, `system_state` | append-only audit и panic lock |
+| `audit_events`, `system_state` | append-only audit и control-plane flags |
 
 Миграции: Alembic в `alembic/versions/` (в т.ч. `013_orchestration_events`). DDL **не** применяется кодом бота при локальном запуске; в Docker entrypoint выполняет `alembic upgrade head`.
 
 ### Event-driven delivery
 
 ```
-Bot → beachops_jobs → ARQ runner → Cursor (cloud) / Windows worker
+Bot → beachops_jobs → ARQ runner → Cursor Cloud
                   ↘ run_events + notification_outbox → notifier → Telegram
                   ↘ reconciler (cron) → get_run → finalize orphaned UI
 ```
 
 Telegram stream edits — best-effort UI. Источник правды: Postgres. Cancel — Redis `CancelStore` (bot↔worker).
-Hot cache (`HotCache`): dashboard TTL ~3 с, auth bootstrap ~15 мин, panic write-through, embeddings по hash текста.
+Hot cache (`HotCache`): dashboard TTL ~3 с, auth bootstrap ~15 мин, embeddings по hash текста.
 
 ## Безопасность
 
@@ -240,7 +260,7 @@ Hot cache (`HotCache`): dashboard TTL ~3 с, auth bootstrap ~15 мин, panic wr
   запись в `main`/`master` блокируется всегда.
 - Payload AES-256-GCM; output redaction перед Telegram/DB/API/TTS.
 - Callback digest+TTL+atomic consume, Redis idempotency/rate limit.
-- `/panic` отменяет queued/active work и блокирует writes; `/unpanic` одноразовый owner flow.
+- Owner `/cancel` и `/rollback` для остановки работы и отката прода.
 
 ## Зависимости (ключевые)
 

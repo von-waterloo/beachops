@@ -28,6 +28,11 @@ export interface Job {
   cursorAgentId?: string | null
   cursorUrl?: string | null
   branch?: string | null
+  totalTokens?: number | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+  cacheReadTokens?: number | null
+  cacheWriteTokens?: number | null
 }
 
 export interface Event {
@@ -36,6 +41,11 @@ export interface Event {
   summary: string
   createdAt: string
   jobId?: string
+  toStatus?: string | null
+  title?: string | null
+  repository?: string | null
+  runtime?: string | null
+  branch?: string | null
 }
 
 export interface Approval {
@@ -72,10 +82,28 @@ export interface AgentSlot {
   runtime?: string
   active?: boolean
   repository?: string | null
+  localPath?: string | null
+  preferredWorkerId?: string | null
   cursorAgentId?: string | null
   cursorUrl?: string | null
   localPath?: string | null
   preferredWorkerId?: string | null
+}
+
+export interface JobStreamEvent {
+  id: string
+  eventType: string
+  text: string | null
+  createdAt: string | null
+}
+
+export interface JobStreamSnapshot {
+  jobId: string
+  status: string
+  events: JobStreamEvent[]
+  lastEventId: string
+  latestText: string | null
+  finalText: string | null
 }
 
 export interface Usage {
@@ -120,6 +148,24 @@ export interface QueueSnapshot {
   total?: number
 }
 
+export interface SelfImproveInfo {
+  enabled: boolean
+  repoUrl?: string | null
+  branches: string[]
+  canToggle?: boolean
+  needsRepo?: boolean
+}
+
+export interface AllowedRepository {
+  url: string
+  branches: string[]
+}
+
+export interface RepositoryPolicyInfo {
+  openMode: boolean
+  repositories: AllowedRepository[]
+}
+
 export interface DashboardSnapshot {
   jobs: Job[]
   events: Event[]
@@ -128,11 +174,12 @@ export interface DashboardSnapshot {
   agents: AgentSlot[]
   selfImprove?: SelfImproveStatus | null
   usage: Usage | null
-  panic: boolean
   role: string
   defaultBranch?: string
+  repositoryPolicy?: RepositoryPolicyInfo
   workers: WorkerNode[]
   queue: QueueSnapshot
+  selfImprove?: SelfImproveInfo
 }
 
 export function isActiveJobStatus(status: JobStatus): boolean {

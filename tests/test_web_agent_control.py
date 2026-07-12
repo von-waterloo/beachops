@@ -103,11 +103,17 @@ def test_assemble_transcript_latest_text_without_terminal_event() -> None:
 
 
 def test_agent_update_request_accepts_partial_fields() -> None:
-    body = AgentUpdateRequest(runtime="windows", localPath="C:/repo")
-    assert body.runtime == "windows"
-    assert body.localPath == "C:/repo"
+    body = AgentUpdateRequest(runtime="cloud", label="Ops")
+    assert body.runtime == "cloud"
+    assert body.label == "Ops"
     assert "preferredWorkerId" not in body.model_fields_set
     assert "runtime" in body.model_fields_set
+    assert "label" in body.model_fields_set
+
+
+def test_agent_update_request_rejects_windows_runtime() -> None:
+    with pytest.raises(ValidationError):
+        AgentUpdateRequest(runtime="windows")
 
 
 def test_agent_update_request_rejects_unknown_runtime() -> None:

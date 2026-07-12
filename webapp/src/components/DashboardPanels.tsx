@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   Activity,
@@ -12,61 +12,75 @@ import {
   HeartPulse,
   Loader2,
   LockKeyhole,
+  LogIn,
   Monitor,
   Plus,
   Radio,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
-  Sparkles,
+  Unplug,
   X,
+  Zap,
 } from 'lucide-react'
-import type { AgentSlot, DashboardSnapshot, Event, Job, WorkerNode } from '../types/api'
+import type {
+  AgentSlot,
+  AllowedRepository,
+  DashboardSnapshot,
+  Event,
+  Job,
+  WorkerNode,
+} from '../types/api'
 import { isActiveJobStatus } from '../types/api'
-import { AgentControlPanel, JobChatPanel } from './AgentControlPanel'
 import { feedback } from '../lib/feedback'
 import {
+  disconnectGithub,
+  fetchGithubRepos,
+  fetchGithubStatus,
+  githubOAuthStartUrl,
+  pinBranchFor,
+  type GithubConnectionStatus,
+  type GithubRemoteRepo,
+} from '../lib/github'
+import {
+  fetchCursorHealth,
+  type CursorHealthSnapshot,
+} from '../lib/cursorHealth'
+import {
   matchesRuntimeFilter,
-  RUNTIME_FILTER_LABELS,
   type RuntimeFilter,
 } from '../lib/runtimeFilter'
 import {
+  eventHeadline,
+  eventTypeLabel,
   relativeTimeRu,
   riskLabel,
   runtimeLabel,
   statusLabel,
+  statusTone,
 } from '../lib/uiCopy'
 
-export type TabId = 'voice' | 'active' | 'history' | 'approvals' | 'repositories'
+export type TabId = 'work' | 'voice' | 'history' | 'approvals' | 'repositories'
 
 type Decision = 'approve' | 'reject' | 'revision'
 
 interface Props {
-  tab: Exclude<TabId, 'voice'> | 'overview'
+  tab: Exclude<TabId, 'voice' | 'work'> | 'active' | 'overview'
   data: DashboardSnapshot
   loading: boolean
   error: string | null
-  liveEvents?: Event[]
   runtimeFilter?: RuntimeFilter
   focusedJobId?: string | null
-  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: TabId) => void
-  onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
+  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: string) => void
+  onSelectJob?: (jobId: string, runtime?: string | null) => void
   onRefresh: () => void
   onDecision: (approvalId: string, decision: Decision, revision?: string) => Promise<void>
   onAddRepository?: (input: { url: string; branch?: string }) => Promise<void>
   onUpdateRepository?: (repoId: string, input: { branch?: string; makeActive?: boolean }) => Promise<void>
-  onActivateSelfImprove?: () => Promise<void>
-  onUpdateAgent?: (slotId: string, input: {
-    runtime?: string
-    localPath?: string | null
-    preferredWorkerId?: string | null
-    makeActive?: boolean
-  }) => Promise<void>
-  onSubmitPrompt?: (input: {
-    prompt: string
-    mode?: 'ask' | 'plan' | 'do'
-    slotId?: string
-  }) => Promise<{ job: { id: string }; enqueued: boolean; reason?: string }>
+  onSetSelfImprove?: (input: { enabled: boolean; repoUrl?: string | null }) => Promise<void>
+  onCreateAgent?: () => Promise<void>
+  onUpdateAgent?: (slotId: string, input: { label?: string; makeActive?: boolean }) => Promise<void>
+  onDeleteAgent?: (slotId: string) => Promise<void>
 }
 
 function Empty({ icon, title, copy }: { icon: React.ReactNode; title: string; copy: string }) {
@@ -81,6 +95,307 @@ function Empty({ icon, title, copy }: { icon: React.ReactNode; title: string; co
       <h2>{title}</h2>
       <p>{copy}</p>
     </motion.div>
+  )
+}
+
+function shortGithubRepo(url: string): string {
+  return url
+    .replace(/^https:\/\/github\.com\//i, '')
+    .replace(/\.git$/i, '')
+}
+
+function preferredBranch(branches: string[], defaultBranch: string): string {
+  const preferred = [defaultBranch, 'dev', 'develop'].find((branch) => branches.includes(branch))
+  if (preferred) return preferred
+  const nonProtected = branches.find(
+    (branch) => !['main', 'master'].includes(branch.toLowerCase()),
+  )
+  return nonProtected ?? branches[0] ?? defaultBranch
+}
+
+function CursorHealthPanel() {
+  const [health, setHealth] = useState<CursorHealthSnapshot | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = async (force = false) => {
+    setLoading(true)
+    setError(null)
+    try {
+      setHealth(await fetchCursorHealth(force))
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Не удалось проверить Cursor API')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void refresh(false)
+  }, [])
+
+  // Silent unless there's an actual problem — no need to show "all good" noise.
+  if (!loading && !error && health?.ok) return null
+
+  return (
+    <Section eyebrow="Cursor" title="Проблема с доступом">
+      <article className="github-connect-card">
+        {loading && !health ? null : error ? (
+          <p className="muted-hint">{error}</p>
+        ) : (
+          <>
+            <div className="github-connect-topline">
+              <strong>Проблема с ключом</strong>
+              <button
+                type="button"
+                className="ghost-link"
+                onClick={() => {
+                  feedback('tap')
+                  void refresh(true).then(() => feedback('success')).catch(() => feedback('error'))
+                }}
+              >
+                <RefreshCw size={14} /> Обновить
+              </button>
+            </div>
+            <ul className="muted-hint" style={{ margin: 0, paddingLeft: '1.1rem' }}>
+              {(health?.tokens ?? []).map((token) => (
+                <li key={token.tokenKey}>
+                  {token.ok ? '✓' : '✗'} {token.tokenKey}
+                  {token.identity ? ` · ${token.identity}` : ''}
+                  {token.hasActiveRepo === true
+                    ? ' · активный repo доступен'
+                    : token.hasActiveRepo === false
+                      ? ' · активный repo не найден в Cursor'
+                      : ''}
+                  {token.error ? ` · ${token.error}` : ''}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </article>
+    </Section>
+  )
+}
+
+function GithubConnectPanel({
+  onPin,
+  canManage,
+}: {
+  onPin: (url: string, branch: string) => void
+  canManage: boolean
+}) {
+  const [status, setStatus] = useState<GithubConnectionStatus | null>(null)
+  const [repos, setRepos] = useState<GithubRemoteRepo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [listBusy, setListBusy] = useState(false)
+  const [pinning, setPinning] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const next = await fetchGithubStatus()
+      setStatus(next)
+      if (next.connected) {
+        setListBusy(true)
+        try {
+          setRepos(await fetchGithubRepos(1))
+        } catch (err: unknown) {
+          setRepos([])
+          setError(err instanceof Error ? err.message : 'Не удалось загрузить репо GitHub')
+        } finally {
+          setListBusy(false)
+        }
+      } else {
+        setRepos([])
+      }
+    } catch {
+      setStatus({ configured: false, connected: false, login: null })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void refresh()
+  }, [])
+
+  if (!canManage) return null
+
+  return (
+    <Section eyebrow="GitHub" title="Войти и выбрать репо">
+      <article className="github-connect-card">
+        {loading ? (
+          <p className="muted-hint"><Loader2 size={14} className="spin-icon" /> Проверяю GitHub…</p>
+        ) : !status?.configured ? (
+          <p className="muted-hint">
+            GitHub OAuth не настроен на сервере. Пока можно вставить URL вручную ниже.
+          </p>
+        ) : !status.connected ? (
+          <>
+            <p>
+              Войдите в GitHub, выберите репозиторий — он закрепится в BeachOps.
+              Cursor всё равно должен иметь доступ к этому репо в своих Settings.
+            </p>
+            <a
+              className="primary-button github-connect-btn"
+              href={githubOAuthStartUrl()}
+              onClick={() => feedback('tap')}
+            >
+              <LogIn size={17} />
+              Войти через GitHub
+            </a>
+          </>
+        ) : (
+          <>
+            <div className="github-connect-topline">
+              <strong>@{status.login || 'github'}</strong>
+              <button
+                type="button"
+                className="ghost-link"
+                onClick={() => {
+                  feedback('tap')
+                  void disconnectGithub()
+                    .then(() => {
+                      feedback('success')
+                      void refresh()
+                    })
+                    .catch(() => feedback('error'))
+                }}
+              >
+                <Unplug size={14} /> Отключить
+              </button>
+            </div>
+            {listBusy && (
+              <p className="muted-hint"><Loader2 size={14} className="spin-icon" /> Загружаю список…</p>
+            )}
+            {!listBusy && repos.length === 0 && (
+              <p className="muted-hint">Репозиториев не видно — проверьте доступ GitHub.</p>
+            )}
+            <div className="github-repo-picker">
+              {repos.map((repo) => (
+                <button
+                  key={repo.url}
+                  type="button"
+                  className="github-repo-option"
+                  disabled={pinning === repo.url}
+                  onClick={() => {
+                    feedback('tap')
+                    setPinning(repo.url)
+                    const branch = pinBranchFor(repo)
+                    onPin(repo.url, branch)
+                    window.setTimeout(() => setPinning(null), 1200)
+                  }}
+                >
+                  <span>
+                    <strong>{repo.fullName}</strong>
+                    <small>
+                      {repo.private ? 'private' : 'public'} · ветка {pinBranchFor(repo)}
+                    </small>
+                  </span>
+                  {pinning === repo.url
+                    ? <Loader2 size={16} className="spin-icon" />
+                    : <Plus size={16} />}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {error && <div className="inline-error" role="alert">{error}</div>}
+      </article>
+    </Section>
+  )
+}
+
+function RepoPolicyBanner({
+  openMode,
+  allowedCount,
+}: {
+  openMode: boolean
+  allowedCount: number
+}) {
+  return (
+    <div className={`locked-notice soft repo-policy-banner${openMode ? '' : ' is-strict'}`}>
+      <GitBranch size={18} />
+      <div>
+        <strong>{openMode ? 'Открытый режим' : 'Только из списка сервера'}</strong>
+        <p>
+          {openMode
+            ? 'Вставьте любой HTTPS GitHub URL и базовую ветку. Запись в main/master запрещена — для работы берите dev или feature.'
+            : allowedCount
+              ? 'Сервер разрешает только репозитории ниже. Нажмите «Подключить» — URL и ветка подставятся сами.'
+              : 'Список разрешённых пуст. Попросите владельца открыть режим или добавить репозитории.'}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function AllowedRepoList({
+  items,
+  connectedUrls,
+  defaultBranch,
+  busyUrl,
+  onConnect,
+  onFill,
+}: {
+  items: AllowedRepository[]
+  connectedUrls: Set<string>
+  defaultBranch: string
+  busyUrl: string | null
+  onConnect: (url: string, branch: string) => void
+  onFill: (url: string, branch: string) => void
+}) {
+  if (!items.length) return null
+  return (
+    <div className="allowed-repo-list" aria-label="Разрешённые репозитории">
+      {items.map((item) => {
+        const branch = preferredBranch(item.branches, defaultBranch)
+        const connected = connectedUrls.has(item.url.toLowerCase())
+        const busy = busyUrl === item.url
+        return (
+          <article className="allowed-repo-card" key={item.url}>
+            <div className="allowed-repo-copy">
+              <strong>{shortGithubRepo(item.url)}</strong>
+              <div className="allowed-branch-chips" role="list">
+                {item.branches.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    className={`branch-chip${name === branch ? ' is-preferred' : ''}`}
+                    role="listitem"
+                    onClick={() => {
+                      feedback('select')
+                      onFill(item.url, name)
+                    }}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {connected ? (
+              <span className="repo-state ready">Уже есть</span>
+            ) : (
+              <button
+                type="button"
+                className="allowed-connect-btn"
+                disabled={busy}
+                onClick={() => {
+                  feedback('tap')
+                  onConnect(item.url, branch)
+                }}
+              >
+                {busy ? <Loader2 size={16} className="spin-icon" /> : <Plus size={16} />}
+                Подключить
+              </button>
+            )}
+          </article>
+        )
+      })}
+    </div>
   )
 }
 
@@ -116,25 +431,10 @@ function RuntimeFilterBar({
   value: RuntimeFilter
   onChange?: (filter: RuntimeFilter) => void
 }) {
-  if (!onChange) return null
-  return (
-    <div className="runtime-filter-bar" role="toolbar" aria-label="Фильтр Cloud / Windows">
-      {(['all', 'cloud', 'windows'] as const).map((filter) => (
-        <button
-          key={filter}
-          type="button"
-          className={value === filter ? 'selected' : ''}
-          aria-pressed={value === filter}
-          onClick={() => {
-            feedback('select')
-            onChange(filter)
-          }}
-        >
-          {RUNTIME_FILTER_LABELS[filter]}
-        </button>
-      ))}
-    </div>
-  )
+  // Cloud-only product: filter UI removed.
+  void value
+  void onChange
+  return null
 }
 
 function AgentCard({
@@ -146,7 +446,7 @@ function AgentCard({
   selected?: boolean
   onSelect?: () => void
 }) {
-  const windows = job.runtime === 'windows'
+  const windows = false
   const interactive = Boolean(onSelect)
   const openCursor = (event: React.MouseEvent) => {
     event.stopPropagation()
@@ -188,6 +488,9 @@ function AgentCard({
           {runtimeLabel(job.runtime)}
           {job.repository ? ` · ${job.repository}` : ''}
           {job.branch ? ` · ${job.branch}` : ''}
+          {typeof job.totalTokens === 'number'
+            ? ` · ${job.totalTokens.toLocaleString('ru-RU')} tok`
+            : ''}
         </p>
         {job.cursorUrl && (
           <button
@@ -207,16 +510,33 @@ function AgentCard({
   )
 }
 
-function SlotCard({ slot }: { slot: AgentSlot }) {
-  const windows = slot.runtime === 'windows'
+function SlotCard({
+  slot,
+  onActivate,
+  onDelete,
+}: {
+  slot: AgentSlot
+  onActivate?: () => void
+  onDelete?: () => void
+}) {
   return (
     <motion.article
-      className={`agent-card runtime-${windows ? 'windows' : 'cloud'}${slot.active ? ' is-selected' : ''}`}
+      className={`agent-card runtime-cloud${slot.active ? ' is-selected' : ''}${onActivate ? ' is-clickable' : ''}`}
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
+      onClick={onActivate}
+      role={onActivate ? 'button' : undefined}
+      tabIndex={onActivate ? 0 : undefined}
+      onKeyDown={(event) => {
+        if (!onActivate) return
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onActivate()
+        }
+      }}
     >
       <div className="agent-mark">
-        {windows ? <Monitor size={18} /> : <Cloud size={18} />}
+        <Cloud size={18} />
       </div>
       <div className="agent-body">
         <div className="card-topline">
@@ -224,10 +544,22 @@ function SlotCard({ slot }: { slot: AgentSlot }) {
             <Radio size={12} />
             {slot.active ? 'Активен' : 'Слот'}
           </span>
+          {onDelete && (
+            <button
+              type="button"
+              className="ghost-link"
+              onClick={(event) => {
+                event.stopPropagation()
+                onDelete()
+              }}
+            >
+              Удалить
+            </button>
+          )}
         </div>
         <h2>{slot.label}</h2>
         <p>
-          {runtimeLabel(slot.runtime)}
+          Cloud
           {slot.repository ? ` · ${slot.repository}` : ''}
         </p>
         {slot.cursorUrl ? (
@@ -236,10 +568,13 @@ function SlotCard({ slot }: { slot: AgentSlot }) {
             href={slot.cursorUrl}
             target="_blank"
             rel="noreferrer"
-            onClick={() => feedback('tap')}
+            onClick={(event) => {
+              event.stopPropagation()
+              feedback('tap')
+            }}
           >
             <ExternalLink size={14} />
-            Открыть чат в Cursor
+            Открыть в Cursor
           </a>
         ) : (
           <p className="muted-hint">Чат появится после первого cloud-run</p>
@@ -339,65 +674,336 @@ function ApprovalActions({
   )
 }
 
-function TimelineList({ events }: { events: Event[] }) {
-  if (!events.length) {
+function SelfImprovePanel({
+  data,
+  onSetSelfImprove,
+}: {
+  data: DashboardSnapshot
+  onSetSelfImprove?: (input: { enabled: boolean; repoUrl?: string | null }) => Promise<void>
+}) {
+  const info = data.selfImprove
+  const enabled = Boolean(info?.enabled)
+  const isOwner = data.role.toLowerCase() === 'owner'
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const activeRepo = data.repositories.find((repo) => repo.active)
+  const targetUrl = info?.repoUrl || activeRepo?.url || null
+
+  const toggle = () => {
+    if (!onSetSelfImprove || busy || !isOwner) return
+    setBusy(true)
+    setError(null)
+    feedback('tap')
+    void onSetSelfImprove({
+      enabled: !enabled,
+      repoUrl: targetUrl,
+    })
+      .then(() => feedback('success'))
+      .catch((err: unknown) => {
+        feedback('error')
+        setError(err instanceof Error ? err.message : 'Не удалось переключить')
+      })
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <Section eyebrow="BeachOps" title="Самосовершенствование">
+      <article className={`self-improve-card${enabled ? ' is-on' : ''}`}>
+        <div className="self-improve-copy">
+          <strong>{enabled ? 'Включено' : 'Выключено'}</strong>
+          <p>
+            {enabled
+              ? `Агент может улучшать сам BeachOps (${info?.branches?.join(', ') || 'dev'}). Деплой — только после вашего approve.`
+              : 'Когда выключено, задачи идут в обычные репо. Включите, чтобы править этот control plane.'}
+          </p>
+          {targetUrl ? (
+            <p className="muted-hint">Цель: {targetUrl.replace('https://github.com/', '')}</p>
+          ) : enabled ? (
+            <p className="muted-hint">Сначала сделайте активным репо BeachOps во вкладке «Репо».</p>
+          ) : (
+            <p className="muted-hint">
+              Выключено — обычные задачи идут в активное репо. Для включения закрепите форк BeachOps во вкладке «Репо».
+            </p>
+          )}
+        </div>
+        {isOwner ? (
+          <button
+            type="button"
+            className={`self-improve-toggle${enabled ? ' is-on' : ''}`}
+            aria-pressed={enabled}
+            disabled={busy || (!enabled && !targetUrl)}
+            onClick={toggle}
+          >
+            {busy ? <Loader2 size={16} className="spin-icon" /> : enabled ? 'Выключить' : 'Включить'}
+          </button>
+        ) : (
+          <span className="muted-hint">Только владелец</span>
+        )}
+      </article>
+      {error && <div className="inline-error" role="alert">{error}</div>}
+    </Section>
+  )
+}
+
+
+function ApprovalsList({
+  approvals,
+  role,
+  pendingIds,
+  act,
+  compact = false,
+}: {
+  approvals: DashboardSnapshot['approvals']
+  role: string
+  pendingIds: Set<string>
+  act: (approvalId: string, decision: Decision, revision?: string) => void
+  compact?: boolean
+}) {
+  const items = compact ? approvals.slice(0, 4) : approvals
+  return (
+    <div className="card-list">
+      {items.map((approval) => (
+        <article className="approval-card" key={approval.id}>
+          <div className="card-topline">
+            <span className={`risk risk-${approval.risk}`}>
+              {approval.risk === 'high' ? <AlertTriangle size={13} /> : <ShieldCheck size={13} />}
+              {riskLabel(approval.risk)}
+            </span>
+            <time>{relativeTimeRu(approval.requestedAt)}</time>
+          </div>
+          <h2>{approval.title}</h2>
+          <p>{approval.repository ?? 'Защищённая операция'}</p>
+          {role.toLowerCase() === 'owner' && (
+            <ApprovalActions
+              pending={pendingIds.has(approval.id)}
+              onApprove={() => act(approval.id, 'approve')}
+              onRevise={() => act(
+                approval.id,
+                'revision',
+                'Проверь результат и исправь в рамках одобренного scope.',
+              )}
+              onReject={() => act(approval.id, 'reject')}
+            />
+          )}
+        </article>
+      ))}
+    </div>
+  )
+}
+
+function TimelineList({
+  events,
+  jobsById,
+  onSelectJob,
+  limit = 40,
+}: {
+  events: Event[]
+  jobsById?: Map<string, Job>
+  onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
+  limit?: number
+}) {
+  const items = events.slice(0, limit)
+  if (!items.length) {
     return (
       <Empty
         icon={<Archive />}
-        title="История пуста"
-        copy="Завершённые прогоны появятся здесь."
+        title="Лента пуста"
+        copy="Здесь появятся статусы прогонов: старт, approve, сбой, готово."
       />
     )
   }
   return (
     <div className="timeline modern-timeline">
       <AnimatePresence initial={false}>
-        {events.map((event, index) => (
-          <motion.article
-            key={event.id}
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: Math.min(index, 8) * 0.03, ease: [0.22, 1, 0.36, 1] }}
-          >
-            <span className="timeline-dot" />
-            <div>
-              <p>{event.summary}</p>
-              <small>
-                {event.kind}
-                {event.jobId ? ` · ${event.jobId.slice(0, 8)}` : ''}
-                {' · '}
-                {relativeTimeRu(event.createdAt)}
-              </small>
-            </div>
-          </motion.article>
-        ))}
+        {items.map((event, index) => {
+          const job = event.jobId ? jobsById?.get(event.jobId) : undefined
+          const title = event.title || job?.title || null
+          const repository = event.repository || job?.repository || null
+          const runtime = event.runtime || job?.runtime || null
+          const branch = event.branch || job?.branch || null
+          const tone = statusTone(event.toStatus || event.summary)
+          const headline = eventHeadline(event)
+          const metaBits = [
+            eventTypeLabel(event.kind),
+            repository,
+            runtime ? runtimeLabel(runtime) : null,
+            branch,
+          ].filter(Boolean)
+          const selectable = Boolean(onSelectJob && event.jobId)
+          const body = (
+            <>
+              <span className={`timeline-dot tone-${tone}`} />
+              <div className="timeline-body">
+                <div className="timeline-topline">
+                  <span className={`status-pill status-${event.toStatus || event.summary} tone-${tone}`}>
+                    {headline}
+                  </span>
+                  <time>{relativeTimeRu(event.createdAt)}</time>
+                </div>
+                {title ? <p className="timeline-title">{title}</p> : null}
+                <small>{metaBits.join(' · ')}</small>
+              </div>
+            </>
+          )
+          return selectable ? (
+            <motion.button
+              type="button"
+              className="timeline-item is-clickable"
+              key={event.id}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: Math.min(index, 8) * 0.03, ease: [0.22, 1, 0.36, 1] }}
+              onClick={() => onSelectJob?.(event.jobId!, runtime)}
+            >
+              {body}
+            </motion.button>
+          ) : (
+            <motion.article
+              className="timeline-item"
+              key={event.id}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: Math.min(index, 8) * 0.03, ease: [0.22, 1, 0.36, 1] }}
+            >
+              {body}
+            </motion.article>
+          )
+        })}
       </AnimatePresence>
+    </div>
+  )
+}
+
+function HistoryPanel({
+  jobs,
+  events,
+  runtimeFilter,
+  focusedJobId,
+  onRuntimeFilterChange,
+  onSelectJob,
+}: {
+  jobs: Job[]
+  events: Event[]
+  runtimeFilter: RuntimeFilter
+  focusedJobId?: string | null
+  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: string) => void
+  onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
+}) {
+  const jobsById = new Map(jobs.map((job) => [job.id, job]))
+  const recentJobs = jobs
+    .filter((job) => matchesRuntimeFilter(job.runtime, runtimeFilter))
+    .slice(0, 40)
+  const failedCount = recentJobs.filter((job) => job.status === 'failed').length
+  const doneCount = recentJobs.filter((job) =>
+    ['completed', 'succeeded', 'accepted'].includes(job.status),
+  ).length
+  const waitingCount = recentJobs.filter((job) =>
+    ['awaiting_approval', 'review_required', 'blocked'].includes(job.status),
+  ).length
+
+  return (
+    <div className="history-feed">
+      <RuntimeFilterBar
+        value={runtimeFilter}
+        onChange={(filter) => onRuntimeFilterChange?.(filter, 'history')}
+      />
+
+      <div className="history-stats" aria-label="Сводка ленты">
+        <div>
+          <strong>{recentJobs.length}</strong>
+          <span>Прогонов</span>
+        </div>
+        <div>
+          <strong>{doneCount}</strong>
+          <span>Готово</span>
+        </div>
+        <div>
+          <strong>{waitingCount}</strong>
+          <span>Ждёт</span>
+        </div>
+        <div>
+          <strong>{failedCount}</strong>
+          <span>Сбои</span>
+        </div>
+      </div>
+
+      <Section eyebrow="Прогоны" title="Недавние задачи">
+        {recentJobs.length ? (
+          <div className="card-list history-job-list">
+            {recentJobs.map((job) => {
+              const selected = focusedJobId === job.id
+              const tone = statusTone(job.status)
+              const className = `work-card history-job-card tone-${tone}${onSelectJob ? ' is-clickable' : ''}${selected ? ' is-selected' : ''}`
+              const body = (
+                <>
+                  <div className="card-topline">
+                    <span className={`status-pill status-${job.status} tone-${tone}`}>
+                      <Radio size={12} />
+                      {statusLabel(job.status)}
+                    </span>
+                    <time>{relativeTimeRu(job.createdAt)}</time>
+                  </div>
+                  <h2>{job.title}</h2>
+                  <p>
+                    {runtimeLabel(job.runtime)}
+                    {job.repository ? ` · ${job.repository}` : ''}
+                    {job.branch ? ` · ${job.branch}` : ''}
+                  </p>
+                </>
+              )
+              return onSelectJob ? (
+                <button
+                  className={className}
+                  type="button"
+                  key={job.id}
+                  onClick={() => onSelectJob(job.id, job.runtime)}
+                >
+                  {body}
+                </button>
+              ) : (
+                <article className={className} key={job.id}>{body}</article>
+              )
+            })}
+          </div>
+        ) : (
+          <Empty
+            icon={<Archive />}
+            title="Пока пусто"
+            copy="Запустите задачу голосом или из Telegram — она появится здесь."
+          />
+        )}
+      </Section>
+
+      <Section eyebrow="Активность" title="Что менялось">
+        <TimelineList
+          events={events}
+          jobsById={jobsById}
+          onSelectJob={onSelectJob}
+          limit={24}
+        />
+      </Section>
     </div>
   )
 }
 
 function Overview({
   data,
-  liveEvents,
   pendingIds,
   act,
   runtimeFilter,
   focusedJobId,
   onRuntimeFilterChange,
   onSelectJob,
-  onUpdateAgent,
-  onSubmitPrompt,
+  onSetSelfImprove,
 }: {
   data: DashboardSnapshot
-  liveEvents: Event[]
   pendingIds: Set<string>
   act: (approvalId: string, decision: Decision, revision?: string) => void
   runtimeFilter: RuntimeFilter
   focusedJobId?: string | null
-  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: TabId) => void
+  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: string) => void
   onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
-  onUpdateAgent?: Props['onUpdateAgent']
-  onSubmitPrompt?: Props['onSubmitPrompt']
+  onSetSelfImprove?: (input: { enabled: boolean; repoUrl?: string | null }) => Promise<void>
 }) {
   const activeJobs = data.jobs
     .filter((job) => isActiveJobStatus(job.status))
@@ -405,7 +1011,8 @@ function Overview({
   const queuedJobs = data.jobs
     .filter((job) => job.status === 'queued')
     .filter((job) => matchesRuntimeFilter(job.runtime, runtimeFilter))
-  const timeline = (liveEvents.length ? liveEvents : data.events).slice(0, 12)
+  const timeline = data.events.slice(0, 12)
+  const jobsById = new Map(data.jobs.map((job) => [job.id, job]))
 
   const active = data.queue?.active ?? data.queue?.running ?? 0
   const queuedCount = data.queue?.queued ?? data.queue?.pending ?? 0
@@ -419,18 +1026,6 @@ function Overview({
 
   return (
     <div className="control-feed">
-      {onUpdateAgent && onSubmitPrompt && (data.agents?.length ?? 0) > 0 && (
-        <AgentControlPanel
-          slots={data.agents}
-          workers={data.workers}
-          role={data.role}
-          onUpdateAgent={onUpdateAgent}
-          onSubmitPrompt={onSubmitPrompt}
-          onJobDispatched={(jobId, runtime) => onSelectJob?.(jobId, runtime)}
-        />
-      )}
-      {focusedJobId && <JobChatPanel jobId={focusedJobId} />}
-
       <div className="stats-strip" aria-label="Сводка очереди">
         <button type="button" onClick={() => onRuntimeFilterChange?.('all', 'active')}>
           <strong>{active}</strong>
@@ -446,7 +1041,7 @@ function Overview({
         </button>
         <button type="button" onClick={() => onRuntimeFilterChange?.('all', 'approvals')}>
           <strong>{data.approvals.length}</strong>
-          <span>Решения</span>
+          <span>Approve</span>
         </button>
       </div>
 
@@ -467,23 +1062,13 @@ function Overview({
               />
             ))}
           </div>
-        ) : runtimeFilter === 'windows' && data.workers.length > 0 ? (
-          <div className="worker-grid">
-            {data.workers.map((worker) => (
-              <WorkerCard key={worker.id} worker={worker} />
-            ))}
-            <p className="muted-hint">
-              Воркер онлайн, но активных Windows-задач нет. Отправьте задачу боту
-              в Telegram или через голос — она появится здесь.
-            </p>
-          </div>
         ) : (
           <Empty
             icon={<Activity />}
             title="Тихий горизонт"
             copy={
               runtimeFilter === 'windows'
-                ? 'Нет активных Windows-задач и онлайн-воркеров.'
+                ? 'Нет активных Windows-задач. Переключитесь на Cloud или Все.'
                 : runtimeFilter === 'cloud'
                   ? 'Нет активных Cloud-задач. Переключитесь на Windows или Все.'
                   : 'Сейчас нет активных агентов Cloud или Windows.'
@@ -492,17 +1077,15 @@ function Overview({
         )}
       </Section>
 
-      {(data.agents?.length ?? 0) > 0 && (
-        <Section eyebrow="Чаты Cursor" title="Агенты">
+      {(data.agents?.some((slot) => slot.cursorUrl) ?? false) && (
+        <Section eyebrow="Cursor" title="Открыть чат на компьютере">
           <div className="agent-grid">
-            {data.agents.map((slot) => (
-              <SlotCard key={slot.id} slot={slot} />
-            ))}
+            {data.agents
+              .filter((slot) => slot.cursorUrl)
+              .map((slot) => (
+                <SlotCard key={slot.id} slot={slot} />
+              ))}
           </div>
-          <p className="muted-hint">
-            Полный диалог Cursor открывается снаружи Mini App — встроенный iframe
-            Cursor не отдаёт. Здесь — слоты и прямые ссылки.
-          </p>
         </Section>
       )}
 
@@ -552,45 +1135,27 @@ function Overview({
         )}
       </Section>
 
-      <Section eyebrow="Решения" title="Нужен разбор">
-        {data.approvals.length ? (
-          <div className="card-list">
-            {data.approvals.slice(0, 4).map((approval) => (
-              <article className="approval-card" key={approval.id}>
-                <div className="card-topline">
-                  <span className={`risk risk-${approval.risk}`}>
-                    {approval.risk === 'high' ? <AlertTriangle size={13} /> : <ShieldCheck size={13} />}
-                    {riskLabel(approval.risk)}
-                  </span>
-                  <time>{relativeTimeRu(approval.requestedAt)}</time>
-                </div>
-                <h2>{approval.title}</h2>
-                {data.role.toLowerCase() === 'owner' && (
-                  <ApprovalActions
-                    pending={pendingIds.has(approval.id)}
-                    onApprove={() => act(approval.id, 'approve')}
-                    onRevise={() => act(
-                      approval.id,
-                      'revision',
-                      'Проверь результат и исправь в рамках одобренного scope.',
-                    )}
-                    onReject={() => act(approval.id, 'reject')}
-                  />
-                )}
-              </article>
-            ))}
-          </div>
-        ) : (
-          <Empty
-            icon={<ShieldCheck />}
-            title="Всё чисто"
-            copy="Нет действий, ждущих вашего решения."
+      {data.approvals.length > 0 && (
+        <Section eyebrow="Approve" title="Ждёт владельца">
+          <ApprovalsList
+            approvals={data.approvals}
+            role={data.role}
+            pendingIds={pendingIds}
+            act={act}
+            compact
           />
-        )}
-      </Section>
+        </Section>
+      )}
+
+      <SelfImprovePanel data={data} onSetSelfImprove={onSetSelfImprove} />
 
       <Section eyebrow="Лента" title="События прогонов">
-        <TimelineList events={timeline} />
+        <TimelineList
+          events={timeline}
+          jobsById={jobsById}
+          onSelectJob={onSelectJob}
+          limit={12}
+        />
       </Section>
 
       <Section eyebrow="Воркеры" title="Здоровье узлов">
@@ -620,11 +1185,12 @@ function Overview({
   )
 }
 
-const PANEL_TITLES: Record<Exclude<TabId, 'voice'>, string> = {
+const PANEL_TITLES: Record<string, string> = {
   active: 'Активные задачи',
   history: 'Лента',
-  approvals: 'Решения',
+  approvals: 'Апрувы',
   repositories: 'Репозитории',
+  overview: 'Обзор',
 }
 
 export function DashboardPanels({
@@ -632,7 +1198,6 @@ export function DashboardPanels({
   data,
   loading,
   error,
-  liveEvents = [],
   runtimeFilter = 'all',
   focusedJobId = null,
   onRuntimeFilterChange,
@@ -641,38 +1206,27 @@ export function DashboardPanels({
   onDecision,
   onAddRepository,
   onUpdateRepository,
-  onActivateSelfImprove,
+  onSetSelfImprove,
+  onCreateAgent,
   onUpdateAgent,
-  onSubmitPrompt,
+  onDeleteAgent,
 }: Props) {
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
   const [repoUrl, setRepoUrl] = useState('')
   const [repoBranch, setRepoBranch] = useState(data.defaultBranch || 'dev')
   const [repoBusy, setRepoBusy] = useState(false)
+  const [quickBusyUrl, setQuickBusyUrl] = useState<string | null>(null)
   const [repoError, setRepoError] = useState<string | null>(null)
-  const [selfImproveBusy, setSelfImproveBusy] = useState(false)
   const [editingBranch, setEditingBranch] = useState<Record<string, string>>({})
-  const selfImprove = data.selfImprove
-  const canActivateSelfImprove = Boolean(
-    onActivateSelfImprove
-    && selfImprove?.available
-    && !selfImprove.active
-    && data.role === 'owner',
-  )
 
-  const activateSelfImprove = () => {
-    if (!onActivateSelfImprove || selfImproveBusy) return
-    setSelfImproveBusy(true)
-    setRepoError(null)
-    feedback('tap')
-    void onActivateSelfImprove()
-      .then(() => feedback('success'))
-      .catch((err: unknown) => {
-        setRepoError(err instanceof Error ? err.message : 'Не удалось включить самосовершенствование')
-        feedback('error')
-      })
-      .finally(() => setSelfImproveBusy(false))
-  }
+  const policy = data.repositoryPolicy
+  const openMode = policy?.openMode ?? true
+  const allowedRepos = policy?.repositories ?? []
+  const connectedUrls = new Set(
+    data.repositories
+      .map((repo) => repo.url?.toLowerCase())
+      .filter((url): url is string => Boolean(url)),
+  )
 
   const act = (approvalId: string, decision: Decision, revision?: string) => {
     if (pendingIds.has(approvalId)) return
@@ -690,29 +1244,48 @@ export function DashboardPanels({
       })
   }
 
-  const submitRepo = () => {
-    if (!onAddRepository || !repoUrl.trim() || repoBusy) return
-    setRepoBusy(true)
+  const fillRepoForm = (url: string, branch: string) => {
+    setRepoUrl(url)
+    setRepoBranch(branch)
     setRepoError(null)
-    feedback('tap')
+  }
+
+  const connectRepo = (
+    url: string,
+    branch: string,
+    options: { quick?: boolean } = {},
+  ) => {
+    if (!onAddRepository || repoBusy || quickBusyUrl) return
+    if (options.quick) setQuickBusyUrl(url)
+    else setRepoBusy(true)
+    setRepoError(null)
     void onAddRepository({
-      url: repoUrl.trim(),
-      branch: repoBranch.trim() || data.defaultBranch || 'dev',
+      url,
+      branch: branch.trim() || data.defaultBranch || 'dev',
     })
       .then(() => {
         setRepoUrl('')
+        setRepoBranch(data.defaultBranch || 'dev')
         feedback('success')
       })
       .catch((err: unknown) => {
         feedback('error')
         setRepoError(err instanceof Error ? err.message : 'Не удалось добавить репозиторий')
+        if (options.quick) fillRepoForm(url, branch)
       })
-      .finally(() => setRepoBusy(false))
+      .finally(() => {
+        setRepoBusy(false)
+        setQuickBusyUrl(null)
+      })
   }
 
-  const filteredActive = data.jobs
-    .filter((job) => isActiveJobStatus(job.status))
-    .filter((job) => matchesRuntimeFilter(job.runtime, runtimeFilter))
+  const submitRepo = () => {
+    if (!repoUrl.trim()) return
+    feedback('tap')
+    connectRepo(repoUrl.trim(), repoBranch.trim() || data.defaultBranch || 'dev')
+  }
+
+  const filteredActive = data.jobs.filter((job) => isActiveJobStatus(job.status))
 
   if (loading && tab !== 'overview') {
     return (
@@ -728,42 +1301,15 @@ export function DashboardPanels({
     return (
       <section className="panel-page overview-page">
         {error && <div className="inline-error" role="alert">{error}</div>}
-        {selfImprove?.active ? (
-          <div className="self-improve-banner is-active" role="status">
-            <Sparkles size={16} />
-            <div>
-              <strong>Самосовершенствование активно</strong>
-              <span>Голос и plan/do идут в репозиторий BeachOps.</span>
-            </div>
-          </div>
-        ) : canActivateSelfImprove ? (
-          <button
-            type="button"
-            className="self-improve-banner"
-            onClick={() => {
-              feedback('select')
-              activateSelfImprove()
-            }}
-            disabled={selfImproveBusy}
-          >
-            <Sparkles size={16} />
-            <div>
-              <strong>Включить самосовершенствование</strong>
-              <span>Бот будет читать и править свой репозиторий BeachOps.</span>
-            </div>
-          </button>
-        ) : null}
         <Overview
           data={data}
-          liveEvents={liveEvents}
           pendingIds={pendingIds}
           act={act}
           runtimeFilter={runtimeFilter}
           focusedJobId={focusedJobId}
           onRuntimeFilterChange={onRuntimeFilterChange}
           onSelectJob={onSelectJob}
-          onUpdateAgent={onUpdateAgent}
-          onSubmitPrompt={onSubmitPrompt}
+          onSetSelfImprove={onSetSelfImprove}
         />
       </section>
     )
@@ -808,157 +1354,80 @@ export function DashboardPanels({
                 />
               ))}
             </div>
-          ) : runtimeFilter === 'windows' && data.workers.length > 0 ? (
-            <>
-              <div className="worker-grid">
-                {data.workers.map((worker) => (
-                  <WorkerCard key={worker.id} worker={worker} />
-                ))}
-              </div>
-              <p className="muted-hint">
-                Метрика Windows раньше показывала онлайн-воркеры, а не задачи.
-                Сейчас здесь узлы онлайн. Задачу создайте в Telegram-боте
-                (текст / пересылка / голос) или через Mini App.
-              </p>
-            </>
           ) : (
             <Empty
               icon={<Clock3 />}
               title="Тихий горизонт"
-              copy={
-                runtimeFilter === 'windows'
-                  ? 'Нет активных Windows-задач и онлайн-воркеров.'
-                  : runtimeFilter === 'cloud'
-                    ? 'Нет активных Cloud-задач.'
-                    : 'Сейчас нет активных задач.'
-              }
+              copy="Сейчас нет активных задач."
             />
-          )}
-
-          {(data.agents?.length ?? 0) > 0 && (
-            <Section eyebrow="Чаты" title="Слоты агентов">
-              <div className="agent-grid">
-                {data.agents.map((slot) => (
-                  <SlotCard key={slot.id} slot={slot} />
-                ))}
-              </div>
-            </Section>
           )}
         </>
       )}
 
       {tab === 'history' && (
-        <TimelineList events={liveEvents.length ? liveEvents : data.events} />
+        <HistoryPanel
+          jobs={data.jobs}
+          events={data.events}
+          runtimeFilter={runtimeFilter}
+          focusedJobId={focusedJobId}
+          onRuntimeFilterChange={onRuntimeFilterChange}
+          onSelectJob={onSelectJob}
+        />
       )}
 
       {tab === 'approvals' && (
         <>
-          <div className="locked-notice">
-            <LockKeyhole size={18} />
-            <div>
-              <strong>Решения владельца</strong>
-              <p>Высокий риск подтверждайте осознанно — голос сам не одобрит.</p>
-            </div>
-          </div>
-          {data.approvals.length ? (
-            <div className="card-list">
-              {data.approvals.map((approval) => (
-                <article className="approval-card" key={approval.id}>
-                  <div className="card-topline">
-                    <span className={`risk risk-${approval.risk}`}>
-                      {approval.risk === 'high' ? <AlertTriangle size={13} /> : <ShieldCheck size={13} />}
-                      {riskLabel(approval.risk)}
-                    </span>
-                    <time>{relativeTimeRu(approval.requestedAt)}</time>
-                  </div>
-                  <h2>{approval.title}</h2>
-                  <p>{approval.repository ?? 'Защищённая операция'}</p>
-                  {data.role.toLowerCase() === 'owner' && (
-                    <ApprovalActions
-                      pending={pendingIds.has(approval.id)}
-                      onApprove={() => act(approval.id, 'approve')}
-                      onRevise={() => act(
-                        approval.id,
-                        'revision',
-                        'Проверь результат и исправь в рамках одобренного scope.',
-                      )}
-                      onReject={() => act(approval.id, 'reject')}
-                    />
-                  )}
-                </article>
-              ))}
-            </div>
+          <SelfImprovePanel data={data} onSetSelfImprove={onSetSelfImprove} />
+          {data.approvals.length > 0 ? (
+            <>
+              <div className="locked-notice">
+                <LockKeyhole size={18} />
+                <div>
+                  <strong>Ждёт вашего решения</strong>
+                  <p>Планы из режима «План» и рискованные действия. Голос сам не одобрит.</p>
+                </div>
+              </div>
+              <ApprovalsList
+                approvals={data.approvals}
+                role={data.role}
+                pendingIds={pendingIds}
+                act={act}
+              />
+            </>
           ) : (
-            <Empty
-              icon={<ShieldCheck />}
-              title="Всё чисто"
-              copy="Нет действий, ждущих вашего решения."
-            />
+            <div className="locked-notice soft">
+              <Zap size={18} />
+              <div>
+                <strong>Пока пусто — так и должно быть</strong>
+                <p>
+                  Сюда попадают только планы и высокий риск. Режим «Сделать» идёт без этого шага.
+                </p>
+              </div>
+            </div>
           )}
         </>
       )}
 
       {tab === 'repositories' && (
         <>
-          <article className={`self-improve-card${selfImprove?.active ? ' is-active' : ''}`}>
-            <div className="self-improve-mark">
-              <Sparkles size={18} />
-            </div>
-            <div className="self-improve-body">
-              <p className="eyebrow">Режим BeachOps</p>
-              <h2>Самосовершенствование</h2>
-              <p>
-                {selfImprove?.active
-                  ? 'Активно: бот читает и правит свой репозиторий BeachOps (plan/do с усиленным safety-промптом).'
-                  : selfImprove?.available
-                    ? 'Подключите форк BeachOps одним нажатием — дальше голос и /do работают уже по самому боту.'
-                    : 'На этом инстансе режим выключен (SELF_IMPROVE_ENABLED). Owner включает его в .env сервера.'}
-              </p>
-              {selfImprove?.repoUrl && (
-                <small className="self-improve-meta">
-                  {selfImprove.repoUrl}
-                  {selfImprove.branches?.length
-                    ? ` · ${selfImprove.branches.join(', ')}`
-                    : ''}
-                </small>
-              )}
-              <div className="self-improve-actions">
-                {selfImprove?.active ? (
-                  <span className="repo-state ready">Активен</span>
-                ) : canActivateSelfImprove ? (
-                  <button
-                    type="button"
-                    className="primary-button"
-                    disabled={selfImproveBusy}
-                    onClick={activateSelfImprove}
-                  >
-                    {selfImproveBusy
-                      ? <Loader2 size={16} className="spin-icon" />
-                      : <Sparkles size={16} />}
-                    Включить
-                  </button>
-                ) : selfImprove?.linked ? (
-                  <button
-                    type="button"
-                    className="primary-button"
-                    disabled={!onUpdateRepository || selfImproveBusy}
-                    onClick={() => {
-                      const repo = data.repositories.find((item) => item.selfImprove)
-                      if (!repo || !onUpdateRepository) return
-                      setSelfImproveBusy(true)
-                      feedback('tap')
-                      void onUpdateRepository(repo.id, { makeActive: true })
-                        .then(() => feedback('success'))
-                        .catch(() => feedback('error'))
-                        .finally(() => setSelfImproveBusy(false))
-                    }}
-                  >
-                    Сделать активным
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          </article>
+          <RepoPolicyBanner openMode={openMode} allowedCount={allowedRepos.length} />
+
+          <CursorHealthPanel />
+          <GithubConnectPanel
+            canManage={Boolean(onAddRepository)}
+            onPin={(url, branch) => connectRepo(url, branch, { quick: true })}
+          />
+
+          {!openMode && (
+            <AllowedRepoList
+              items={allowedRepos}
+              connectedUrls={connectedUrls}
+              defaultBranch={data.defaultBranch || 'dev'}
+              busyUrl={quickBusyUrl}
+              onConnect={(url, branch) => connectRepo(url, branch, { quick: true })}
+              onFill={fillRepoForm}
+            />
+          )}
 
           <form
             className="repo-add-form"
@@ -967,6 +1436,11 @@ export function DashboardPanels({
               submitRepo()
             }}
           >
+            <p className="repo-add-lead">
+              {openMode
+                ? 'Или вручную: URL → ветка (обычно dev) → Добавить'
+                : 'Или вставьте URL вручную — только из списка сервера'}
+            </p>
             <label>
               <span>GitHub URL</span>
               <input
@@ -984,7 +1458,15 @@ export function DashboardPanels({
                 onChange={(event) => setRepoBranch(event.target.value)}
                 placeholder={data.defaultBranch || 'dev'}
                 autoComplete="off"
+                list="repo-branch-suggestions"
               />
+              <datalist id="repo-branch-suggestions">
+                {[data.defaultBranch || 'dev', 'dev', 'develop', 'main']
+                  .filter((value, index, all) => value && all.indexOf(value) === index)
+                  .map((value) => (
+                    <option key={value} value={value} />
+                  ))}
+              </datalist>
             </label>
             <button type="submit" disabled={repoBusy || !repoUrl.trim()}>
               {repoBusy ? <Loader2 size={16} className="spin-icon" /> : <Plus size={16} />}
@@ -994,12 +1476,43 @@ export function DashboardPanels({
           {repoError && <div className="inline-error" role="alert">{repoError}</div>}
 
           {(data.agents?.length ?? 0) > 0 && (
-            <Section eyebrow="Чаты" title="Cloud-агенты">
+            <Section eyebrow="Агенты" title="Cloud-агенты">
               <div className="agent-grid">
                 {data.agents.map((slot) => (
-                  <SlotCard key={slot.id} slot={slot} />
+                  <SlotCard
+                    key={slot.id}
+                    slot={slot}
+                    onActivate={
+                      onUpdateAgent && !slot.active
+                        ? () => {
+                            feedback('select')
+                            void onUpdateAgent(slot.id, { makeActive: true })
+                          }
+                        : undefined
+                    }
+                    onDelete={
+                      onDeleteAgent && (data.agents?.length ?? 0) > 1
+                        ? () => {
+                            if (!window.confirm(`Удалить «${slot.label}»?`)) return
+                            void onDeleteAgent(slot.id)
+                          }
+                        : undefined
+                    }
+                  />
                 ))}
               </div>
+              {onCreateAgent && (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => {
+                    feedback('tap')
+                    void onCreateAgent()
+                  }}
+                >
+                  <Plus size={16} /> Новый агент
+                </button>
+              )}
             </Section>
           )}
 
@@ -1009,19 +1522,14 @@ export function DashboardPanels({
                 const draft = editingBranch[repo.id] ?? repo.branch
                 return (
                   <motion.article
-                    className={`repo-card${repo.active ? ' is-active' : ''}${repo.selfImprove ? ' is-self-improve' : ''}`}
+                    className={`repo-card${repo.active ? ' is-active' : ''}`}
                     key={repo.id}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                   >
-                    <div className="repo-mark">
-                      {repo.selfImprove ? <Sparkles size={18} /> : <GitBranch size={18} />}
-                    </div>
+                    <div className="repo-mark"><GitBranch size={18} /></div>
                     <div className="repo-body">
-                      <h2>
-                        {repo.name}
-                        {repo.selfImprove ? <i className="self-improve-pill">self</i> : null}
-                      </h2>
+                      <h2>{repo.name}</h2>
                       <p>{repo.url ?? repo.name}</p>
                       <div className="repo-branch-row">
                         <input
@@ -1074,8 +1582,12 @@ export function DashboardPanels({
           ) : (
             <Empty
               icon={<GitBranch />}
-              title="Нет репозиториев"
-              copy="Добавьте GitHub URL и базовую ветку — дальше /do работает прямо на ней."
+              title="Подключите репозиторий"
+              copy={
+                openMode
+                  ? 'Без активного репо задачи некуда отправлять. Вставьте HTTPS GitHub URL выше и нажмите «Добавить».'
+                  : 'Выберите репо из списка разрешённых или вставьте URL из allowlist — после этого можно говорить агенту.'
+              }
             />
           )}
         </>

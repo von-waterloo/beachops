@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 from beachops.domain.cursor_models import CURSOR_MODEL_ORDER, cursor_model_label
-from beachops.domain.cursor_tokens import CURSOR_TOKEN_ORDER, cursor_token_label
+from beachops.domain.cursor_tokens import cursor_token_label
 from beachops.domain.models import AgentSlot, RepoConfig, RunSummary, UserMode
 from beachops.services.agent_slot_naming import slot_button_text
 from beachops.services.ui_copy import MODE_LABELS
@@ -32,7 +34,6 @@ CB_BUILD_PLAN = "plan:build"
 CB_JOB_APPROVE_PREFIX = "j:a:"
 CB_JOB_REJECT_PREFIX = "j:r:"
 CB_JOB_REVISION_PREFIX = "j:v:"
-CB_UNPANIC_PREFIX = "j:u:"
 CB_ROLLBACK_PREFIX = "j:rb:"
 CB_VOICE_CONFIRM_PREFIX = "vc:"
 CB_VOICE_CANCEL_PREFIX = "vx:"
@@ -76,19 +77,6 @@ def job_approval_keyboard(
             ]
         )
     return InlineKeyboardMarkup(rows)
-
-
-def unpanic_keyboard(token: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    "Включить write-действия",
-                    callback_data=f"{CB_UNPANIC_PREFIX}{token}",
-                )
-            ]
-        ]
-    )
 
 
 def rollback_keyboard(token: str) -> InlineKeyboardMarkup:
@@ -159,16 +147,27 @@ def _mode_buttons(*, is_admin: bool, current: UserMode) -> list[InlineKeyboardBu
 _MODEL_BUTTONS_PER_ROW = 2
 
 
-def _model_buttons(*, current_model_key: str) -> list[list[InlineKeyboardButton]]:
+def _model_buttons(
+    *,
+    current_model_key: str,
+    model_options: Sequence[tuple[str, str]] | None = None,
+) -> list[list[InlineKeyboardButton]]:
     """Model choices as a 2-per-row grid with versioned labels."""
     buttons: list[InlineKeyboardButton] = []
-    for choice in CURSOR_MODEL_ORDER:
-        label = cursor_model_label(choice.value)
-        prefix = "✓ " if choice.value == current_model_key else ""
+    if model_options:
+        choices = list(model_options)
+    else:
+        choices = [(choice.value, cursor_model_label(choice.value)) for choice in CURSOR_MODEL_ORDER]
+    for key, label in choices:
+        prefix = "✓ " if key == current_model_key else ""
+        # Telegram callback_data max 64 bytes — fingerprints stay short.
+        callback = f"{CB_MODEL_PREFIX}{key}"
+        if len(callback.encode("utf-8")) > 64:
+            continue
         buttons.append(
             InlineKeyboardButton(
-                f"{prefix}{label}",
-                callback_data=f"{CB_MODEL_PREFIX}{choice.value}",
+                f"{prefix}{label}"[:64],
+                callback_data=callback,
             )
         )
     return [
@@ -177,17 +176,21 @@ def _model_buttons(*, current_model_key: str) -> list[list[InlineKeyboardButton]
     ]
 
 
-def _token_buttons(*, current_token_key: str | None) -> list[list[InlineKeyboardButton]]:
-    """Token switch row; hidden when the second token is not configured."""
-    if current_token_key is None:
+def _token_buttons(
+    *,
+    current_token_key: str | None,
+    available_token_keys: Sequence[str] | None = None,
+) -> list[list[InlineKeyboardButton]]:
+    """Token switch row; hidden when no extra keys are configured."""
+    if current_token_key is None or not available_token_keys:
         return []
     row: list[InlineKeyboardButton] = []
-    for choice in CURSOR_TOKEN_ORDER:
-        prefix = "✓ " if choice.value == current_token_key else ""
+    for key in available_token_keys:
+        prefix = "✓ " if key == current_token_key else ""
         row.append(
             InlineKeyboardButton(
-                f"{prefix}🔑 {cursor_token_label(choice.value)}",
-                callback_data=f"{CB_TOKEN_PREFIX}{choice.value}",
+                f"{prefix}🔑 {cursor_token_label(key)}",
+                callback_data=f"{CB_TOKEN_PREFIX}{key}",
             )
         )
     return [row]
@@ -200,10 +203,22 @@ def status_reply_markup(
     current_model_key: str,
     has_repos: bool,
     current_token_key: str | None = None,
+    available_token_keys: Sequence[str] | None = None,
+    model_options: Sequence[tuple[str, str]] | None = None,
 ) -> InlineKeyboardMarkup:
     rows = [_mode_buttons(is_admin=is_admin, current=current)]
-    rows.extend(_model_buttons(current_model_key=current_model_key))
-    rows.extend(_token_buttons(current_token_key=current_token_key))
+    rows.extend(
+        _model_buttons(
+            current_model_key=current_model_key,
+            model_options=model_options,
+        )
+    )
+    rows.extend(
+        _token_buttons(
+            current_token_key=current_token_key,
+            available_token_keys=available_token_keys,
+        )
+    )
     rows.extend(status_nav_keyboard(has_repos=has_repos).inline_keyboard)
     return InlineKeyboardMarkup(rows)
 
@@ -225,12 +240,14 @@ def post_run_keyboard(
     current: UserMode,
     current_model_key: str,
     current_token_key: str | None = None,
+    available_token_keys: Sequence[str] | None = None,
     with_retry: bool = False,
     with_build_plan: bool = False,
+    model_options: Sequence[tuple[str, str]] | None = None,
 ) -> InlineKeyboardMarkup:
-    rows = [_mode_buttons(is_admin=is_admin, current=current)]
-    rows.extend(_model_buttons(current_model_key=current_model_key))
-    rows.extend(_token_buttons(current_token_key=current_token_key))
+    """Compact post-run controls — mode/model/token switch via /status."""
+    del current, current_model_key, current_token_key, available_token_keys, model_options
+    rows: list[list[InlineKeyboardButton]] = []
     if with_build_plan and is_admin:
         rows.append(
             [InlineKeyboardButton("▶️ Выполнить план", callback_data=CB_BUILD_PLAN)]
@@ -247,7 +264,9 @@ def welcome_keyboard(
     current: UserMode,
     current_model_key: str,
     current_token_key: str | None = None,
+    available_token_keys: Sequence[str] | None = None,
     webapp_url: str | None = None,
+    model_options: Sequence[tuple[str, str]] | None = None,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     url = (webapp_url or "").strip()
@@ -256,8 +275,18 @@ def welcome_keyboard(
             [InlineKeyboardButton("🎛 Агенты", web_app=WebAppInfo(url=url))]
         )
     rows.append(_mode_buttons(is_admin=is_admin, current=current))
-    rows.extend(_model_buttons(current_model_key=current_model_key))
-    rows.extend(_token_buttons(current_token_key=current_token_key))
+    rows.extend(
+        _model_buttons(
+            current_model_key=current_model_key,
+            model_options=model_options,
+        )
+    )
+    rows.extend(
+        _token_buttons(
+            current_token_key=current_token_key,
+            available_token_keys=available_token_keys,
+        )
+    )
     rows.extend(status_nav_keyboard(has_repos=has_repos).inline_keyboard)
     return InlineKeyboardMarkup(rows)
 

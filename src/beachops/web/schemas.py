@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ApiModel(BaseModel):
@@ -55,10 +55,6 @@ class VoiceSpeakRequest(ApiModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
-class PanicRequest(ApiModel):
-    enabled: bool
-
-
 class WorkerRegisterRequest(ApiModel):
     id: str
     hostname: str = Field(min_length=1, max_length=200)
@@ -98,14 +94,47 @@ class RepoUpdateRequest(ApiModel):
     makeActive: bool | None = None
 
 
+class AgentCreateRequest(ApiModel):
+    label: str | None = Field(default=None, max_length=64)
+    makeActive: bool = True
+
+
 class AgentUpdateRequest(ApiModel):
-    runtime: str | None = Field(default=None, pattern="^(cloud|windows)$")
+    label: str | None = Field(default=None, max_length=64)
+    runtime: str | None = Field(default=None, pattern="^(cloud)$")
     localPath: str | None = Field(default=None, max_length=500)
     preferredWorkerId: str | None = Field(default=None, max_length=64)
     makeActive: bool | None = None
 
 
+class PromptImage(ApiModel):
+    mimeType: str = Field(min_length=3, max_length=64)
+    data: str = Field(min_length=8, max_length=8_000_000)
+
+
 class PromptRequest(ApiModel):
-    prompt: str = Field(min_length=1, max_length=8000)
+    prompt: str = Field(default="", max_length=8000)
     mode: str = Field(default="ask", pattern="^(ask|plan|do)$")
-    slotId: int | None = None
+    slotId: str | None = Field(default=None, max_length=32)
+    images: list[PromptImage] | None = Field(default=None, max_length=8)
+
+    @model_validator(mode="after")
+    def require_prompt_or_images(self) -> PromptRequest:
+        if not self.prompt.strip() and not self.images:
+            raise ValueError("prompt or images required")
+        return self
+
+    def resolved_prompt(self) -> str:
+        text = self.prompt.strip()
+        if text:
+            return text
+        if self.images:
+            from beachops.services.ui_copy import photo_default_prompt
+
+            return photo_default_prompt()
+        return ""
+
+
+class SelfImproveRequest(ApiModel):
+    enabled: bool
+    repoUrl: str | None = Field(default=None, max_length=400)

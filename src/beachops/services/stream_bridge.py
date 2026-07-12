@@ -37,6 +37,7 @@ class StreamState:
     plan_text: str | None = None
     plan_name: str | None = None
     plan_tool_called: bool = False
+    last_event_id: str | None = None
 
     def set_plan(self, text: str, *, name: str | None = None) -> None:
         self.plan_text = redact_text(text).strip() or None

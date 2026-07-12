@@ -1,37 +1,31 @@
-# BeachOps — документация
+# BeachOps docs
 
-Диалог программиста с Cursor-агентами: Telegram + voice Mini App, ask/plan/do,
-слоты агентов, Cloud/Windows runtime, plan/owner approval, durable jobs и audit.
+Telegram + voice Mini App control plane for Cursor Cloud Agents: ask / plan / do,
+agent slots, approvals, durable jobs, optional self-improve (`dev` → CI → prod).
 
-## С чего начать
+## Contents
 
-**[База знаний / онбординг](./KNOWLEDGE_BASE.md)** — премиальный гайд по всем
-фичам: Telegram, Mini App, Windows-агент, свой деплой и self-deploy CI.
-Откройте его первым, если нужно «просто почитать, как пользоваться».
+| Doc | Audience | What it covers |
+|-----|----------|----------------|
+| [Architecture](./ARCHITECTURE.md) | developers | stack, run pipeline, modules, DB |
+| [User guide](./USER_GUIDE.md) | operators | Telegram commands, modes, scenarios |
+| [Development](./DEVELOPMENT.md) | developers | local run, layout, tests |
+| [Operations](./OPERATIONS.md) | DevOps | Docker, deploy, backups, migrate |
+| [Ops MCP](./OPS_MCP.md) | DevOps / owners | SSH/docker logs MCP for cloud agents |
+| [Self-deploy / CI](./SELF_DEPLOY.md) | DevOps / owner | main/dev → CI → auto-deploy; rollback |
+| [Configuration](./CONFIGURATION.md) | everyone | environment variables, roles |
+| [Threat model](./THREAT_MODEL.md) | security/ops | trust boundaries, controls |
 
-## Содержание
+## Quick start
 
-| Документ | Для кого | Описание |
-|----------|----------|----------|
-| [База знаний](./KNOWLEDGE_BASE.md) | все | онбординг, карта фич, Windows, деплой |
-| [Обзор и архитектура](./ARCHITECTURE.md) | разработчики | стек, потоки данных, модули, БД |
-| [Руководство пользователя](./USER_GUIDE.md) | операторы бота | команды, режимы, сценарии в Telegram |
-| [Разработка](./DEVELOPMENT.md) | разработчики | локальный запуск, структура кода, тесты |
-| [Эксплуатация](./OPERATIONS.md) | DevOps | Docker, деплой, бэкапы, миграции |
-| [Self-deploy / CI](./SELF_DEPLOY.md) | DevOps / owner | main/dev → CI → auto-deploy host-185; bot rollback via workflow_dispatch |
-| [Конфигурация](./CONFIGURATION.md) | все | переменные окружения, права доступа |
-| [Threat model](./THREAT_MODEL.md) | security/ops | trust boundaries, controls, incident response |
+1. Copy `.env.example` → `.env` and fill in keys.
+2. Connect GitHub in the [Cursor Dashboard](https://cursor.com/dashboard).
+3. Create an API key under [Integrations](https://cursor.com/dashboard/integrations).
+4. Start compose; `migrate` applies schema, then bot/worker/API/webapp.
+   Details: [CONFIGURATION.md](./CONFIGURATION.md).
 
-## Быстрый старт
+Deploy your own copy: [OPERATIONS.md](./OPERATIONS.md) and the root
+[README.md](../README.md). Maintainer CI on a self-hosted runner:
+[SELF_DEPLOY.md](./SELF_DEPLOY.md) (not required for third-party installs).
 
-1. Скопировать `.env.example` → `.env` (короткий шаблон) и заполнить ключи.
-2. Подключить GitHub в [Cursor Dashboard](https://cursor.com/dashboard).
-3. Создать API key в [Integrations](https://cursor.com/dashboard/integrations).
-4. Поднять compose; `migrate` применит схему, затем bot/worker/API/webapp.
-   Тонкая настройка — [CONFIGURATION.md](./CONFIGURATION.md).
-
-Продуктовый обзор: [KNOWLEDGE_BASE.md](./KNOWLEDGE_BASE.md). Свой деплой:
-[OPERATIONS.md](./OPERATIONS.md) и корневой [README.md](../README.md)
-(«Deploy your own copy»). Прод автора / runner host-185 —
-[SELF_DEPLOY.md](./SELF_DEPLOY.md) и `.cursor/rules/servers-access.mdc`
-(не требуется для чужой инсталляции).
+Optional SSH/docker log tools for agents: [OPS_MCP.md](./OPS_MCP.md).

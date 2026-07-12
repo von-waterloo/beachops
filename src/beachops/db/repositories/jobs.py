@@ -396,6 +396,9 @@ class JobRepository:
         *,
         cursor_agent_id: str | None = None,
         cursor_run_id: str | None = None,
+        cursor_token_key: str | None = None,
+        cursor_last_event_id: str | None = None,
+        cursor_run_status: str | None = None,
         telegram_message_id: int | None = None,
         telegram_chat_id: int | None = None,
     ) -> bool:
@@ -405,8 +408,11 @@ class JobRepository:
                 UPDATE beachops_jobs
                 SET cursor_agent_id = COALESCE($3, cursor_agent_id),
                     cursor_run_id = COALESCE($4, cursor_run_id),
-                    telegram_message_id = COALESCE($5, telegram_message_id),
-                    telegram_chat_id = COALESCE($6, telegram_chat_id),
+                    cursor_token_key = COALESCE($5, cursor_token_key),
+                    cursor_last_event_id = COALESCE($6, cursor_last_event_id),
+                    cursor_run_status = COALESCE($7, cursor_run_status),
+                    telegram_message_id = COALESCE($8, telegram_message_id),
+                    telegram_chat_id = COALESCE($9, telegram_chat_id),
                     updated_at = now()
                 WHERE id = $1 AND actor_id = $2
                 RETURNING id
@@ -415,6 +421,9 @@ class JobRepository:
                 actor_id,
                 cursor_agent_id,
                 cursor_run_id,
+                cursor_token_key,
+                cursor_last_event_id,
+                cursor_run_status,
                 telegram_message_id,
                 telegram_chat_id,
             )
@@ -427,12 +436,22 @@ class JobRepository:
         *,
         pr_url: str | None,
         total_tokens: int | None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        cache_read_tokens: int | None = None,
+        cache_write_tokens: int | None = None,
     ) -> bool:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 UPDATE beachops_jobs
-                SET pr_url = $3, total_tokens = $4, updated_at = now()
+                SET pr_url = $3,
+                    total_tokens = $4,
+                    input_tokens = COALESCE($5, input_tokens),
+                    output_tokens = COALESCE($6, output_tokens),
+                    cache_read_tokens = COALESCE($7, cache_read_tokens),
+                    cache_write_tokens = COALESCE($8, cache_write_tokens),
+                    updated_at = now()
                 WHERE id = $1 AND actor_id = $2
                 RETURNING id
                 """,
@@ -440,8 +459,47 @@ class JobRepository:
                 actor_id,
                 redact_text(pr_url) if pr_url else None,
                 total_tokens,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
             )
         return row is not None
+
+    async def mark_finalized(self, actor_id: int, job_id: UUID) -> bool:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE beachops_jobs
+                SET finalized_at = COALESCE(finalized_at, now()),
+                    finished_at = COALESCE(finished_at, now()),
+                    updated_at = now()
+                WHERE id = $1 AND actor_id = $2 AND finalized_at IS NULL
+                RETURNING id
+                """,
+                job_id,
+                actor_id,
+            )
+        return row is not None
+
+    async def list_artifacts(
+        self,
+        actor_id: int,
+        job_id: UUID,
+    ) -> list[dict[str, Any]]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT a.id, a.artifact_kind, a.uri, a.sha256, a.metadata, a.created_at
+                FROM beachops_artifacts a
+                JOIN beachops_jobs j ON j.id = a.job_id
+                WHERE a.job_id = $1 AND j.actor_id = $2
+                ORDER BY a.id
+                """,
+                job_id,
+                actor_id,
+            )
+        return [dict(row) for row in rows]
 
     async def list_events(
         self,
@@ -467,6 +525,7 @@ class JobRepository:
 
 
 def _row_to_job(row: asyncpg.Record) -> Job:
+    keys = row.keys()
     return Job(
         id=row["id"],
         actor_id=row["actor_id"],
@@ -479,17 +538,29 @@ def _row_to_job(row: asyncpg.Record) -> Job:
         payload_ciphertext=row["payload_ciphertext"],
         cursor_agent_id=row["cursor_agent_id"],
         cursor_run_id=row["cursor_run_id"],
+        cursor_token_key=row["cursor_token_key"] if "cursor_token_key" in keys else None,
+        cursor_last_event_id=(
+            row["cursor_last_event_id"] if "cursor_last_event_id" in keys else None
+        ),
+        cursor_run_status=row["cursor_run_status"] if "cursor_run_status" in keys else None,
         pr_url=row["pr_url"],
         total_tokens=row["total_tokens"],
+        input_tokens=row["input_tokens"] if "input_tokens" in keys else None,
+        output_tokens=row["output_tokens"] if "output_tokens" in keys else None,
+        cache_read_tokens=row["cache_read_tokens"] if "cache_read_tokens" in keys else None,
+        cache_write_tokens=(
+            row["cache_write_tokens"] if "cache_write_tokens" in keys else None
+        ),
         telegram_chat_id=row["telegram_chat_id"],
         telegram_message_id=row["telegram_message_id"],
         idempotency_key=row["idempotency_key"],
-        runtime=row["runtime"] if "runtime" in row.keys() else "cloud",
-        worker_node_id=row["worker_node_id"] if "worker_node_id" in row.keys() else None,
-        attempt=int(row["attempt"]) if "attempt" in row.keys() and row["attempt"] is not None else 0,
-        telegram_updated=bool(row["telegram_updated"]) if "telegram_updated" in row.keys() else False,
-        started_at=row["started_at"] if "started_at" in row.keys() else None,
-        finished_at=row["finished_at"] if "finished_at" in row.keys() else None,
+        runtime=row["runtime"] if "runtime" in keys else "cloud",
+        worker_node_id=row["worker_node_id"] if "worker_node_id" in keys else None,
+        attempt=int(row["attempt"]) if "attempt" in keys and row["attempt"] is not None else 0,
+        telegram_updated=bool(row["telegram_updated"]) if "telegram_updated" in keys else False,
+        started_at=row["started_at"] if "started_at" in keys else None,
+        finished_at=row["finished_at"] if "finished_at" in keys else None,
+        finalized_at=row["finalized_at"] if "finalized_at" in keys else None,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

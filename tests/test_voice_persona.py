@@ -1,4 +1,13 @@
-from beachops.domain.voice_persona import SPARTAN_TTS_INSTRUCTIONS, to_spoken_briefing
+from beachops.domain.voice_persona import (
+    BEACHOPS_STT_PROMPT,
+    MilestoneGate,
+    SPARTAN_TTS_INSTRUCTIONS,
+    milestone_line,
+    spoken_ack,
+    to_spoken_briefing,
+)
+from beachops.services.situation_brief import ControlRoomCounts, format_spoken_room
+from beachops.web.voice.gateway import RealtimeVoiceGateway
 
 
 def test_spoken_briefing_strips_code_and_urls() -> None:
@@ -20,7 +29,72 @@ def test_spoken_briefing_respects_max_chars_at_sentence() -> None:
     assert spoken.endswith(".")
 
 
-def test_spartan_instructions_are_laconic() -> None:
+def test_spartan_instructions_are_conversational() -> None:
     lower = SPARTAN_TTS_INSTRUCTIONS.lower()
-    assert "spartan" in lower
-    assert "cheerfulness" in lower or "filler" in lower
+    assert "beach" in lower or "coworker" in lower or "conversational" in lower
+    assert "war-room" not in lower and "war room" not in lower
+
+
+def test_stt_prompt_biases_beachops_terms() -> None:
+    assert "BeachOps" in BEACHOPS_STT_PROMPT
+    assert "Cursor" in BEACHOPS_STT_PROMPT
+    assert "Windows" not in BEACHOPS_STT_PROMPT
+    assert "Keywords:" in BEACHOPS_STT_PROMPT
+
+
+def test_spoken_ack_is_human_without_metrics() -> None:
+    assert spoken_ack() == "Ок, беру."
+    assert spoken_ack(runtime="cloud", room="В очереди ещё 1.") == "Ок, беру."
+    assert "Windows" not in spoken_ack(runtime="windows")
+    assert "Cloud" not in spoken_ack(runtime="cloud")
+
+
+def test_milestone_line_only_approval() -> None:
+    assert milestone_line(status="running", previous_status="queued") is None
+    assert milestone_line(
+        status="awaiting_approval", previous_status="running"
+    ) == "План готов — глянь и скажи, делать или нет."
+    assert milestone_line(progress_text="Agent started on cloud") is None
+    assert milestone_line(progress_text="Writing file src/app.py") is None
+
+
+def test_milestone_gate_interval_and_max() -> None:
+    gate = MilestoneGate(min_interval_sec=15, max_per_job=2)
+    assert gate.allow(0.0, "line a")
+    gate.mark(0.0, "line a")
+    assert not gate.allow(5.0, "line b")
+    assert gate.allow(16.0, "line b")
+    gate.mark(16.0, "line b")
+    assert not gate.allow(40.0, "line c")
+
+
+def test_format_spoken_room_silent() -> None:
+    spoken = format_spoken_room(
+        ControlRoomCounts(
+            running=3,
+            queued=2,
+            blocked=1,
+            pending_approvals=1,
+            workers_online=2,
+        )
+    )
+    assert spoken == ""
+
+
+def test_realtime_session_includes_stt_prompt() -> None:
+    gateway = RealtimeVoiceGateway(api_key="sk-test")
+    session = gateway._session_update_payload()
+    assert session["type"] == "realtime"
+    transcription = session["audio"]["input"]["transcription"]
+    assert transcription["model"] == "gpt-4o-transcribe"
+    assert transcription["prompt"] == BEACHOPS_STT_PROMPT
+    assert "delay" not in transcription
+
+
+def test_whisper_nested_model_skips_prompt() -> None:
+    gateway = RealtimeVoiceGateway(
+        api_key="sk-test",
+        input_transcribe_model="whisper-1",
+    )
+    transcription = gateway._session_update_payload()["audio"]["input"]["transcription"]
+    assert "prompt" not in transcription

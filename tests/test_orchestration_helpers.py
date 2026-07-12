@@ -24,12 +24,12 @@ def test_parse_runtime_windows_aliases() -> None:
     assert cursor_agent_url("local-1") is None
 
 
-def test_resolve_runtime_prefers_payload() -> None:
+def test_resolve_runtime_always_cloud() -> None:
     assert (
         resolve_runtime(slot_runtime="cloud", payload_runtime="windows")
-        is AgentRuntime.WINDOWS
+        is AgentRuntime.CLOUD
     )
-    assert resolve_runtime(slot_runtime="windows", payload_runtime=None) is AgentRuntime.WINDOWS
+    assert resolve_runtime(slot_runtime="windows", payload_runtime=None) is AgentRuntime.CLOUD
 
 
 @pytest.mark.asyncio

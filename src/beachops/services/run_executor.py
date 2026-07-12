@@ -6,17 +6,15 @@ import logging
 import time
 from collections.abc import Sequence
 
-from cursor_sdk import SDKImage
 from telegram.ext import ContextTypes
 
 from beachops.app_context import AppContext
 from beachops.config.settings import Settings
 from beachops.domain.active_run import ActiveRunInfo
-from beachops.domain.cursor_models import resolve_cursor_model
 from beachops.domain.cursor_tokens import normalize_cursor_token_key
 from beachops.domain.models import UserMode
 from beachops.services.agent_slots import RunContext
-from beachops.services.cursor_token_ui import current_token_key_for_ui
+from beachops.services.cursor_token_ui import token_ui_pair
 from beachops.services.cursor_agent import RunOutcome
 from beachops.services.job_queue import RunCancelled, SubmitInfo, SubmitResult
 from beachops.services.stream_bridge import StreamState
@@ -31,13 +29,53 @@ from beachops.services.ui_copy import (
     queued_message,
 )
 
+try:
+    from cursor_sdk import SDKImage
+except ImportError:  # pragma: no cover
+    SDKImage = object  # type: ignore[misc, assignment]
+
 logger = logging.getLogger(__name__)
 
 _LAST_PROMPT_TTL_SEC = 600
+_PROGRESS_BUCKET_SEC = 3
 
 # Длинный результат урезается в сообщении Telegram (4096 с учётом шапки/футера),
 # поэтому сохраняем полный markdown отдельным файлом.
 _RESULT_DOCUMENT_THRESHOLD = 3000
+
+
+async def _self_improve_flag(app: AppContext, repository_url: str) -> bool:
+    from beachops.services.self_improve import is_self_improve_active_for
+
+    return await is_self_improve_active_for(app, repository_url)
+
+
+async def _maybe_append_run_progress(
+    app: AppContext,
+    job_id,
+    actor_id: int,
+    state: StreamState,
+) -> None:
+    """Throttle durable run.progress events for Mini App / voice live feed."""
+    text = (
+        (state.final_text or state.plan_text or state.assistant_text or "").strip()
+    )
+    tool = (state.tool_lines[-1] if state.tool_lines else "") or ""
+    if not text and not tool:
+        return
+    bucket = int(time.time()) // _PROGRESS_BUCKET_SEC
+    await app.run_events.append(
+        job_id=job_id,
+        actor_id=actor_id,
+        event_type="run.progress",
+        payload={
+            "assistantText": text[:2000] if text else None,
+            "tool": tool[:240] if tool else None,
+            "status": state.status,
+        },
+        idempotency_key=f"{job_id}:progress:{bucket}",
+        sequence=bucket,
+    )
 
 
 async def _maybe_send_result_document(
@@ -98,9 +136,6 @@ async def validate_prompt_request(
 
         return no_repo_selected()
 
-    if mode == UserMode.DO and await app.system_state.is_panic_enabled():
-        return "PANIC активен: write-действия отключены владельцем."
-
     from beachops.services.repository_policy import RepositoryNotAllowedError
     from beachops.services.ui_copy import repo_not_allowed
 
@@ -110,8 +145,8 @@ async def validate_prompt_request(
             ctx.repo.default_branch,
             write=mode == UserMode.DO,
         )
-    except RepositoryNotAllowedError:
-        return repo_not_allowed()
+    except RepositoryNotAllowedError as exc:
+        return repo_not_allowed(str(exc))
 
     return None
 
@@ -265,6 +300,7 @@ async def _run_job(
     *,
     images: tuple[SDKImage, ...] | None = None,
     job_id=None,
+    channel: str | None = None,
 ) -> RunOutcome | None:
     from uuid import UUID
 
@@ -286,11 +322,10 @@ async def _run_job(
     )
     preview_chars = app.settings.stream_thinking_preview_chars
     header = build_run_header(mode, repo.alias)
-    model_key = await app.users.get_cursor_model_key(
-        user_id, default=app.settings.cursor_model
-    )
+    from beachops.services.cursor_model_catalog import resolve_user_model_selection
     from beachops.services.logging_config import bind_log_context
 
+    model_key, cursor_model = await resolve_user_model_selection(app, user_id)
     bind_log_context(
         user_id=user_id,
         job_id=str(durable_job_id) if durable_job_id else None,
@@ -298,7 +333,7 @@ async def _run_job(
     )
     token_key = await resolve_run_token_key(app, user_id, slot)
     api_key = app.settings.cursor_api_key_for(token_key)
-    ui_token_key = await current_token_key_for_ui(app, user_id)
+    ui_token_key, available_tokens = await token_ui_pair(app, user_id)
     message, placeholder_anim = await send_placeholder(
         context,
         user_id,
@@ -316,6 +351,7 @@ async def _run_job(
         mode=mode,
         current_model_key=model_key,
         current_token_key=ui_token_key,
+        available_token_keys=available_tokens,
         placeholder_animation=placeholder_anim,
         thinking_display=thinking_display,
         thinking_preview_chars=preview_chars,
@@ -365,6 +401,8 @@ async def _run_job(
                 telegram_message_id=message.message_id,
                 telegram_chat_id=message.chat_id,
             )
+        if durable_job_id is not None:
+            await _maybe_append_run_progress(app, durable_job_id, user_id, state)
         if not state.has_visible_output(thinking_display=thinking_display):
             if state.run_id:
                 await placeholder_anim.set_preset("waiting_signal")
@@ -379,20 +417,17 @@ async def _run_job(
         entries = await app.memory.recall(user_id, repo.id, prompt)
         memory_block = app.memory.format_recall_block(entries) or None
 
-    cursor_model = resolve_cursor_model(model_key)
+    from beachops.services.situation_brief import build_situation_brief
+
+    situation_block = await build_situation_brief(
+        app,
+        actor_id=user_id,
+        run_context=run_ctx,
+        role=app.settings.role_for(user_id),
+        channel=channel,
+    )
 
     from beachops.services.inline_keyboards import post_run_keyboard, status_reply_markup
-
-    cloud_env_vars = None
-    server_ssh_note = None
-    if app.settings.agent_ssh_configured() and app.settings.can_use_server_ssh(user_id):
-        from beachops.domain.prompts import server_ssh_block
-
-        cloud_env_vars = app.settings.agent_ssh_cloud_env_vars()
-        server_ssh_note = server_ssh_block(
-            label=app.settings.agent_ssh_label,
-            remote_dir=app.settings.agent_ssh_remote_dir,
-        )
 
     try:
         if await _cancelled():
@@ -407,18 +442,18 @@ async def _run_job(
                 cursor_agent_id=slot.cursor_agent_id,
                 on_update=on_update,
                 memory_block=memory_block,
+                situation_block=situation_block,
                 images=images,
                 api_key=api_key,
-                self_improve=app.settings.is_self_improve_repo(repo.github_url),
-                cloud_env_vars=cloud_env_vars,
-                server_ssh_note=server_ssh_note,
+                self_improve=await _self_improve_flag(app, repo.github_url),
+                channel=channel,
             )
         except RunCancelled:
             final_mode = await app.users.get_mode(user_id)
             final_model_key = await app.users.get_cursor_model_key(
                 user_id, default=app.settings.cursor_model
             )
-            final_token_key = await current_token_key_for_ui(app, user_id)
+            final_token_key, available_tokens = await token_ui_pair(app, user_id)
             await renderer.finalize(
                 StreamState(),
                 footer="⏹ Отменено",
@@ -428,6 +463,7 @@ async def _run_job(
                     current_model_key=final_model_key,
                     has_repos=True,
                     current_token_key=final_token_key,
+                    available_token_keys=available_tokens,
                 ),
             )
             return None
@@ -442,6 +478,9 @@ async def _run_job(
                 durable_job_id,
                 cursor_agent_id=outcome.state.agent_id or new_agent_id,
                 cursor_run_id=outcome.state.run_id,
+                cursor_token_key=token_key,
+                cursor_last_event_id=outcome.state.last_event_id,
+                cursor_run_status=outcome.state.status,
                 telegram_message_id=message.message_id,
                 telegram_chat_id=message.chat_id,
             )
@@ -452,6 +491,8 @@ async def _run_job(
             error_message=outcome.error_message,
             duration_ms=outcome.state.duration_ms,
             total_tokens=outcome.state.total_tokens,
+            input_tokens=outcome.state.input_tokens,
+            output_tokens=outcome.state.output_tokens,
         )
 
         with_retry = bool(outcome.error_message or outcome.status == "error")
@@ -462,7 +503,7 @@ async def _run_job(
         final_model_key = await app.users.get_cursor_model_key(
             user_id, default=app.settings.cursor_model
         )
-        final_token_key = await current_token_key_for_ui(app, user_id)
+        final_token_key, available_tokens = await token_ui_pair(app, user_id)
         await renderer.finalize(
             outcome.state,
             footer=footer,
@@ -471,6 +512,7 @@ async def _run_job(
                 current=final_mode,
                 current_model_key=final_model_key,
                 current_token_key=final_token_key,
+                available_token_keys=available_tokens,
                 with_retry=with_retry,
                 with_build_plan=with_build_plan,
             ),
@@ -497,7 +539,7 @@ async def _run_job(
         final_model_key = await app.users.get_cursor_model_key(
             user_id, default=app.settings.cursor_model
         )
-        final_token_key = await current_token_key_for_ui(app, user_id)
+        final_token_key, available_tokens = await token_ui_pair(app, user_id)
         await renderer.finalize(
             StreamState(),
             footer="⏹ Отменено",
@@ -507,6 +549,7 @@ async def _run_job(
                 current_model_key=final_model_key,
                 has_repos=True,
                 current_token_key=final_token_key,
+                available_token_keys=available_tokens,
             ),
         )
     except Exception:
@@ -515,7 +558,7 @@ async def _run_job(
         final_model_key = await app.users.get_cursor_model_key(
             user_id, default=app.settings.cursor_model
         )
-        final_token_key = await current_token_key_for_ui(app, user_id)
+        final_token_key, available_tokens = await token_ui_pair(app, user_id)
         await renderer.finalize(
             StreamState(),
             footer="⚠️ Внутренняя ошибка бота",
@@ -524,6 +567,7 @@ async def _run_job(
                 current=final_mode,
                 current_model_key=final_model_key,
                 current_token_key=final_token_key,
+                available_token_keys=available_tokens,
                 with_retry=True,
             ),
         )

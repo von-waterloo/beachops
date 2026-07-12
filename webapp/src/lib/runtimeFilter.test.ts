@@ -8,10 +8,9 @@ describe('matchesRuntimeFilter', () => {
     expect(matchesRuntimeFilter(null, 'all')).toBe(true)
   })
 
-  it('keeps only windows for windows filter', () => {
-    expect(matchesRuntimeFilter('windows', 'windows')).toBe(true)
+  it('hides windows plane filter (cloud-only product)', () => {
+    expect(matchesRuntimeFilter('windows', 'windows')).toBe(false)
     expect(matchesRuntimeFilter('cloud', 'windows')).toBe(false)
-    expect(matchesRuntimeFilter(undefined, 'windows')).toBe(false)
   })
 
   it('treats non-windows as cloud', () => {

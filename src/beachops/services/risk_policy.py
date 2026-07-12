@@ -50,6 +50,24 @@ _READ_ONLY_REQUEST_RE = re.compile(
     r"(?i)^\s*(?:please\s+)?(?:explain|describe|document|analy[sz]e|review|"
     r"summarize|what\b|why\b|how\b|where\b)"
 )
+# Safety / scope lines that forbid an action — strip before high-risk matching
+# so "Do NOT merge to main" does not look like a merge request.
+_NEGATED_RISK_CLAUSE_RE = re.compile(
+    r"(?i)(?:"
+    r"(?:do\s+not|don't|dont|never|no(?:\s+need\s+to)?)\s+"
+    r"(?:merge|deploy|release|promote|delete|destroy|force[- ]?push|roll\s*out)"
+    r"(?:\s+\w+){0,8}"
+    r"|"
+    r"(?:не\s+(?:надо\s+|нужно\s+)?(?:мерж\w*|депло\w*|рели\w*|удал\w*|пуш\w*)|"
+    r"без\s+(?:merge|merging|deploy(?:ment)?|деплоя|релиза)|"
+    r"(?:merge|deploy|release|деплой|мерж)\s+не\s+(?:делай|нужен|нужно))"
+    r"(?:\s+\w+){0,8}"
+    r")"
+)
+
+
+def _text_for_risk_match(text: str) -> str:
+    return _NEGATED_RISK_CLAUSE_RE.sub(" ", text)
 
 
 @dataclass(frozen=True)
@@ -95,24 +113,26 @@ class RiskPolicy:
         if not write and _READ_ONLY_REQUEST_RE.match(text):
             return RiskAssessment(level=RiskLevel.LOW, blocked=False)
 
-        if _RAW_SHELL_RE.search(text):
+        match_text = _text_for_risk_match(text)
+
+        if _RAW_SHELL_RE.search(match_text):
             return _blocked("arbitrary shell execution")
-        if _FORCE_RE.search(text):
+        if _FORCE_RE.search(match_text):
             return _blocked("force or protected-branch operation")
-        if _SECRET_EXFIL_RE.search(text):
+        if _SECRET_EXFIL_RE.search(match_text):
             return _blocked("secret access or exfiltration")
-        if _DESTRUCTIVE_RE.search(text):
+        if _DESTRUCTIVE_RE.search(match_text):
             return _blocked("destructive command")
 
-        if _DEPLOY_RE.search(text):
+        if _DEPLOY_RE.search(match_text):
             return _high("production deployment", ApprovalKind.DEPLOY)
-        if _MERGE_RE.search(text):
+        if _MERGE_RE.search(match_text):
             return _high("repository merge", ApprovalKind.MERGE)
-        if _PROD_DB_RE.search(text):
+        if _PROD_DB_RE.search(match_text):
             return _high("production database write", ApprovalKind.PROD_DB)
-        if _IAM_RE.search(text):
+        if _IAM_RE.search(match_text):
             return _high("identity or access change", ApprovalKind.IAM)
-        if _DELETE_RE.search(text):
+        if _DELETE_RE.search(match_text):
             return _high("destructive resource change", ApprovalKind.DESTRUCTIVE)
         if job_kind == JobKind.CHANGE or write:
             return RiskAssessment(
@@ -153,4 +173,3 @@ def _high(reason: str, approval_kind: ApprovalKind) -> RiskAssessment:
         reasons=(reason,),
         approval_kind=approval_kind,
     )
-
