@@ -114,7 +114,10 @@ echo y | plink -ssh -l const -i "C:\Users\vonwa\.ssh\const.ppk" 185.244.49.94 "c
 - **MCP ops** (`MCP_ENABLED`, `OPS_SSH_*`): cloud-агент ходит в `beachops-ops`
   (`ssh_exec` / `docker_ps` / `docker_logs`). На проде ключ
   `/home/const/.ssh/beachops_ops` монтируется в api как
-  `/run/beachops-ssh/id_ed25519`; pubkey должен быть в `authorized_keys` у `const`.
+  `/run/beachops-ssh/id_ed25519`; pubkey в `authorized_keys` у `const` (185) и
+  `root` (176). Hosts: `eu` = прямой SSH на 185; `ru` =
+  `root@host.docker.internal:2222` через reverse-туннель
+  `autossh-reverse-ssh-tunnel` на 176 (прямой 185→176:22 закрыт сетью).
 - На проде: docker `webapp` слушает host port `8080`; host nginx + Let's Encrypt
   проксируют `https://beachops.marketolog.tech` → `127.0.0.1:8080`
   (конфиг `/etc/nginx/sites-available/beachops-marketolog.conf`, шаблон в
