@@ -191,6 +191,7 @@ class RealtimeVoiceGateway:
                         await connection.input_audio_buffer.clear()
                         buffered_bytes = 0
                     elif event_type == "audio.start":
+                        await connection.input_audio_buffer.clear()
                         buffered_bytes = 0
                         await websocket.send_json({"type": "audio.ready"})
                     elif event_type == "plan.request" and on_plan_request is not None:
@@ -276,6 +277,13 @@ class RealtimeVoiceGateway:
                 error = getattr(event, "error", None)
                 code = getattr(error, "code", None) or "provider_error"
                 message = getattr(error, "message", None) or "Voice provider error"
+                message_text = str(message)
+                if "buffer too small" in message_text.lower():
+                    code = "empty_audio"
+                    message_text = (
+                        "Слишком коротко — подержите кнопку "
+                        "и говорите не меньше секунды."
+                    )
                 logger.warning(
                     "Voice provider error event",
                     extra={
@@ -287,6 +295,6 @@ class RealtimeVoiceGateway:
                     {
                         "type": "error",
                         "code": str(code),
-                        "message": str(message),
+                        "message": message_text,
                     }
                 )

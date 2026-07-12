@@ -17,6 +17,8 @@ const MAX_RECORDING_MS = 60_000
 const PING_INTERVAL_MS = 25_000
 /** PCM16 mono @ 24 kHz — OpenAI needs ≥100ms before commit. */
 const MIN_AUDIO_BYTES = 24_000 * 2 / 10
+/** Min hold before stop — worklet needs a few render quanta on Telegram WebView. */
+const MIN_RECORDING_MS = 150
 const AUTH_FAILED = 'Session expired or invalid'
 const RATE_LIMITED = 'Voice session rate limited — try again shortly'
 const TOO_SHORT =
@@ -49,7 +51,13 @@ const VOICE_ERROR_MESSAGES: Record<string, string> = {
 }
 
 function voiceErrorMessage(event: VoiceEvent): string {
-  if (event.message?.trim()) return event.message.trim()
+  if (event.message?.trim()) {
+    const lower = event.message.toLowerCase()
+    if (lower.includes('buffer too small') || lower.includes('0.00ms')) {
+      return TOO_SHORT
+    }
+    return event.message.trim()
+  }
   if (event.code && VOICE_ERROR_MESSAGES[event.code]) {
     return VOICE_ERROR_MESSAGES[event.code]
   }
@@ -70,6 +78,9 @@ export function useVoiceSession() {
   const seqRef = useRef(0)
   const chunkSeqRef = useRef(0)
   const bytesSentRef = useRef(0)
+  const captureOpenRef = useRef(false)
+  const recordingStartedAtRef = useRef(0)
+  const startingCaptureRef = useRef(false)
   const seenEventsRef = useRef(new Set<string>())
   const reconnectRef = useRef(0)
   const reconnectTimerRef = useRef<number | undefined>(undefined)
@@ -266,6 +277,8 @@ export function useVoiceSession() {
   const stopCapture = useCallback((notifyServer = true) => {
     window.clearTimeout(maxDurationRef.current)
     cancelAnimationFrame(animationRef.current)
+    captureOpenRef.current = false
+    startingCaptureRef.current = false
     workletRef.current?.disconnect()
     workletRef.current = null
     if (notifyServer) {
@@ -298,6 +311,8 @@ export function useVoiceSession() {
     }
 
     try {
+      if (startingCaptureRef.current) return
+      startingCaptureRef.current = true
       stopPlayback()
       sendJson({ type: 'barge_in' })
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -337,12 +352,12 @@ export function useVoiceSession() {
       const worklet = new AudioWorkletNode(context, 'beachops-pcm')
       const silentGain = context.createGain()
       silentGain.gain.value = 0
-      source.connect(worklet)
       worklet.connect(silentGain)
       silentGain.connect(context.destination)
       workletRef.current = worklet
       worklet.port.onmessage = ({ data }: MessageEvent<ArrayBuffer>) => {
-        if (data.byteLength && wsRef.current?.readyState === WebSocket.OPEN) {
+        if (!captureOpenRef.current || !data.byteLength) return
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
           chunkSeqRef.current += 1
           bytesSentRef.current += data.byteLength
           wsRef.current.send(data)
@@ -350,8 +365,15 @@ export function useVoiceSession() {
       }
       chunkSeqRef.current = 0
       bytesSentRef.current = 0
+      captureOpenRef.current = false
       sendJson({ type: 'audio.start', codec: 'audio/pcm', sampleRate: 24_000 })
-      dispatch({ type: 'START_LISTENING', at: Date.now() })
+      if (context.state === 'suspended') {
+        await context.resume()
+      }
+      captureOpenRef.current = true
+      source.connect(worklet)
+      recordingStartedAtRef.current = Date.now()
+      dispatch({ type: 'START_LISTENING', at: recordingStartedAtRef.current })
       feedback('tap')
       maxDurationRef.current = window.setTimeout(() => {
         if (bytesSentRef.current < MIN_AUDIO_BYTES) {
@@ -363,17 +385,23 @@ export function useVoiceSession() {
         feedback('warning')
       }, MAX_RECORDING_MS)
     } catch (error) {
+      captureOpenRef.current = false
+      startingCaptureRef.current = false
       const denied = error instanceof DOMException && error.name === 'NotAllowedError'
       dispatch({
         type: 'FAIL',
         message: denied ? 'Microphone permission is required' : 'Microphone is unavailable',
       })
       feedback('error')
+    } finally {
+      startingCaptureRef.current = false
     }
   }, [connect, discardShortCapture, sendJson, state.connected, stopCapture, stopPlayback])
 
   const finishListening = useCallback(() => {
-    if (bytesSentRef.current < MIN_AUDIO_BYTES) {
+    if (startingCaptureRef.current) return
+    const elapsed = Date.now() - recordingStartedAtRef.current
+    if (elapsed < MIN_RECORDING_MS || bytesSentRef.current < MIN_AUDIO_BYTES) {
       discardShortCapture()
       return
     }
