@@ -48,9 +48,11 @@ Docker compose переопределяет `DATABASE_URL` на `@postgres:5432`
 
 | Переменная | По умолчанию | Описание |
 |------------|--------------|----------|
-| `CURSOR_MODEL` | `composer-2.5` | модель Cloud Agent |
+| `CURSOR_MODEL` | `composer-2.5` | UI-preset / fallback; динамический каталог — `GET /v1/models` (кэш Redis) |
+| `CURSOR_API_BASE_URL` | `https://api.cursor.com` | база Cloud Agents API v1 |
 | `CURSOR_API_KEY_MT2` | — (пусто) | второй Cursor API key — кнопка **🔑 mt2**; пусто = кнопка скрыта |
 | `CURSOR_API_KEY_MT3` | — (пусто) | третий Cursor API key — кнопка **🔑 mt3**; ряд токенов виден, если задан MT2 и/или MT3 |
+| `PHOTO_MAX_COUNT` | `5` | макс. изображений на prompt (жёсткий потолок API v1 = 5) |
 | `WORKSPACE_PATH` | `./data/workspace` | workspace для cursor-sdk bridge; в Docker: `/data/workspace` |
 | `DEFAULT_BRANCH` | `dev` | стартовая ветка; обязана входить в policy |
 | `DEFAULT_REPO_URL` | — (пусто) | seed только если точная пара URL/branch разрешена policy |
@@ -96,19 +98,22 @@ Docker compose переопределяет `DATABASE_URL` на `@postgres:5432`
 | `MEMORY_LIST_LIMIT` | `10` | лимит `/memory` без query |
 | `MEMORY_EMBED_MAX_CHARS` | `8000` | обрезка текста перед embedding |
 
-## HTTP MCP (ops на серверах владельца)
+## HTTP MCP (ops on owner hosts)
 
-| Переменная | По умолчанию | Описание |
-|------------|--------------|----------|
-| `MCP_ENABLED` | `false` | включить MCP endpoint и передачу `beachops-ops` в cloud-агент |
-| `MCP_PUBLIC_URL` | — | публичный URL Streamable HTTP MCP (например `{WEBAPP_BASE_URL}/mcp`) |
-| `MCP_BEARER_TOKEN` | — | Bearer для `Authorization` при вызове MCP и в `HttpMcpServerConfig` |
-| `OPS_SSH_HOSTS` | — | allowlist: `alias=user@host:port` (+ опционально `/via=other`). Прод: `eu=const@185…,ru=root@127.0.0.1:2222/via=eu` |
-| `OPS_SSH_KEY_PATH` | — | путь к приватному SSH-ключу **внутри контейнера api** (compose монтирует host-ключ в `/run/beachops-ssh/id_ed25519`) |
-| `OPS_SSH_TIMEOUT_SEC` | `30` | таймаут SSH-команды (5–120) |
-| `OPS_SSH_MAX_OUTPUT_CHARS` | `12000` | обрезка stdout/stderr в ответе tool |
+Full guide: [OPS_MCP.md](./OPS_MCP.md) (English).
 
-Tools: `ssh_exec`, `docker_ps`, `docker_logs` (`web/mcp_server.py`). Без полного набора env MCP не активируется.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_ENABLED` | `false` | Enable `/mcp` and inject `beachops-ops` into cloud agents |
+| `MCP_PUBLIC_URL` | — | Public HTTPS MCP URL (usually `{WEBAPP_BASE_URL}/mcp`) |
+| `MCP_BEARER_TOKEN` | — | Bearer for MCP auth and `HttpMcpServerConfig` |
+| `OPS_SSH_HOSTS` | — | Allowlist `alias=user@host:port` (+ optional `/via=other`). Example: `eu=…,mt-dev=…,ru=…/via=eu` |
+| `OPS_SSH_KEY_PATH` | — | Private key path **inside the api container** (overlay mounts to `/run/beachops-ssh/id_ed25519`) |
+| `OPS_SSH_KEY_HOST_PATH` | — | Absolute key path **on the Docker host**; required to use `docker-compose.ops.yml` |
+| `OPS_SSH_TIMEOUT_SEC` | `30` | SSH command timeout (5–120) |
+| `OPS_SSH_MAX_OUTPUT_CHARS` | `12000` | Truncate tool stdout/stderr |
+
+Tools: `ssh_exec`, `docker_ps`, `docker_logs`. Suggested aliases: `eu` (BeachOps), `mt-dev` (app DEV), `ru` (app PROD). MCP is independent of Cursor key presets (`mt` / `mt2` / `mt3`).
 
 ## Control plane и Mini App
 
@@ -138,7 +143,7 @@ Tools: `ssh_exec`, `docker_ps`, `docker_logs` (`web/mcp_server.py`). Без по
 
 | Переменная | По умолчанию | Описание |
 |------------|--------------|----------|
-| `PHOTO_MAX_COUNT` | `20` | max изображений в одном промпте (1–100; потолок — лимит Cursor/Anthropic vision API; при >20 max сторона картинки 2000px вместо 8000px) |
+| `PHOTO_MAX_COUNT` | `5` | max изображений в одном промпте (1–5; жёсткий потолок Cloud Agents API v1) |
 | `MEDIA_GROUP_DELAY_SEC` | `6.0` | задержка сборки альбома (фото и пересылки) |
 | `SHUTDOWN_DRAIN_SEC` | `15.0` | ожидание активных run при остановке бота |
 | `PROMPT_COALESCE_SEC` | `5` | debounce текста и фото в один промпт (0–30): ждёт тишины после последнего апдейта, чтобы подпись и картинки не уезжали разными run |

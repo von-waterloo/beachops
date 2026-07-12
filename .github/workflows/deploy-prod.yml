@@ -196,7 +196,12 @@ jobs:
           COMPOSE_DOCKER_CLI_BUILD: "1"
         run: |
           set -euo pipefail
-          docker compose -p "$COMPOSE_PROJECT" up --build -d --remove-orphans
+          COMPOSE=(docker compose -p "$COMPOSE_PROJECT" -f docker-compose.yml)
+          if [ -f docker-compose.ops.yml ] && grep -qE '^OPS_SSH_KEY_HOST_PATH=.+' .env; then
+            COMPOSE+=(-f docker-compose.ops.yml)
+            echo "Including docker-compose.ops.yml (OPS SSH key mount)"
+          fi
+          "${COMPOSE[@]}" up --build -d --remove-orphans
 
       - name: Wait for health
         run: |

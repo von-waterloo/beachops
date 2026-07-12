@@ -14,6 +14,7 @@ Full docs live in [docs/README.md](./docs/README.md).
 | [User guide](./docs/USER_GUIDE.md) | Commands, modes, Telegram UX |
 | [Development](./docs/DEVELOPMENT.md) | Local setup, layout, tests |
 | [Operations](./docs/OPERATIONS.md) | Docker, backups, migrate |
+| [Ops MCP](./docs/OPS_MCP.md) | SSH / Docker logs for cloud agents |
 | [Self-deploy](./docs/SELF_DEPLOY.md) | `main`/`dev` → CI → prod |
 | [Configuration](./docs/CONFIGURATION.md) | Every env knob |
 
@@ -36,7 +37,7 @@ Plus: multiple named agent sessions, semantic memory, a real job queue, owner ap
 ## Features at a glance
 
 - Telegram bot + HTTPS Mini App (dashboard, voice, repos, queue)
-- Cursor **Cloud Agents** via `cursor-sdk` (`create` / `resume`, streaming back into one Telegram message)
+- Cursor **Cloud Agents API v1** (REST + SSE; observer вне ARQ slot)
 - Up to 8 named **agent slots** per user — switch, rename, delete in Telegram and Mini App (**Работа**)
 - Durable jobs (Postgres + Redis/ARQ), cancel, reconciler if Telegram UI lags
 - GitHub repos: open mode or allowlist; soft pin via OAuth in the Mini App

@@ -23,7 +23,13 @@ Volumes:
 |--------|------------|
 | `postgres-data` | данные PostgreSQL |
 | `redis-data` | ARQ queue, idempotency, rate limits, hot cache |
-| `bot-data` | workspace cursor-sdk (`/data/workspace`) |
+| `bot-data` | workspace (`/data/workspace`) |
+
+После деплоя с новой схемой (например migration `018` — SSE/usage/model params/cloud status) миграции запускать **вручную** на проде, если compose `migrate` не в вашем пайплайне:
+
+```powershell
+echo y | plink ... "cd /home/const/tg-cursor-bot && docker compose -p tg-cursor-bot run --rm migrate"
+```
 
 ### Миграции
 
@@ -111,14 +117,10 @@ echo y | plink -ssh -l const -i "C:\Users\vonwa\.ssh\const.ppk" 185.244.49.94 "c
 - Self-improve (`SELF_IMPROVE_*`) по умолчанию выключен. Включение только в вашем `.env`
   добавляет ваш форк BeachOps в allowlist; откат прода — `/rollback` (нужен
   `GITHUB_DEPLOY_DISPATCH`).
-- **MCP ops** (`MCP_ENABLED`, `OPS_SSH_*`): cloud-агент ходит в `beachops-ops`
-  (`ssh_exec` / `docker_ps` / `docker_logs`). На проде ключ
-  `/home/const/.ssh/beachops_ops` монтируется в api как
-  `/run/beachops-ssh/id_ed25519`; pubkey в `authorized_keys` у `const` (185) и
-  `root` (176). Hosts: `eu` = прямой SSH на 185; `ru` =
-  `root@127.0.0.1:2222/via=eu` — reverse-туннель
-  `autossh-reverse-ssh-tunnel` на 176 + ProxyJump через `eu` (из api-контейнера
-  до host:2222 путь закрыт; прямой 185→176:22 тоже).
+- **MCP ops** (`MCP_ENABLED`, `OPS_SSH_*`): optional; see English guide
+  [OPS_MCP.md](./OPS_MCP.md). Use `docker-compose.ops.yml` + `OPS_SSH_KEY_HOST_PATH`
+  (never commit private keys). Suggested aliases: `eu` (BeachOps), `mt-dev` (app DEV),
+  `ru` (app PROD, often `/via=eu` through a reverse tunnel).
 - На проде: docker `webapp` слушает host port `8080`; host nginx + Let's Encrypt
   проксируют `https://beachops.marketolog.tech` → `127.0.0.1:8080`
   (конфиг `/etc/nginx/sites-available/beachops-marketolog.conf`, шаблон в

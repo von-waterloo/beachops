@@ -19,13 +19,17 @@ router = APIRouter(tags=["mcp"])
 TOOLS = [
     {
         "name": "ssh_exec",
-        "description": "Run a shell command on an allowlisted owner server via SSH.",
+        "description": (
+            "Run a shell command on an allowlisted host alias from OPS_SSH_HOSTS. "
+            "Typical aliases: eu (BeachOps), mt-dev (AI-ContentMaker DEV), "
+            "ru (AI-ContentMaker PROD)."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "host": {
                     "type": "string",
-                    "description": "Host alias from OPS_SSH_HOSTS (e.g. eu, ru).",
+                    "description": "Host alias: eu | mt-dev | ru (see OPS_SSH_HOSTS).",
                 },
                 "command": {"type": "string", "description": "Shell command to run."},
             },
@@ -34,22 +38,36 @@ TOOLS = [
     },
     {
         "name": "docker_ps",
-        "description": "List docker containers on an allowlisted host.",
+        "description": (
+            "List Docker containers on an allowlisted host. "
+            "Use eu for BeachOps, mt-dev for AI-ContentMaker DEV "
+            "(mt_*_dev), ru for AI-ContentMaker PROD (ai-contentmaker-*)."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "host": {"type": "string", "description": "Host alias."},
+                "host": {
+                    "type": "string",
+                    "description": "Host alias: eu | mt-dev | ru.",
+                },
             },
             "required": ["host"],
         },
     },
     {
         "name": "docker_logs",
-        "description": "Fetch recent docker container logs on an allowlisted host.",
+        "description": (
+            "Fetch recent Docker logs. Prefer docker_ps first for exact names. "
+            "DEV examples: mt_backend_dev, mt_worker_dev. "
+            "PROD examples: ai-contentmaker-backend-1, ai-contentmaker-worker-1."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "host": {"type": "string"},
+                "host": {
+                    "type": "string",
+                    "description": "Host alias: eu | mt-dev | ru.",
+                },
                 "container": {"type": "string"},
                 "tail": {"type": "integer", "default": 100},
             },

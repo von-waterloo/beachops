@@ -3,13 +3,13 @@
 ## Контекст системы
 
 - **Telegram Bot API** — long polling, один инстанс (конфликт при нескольких).
-- **Cursor Cloud Agents** — единственный execution plane продукта (`cursor-sdk`, bridge + cloud repos).
-- **PostgreSQL 16 + pgvector** — пользователи, репозитории, сессии агентов, семантическая память.
+- **Cursor Cloud Agents** — единственный execution plane продукта (Cloud Agents API **v1**: REST create/follow-up + SSE stream; legacy Windows SDK — только локальный worker).
+- **PostgreSQL 16 + pgvector** — пользователи, репозитории, сессии агентов, семантическая память, durable jobs / usage / SSE cursors.
 - **Redis + ARQ** — durable jobs, distributed actor locks, rate limits, replay protection,
-  short-lived hot cache (dashboard, auth bootstrap, embeddings).
+  short-lived hot cache (dashboard, auth bootstrap, embeddings, models/me/repos).
 - **FastAPI + React Mini App** — dashboard, approvals, realtime voice.
 - **OpenAI API** — realtime STT, streaming TTS, эмбеддинги.
-- **Workspace volume** — локальная рабочая директория для cursor-sdk bridge (`WORKSPACE_PATH`).
+- **Workspace volume** — локальная рабочая директория (`WORKSPACE_PATH`); cloud runs не требуют локального checkout репозитория.
 
 ```
 ┌─────────────┐     long polling      ┌──────────────────┐
@@ -21,8 +21,8 @@
                     ┌──────────────────────────┼──────────────────────────┐
                     ▼                          ▼                          ▼
             ┌───────────────┐          ┌───────────────┐          ┌───────────────┐
-            │  PostgreSQL   │          │  cursor-sdk   │          │   OpenAI API  │
-            │  + pgvector   │          │  Cloud Agents │          │ transcribe +  │
+            │  PostgreSQL   │          │ Cursor API v1 │          │   OpenAI API  │
+            │  + pgvector   │          │ REST + SSE    │          │ transcribe +  │
             └───────────────┘          └───────────────┘          │  embeddings   │
                                                                   └───────────────┘
 ```
@@ -123,12 +123,13 @@ GitHub URL). Непустой allowlist по-прежнему ограничив
 По умолчанию `AUTO_APPROVE_PLANS=false`: после plan — `awaiting_approval` и owner-кнопки;
 `AUTO_APPROVE_PLANS=true` сразу enqueue DO.
 
-**HTTP MCP `beachops-ops`:** при `MCP_ENABLED` + `MCP_PUBLIC_URL` + `MCP_BEARER_TOKEN`
-`CursorAgentService` передаёт cloud-агенту `HttpMcpServerConfig` с tools
+**HTTP MCP `beachops-ops`:** when `MCP_ENABLED` + `MCP_PUBLIC_URL` + `MCP_BEARER_TOKEN`
+are set, `CursorAgentService` injects `HttpMcpServerConfig` with tools
 `ssh_exec`, `docker_ps`, `docker_logs` (`web/mcp_server.py` → `OpsSshService`).
-Промпты ask/plan/do напоминают использовать MCP для логов/SSH, не выдумывать вывод.
+Ask/plan/do prompts map aliases: `eu` (BeachOps), `mt-dev` (app DEV), `ru` (app PROD).
+Setup guide: [OPS_MCP.md](./OPS_MCP.md). Independent of Cursor key presets (`mt`/`mt2`/`mt3`).
 
-**Project skills** (`.cursor/skills/`, индекс `project-skills`): `add-bot-feature`, `telegram-ui`, `db-migrations`, `bot-testing`, `agent-run-pipeline`, `github-branches`, `deploy-prod`. В plan/do промптах агенту сказано читать нужный skill перед нетривиальной работой.
+**Project skills** (`.cursor/skills/`, index `project-skills`): `add-bot-feature`, `telegram-ui`, `db-migrations`, `bot-testing`, `agent-run-pipeline`, `github-branches`, `deploy-prod`. Plan/do prompts tell the agent to read the right skill before non-trivial work.
 
 У каждого режима свой системный префикс в `domain/prompts.py`:
 
@@ -136,13 +137,15 @@ GitHub URL). Непустой allowlist по-прежнему ограничив
 - **plan** (`PLAN_SYSTEM_PREFIX`) — исследовать код, переиспользовать существующее, опираться на skills; объём плана = задаче; до 3 A/B/C при критичных развилках; план под Telegram (без mermaid/таблиц), напоминание про миграции.
 - **do** (`DO_GUIDANCE` + git safety) — сразу правки в базовой ветке; без лишних уточнений; без merge/deploy в main.
 
-### CursorAgentService
+### CursorAgentService (Cloud Agents API v1)
 
-1. `AsyncClient.launch_bridge(workspace=WORKSPACE_PATH)`
-2. `agents.create` или `agents.resume(cursor_agent_id)`
-3. `agent.send(prompt, SendOptions(mode=...))`
-4. Стрим `run.messages()` → `StreamState` (assistant, thinking, tool_call, status)
-5. `run.wait()` → финальный текст, PR URL, duration
+1. `POST /v1/agents` или follow-up `POST /v1/agents/{id}/runs` (`cursor_cloud_client`)
+2. Persist `agent_id` / `run_id` / `Last-Event-ID` в `beachops_jobs`
+3. Фоновый observer читает `GET .../stream` (SSE) → `StreamState`
+4. При disconnect / `410 stream_expired` / рестарте worker — `GET run` + reconciler
+5. Terminal: `GET .../usage?runId=` → footer/Telegram/Mini App; artifacts → Telegram (без presigned URL в БД)
+
+ARQ `execute_job` только **запускает** run и освобождает slot; долгий SSE не занимает `max_jobs`. Busy-gate в БД не даёт следующему job того же actor стартовать до `finalized_at`.
 
 Финальный результат длиннее ~3000 символов дополнительно отправляется полным
 `.md`-файлом: Telegram-сообщение с шапкой и футером ограничено 4096 символами.
@@ -156,23 +159,22 @@ GitHub URL). Непустой allowlist по-прежнему ограничив
 
 ### Plan-режим: перехват плана
 
-Cursor в `mode="plan"` возвращает в `result.result` только короткую вводную фразу, а сам план:
+Cursor в `mode="plan"` возвращает в result часто только короткую вводную, а сам план:
 
-- передаёт tool-вызовом **`create_plan`** (полный markdown в `args["plan"]`) — перехватывается в `_consume_message` → `StreamState.set_plan`;
-- сохраняет артефактом `artifacts/plans/*.plan.md` (с YAML frontmatter) — fallback через `agent.list_artifacts()` / `download_artifact()`, только если `create_plan` был вызван в этом run (защита от чужого плана при resume).
+- передаёт tool-вызовом **`create_plan`** (полный markdown в args) — перехватывается в SSE `tool_call` → `StreamState.set_plan`;
+- сохраняет артефактом `artifacts/plans/*.plan.md` — fallback через REST list/download, только если `create_plan` был в этом run.
 
-`_finalize_plan` подставляет plan artifact в `final_text`. Worker создаёт
-`PLAN_EXECUTION` approval и отдельные одноразовые owner callback tokens. Статическая
-кнопка `CB_BUILD_PLAN` считается legacy и execution не запускает.
+`_finalize_plan` подставляет plan artifact в `final_text`. Finalizer создаёт
+`PLAN_EXECUTION` approval и одноразовые owner callback tokens. Статическая
+кнопка `CB_BUILD_PLAN` — legacy.
 
 ### Durable jobs
 
 `beachops_jobs` хранит encrypted payload и state machine; ARQ получает только UUID.
-Redis lock гарантирует один run на actor. После plan при `AUTO_APPROVE_PLANS=true`
-— сразу do-follow-up; иначе `awaiting_approval` и owner-кнопки (дефолт).
-Прямой `/do` и ask завершаются как `succeeded` без лишнего Telegram-approval;
-review — через PR в GitHub. Worker восстанавливает stale planning/running jobs
-после рестарта.
+Короткий Redis lock на actor при launch; observer живёт вне ARQ.
+После plan при `AUTO_APPROVE_PLANS=true` — сразу do-follow-up; иначе `awaiting_approval`.
+Worker на startup rehydrate observers для RUNNING/PLANNING с Cursor IDs; иначе
+возвращает в QUEUED. Периодический reconciler + agent inventory sync (без auto-DELETE).
 
 ### Семантическая память
 
@@ -195,7 +197,7 @@ review — через PR в GitHub. Worker восстанавливает stale 
 
 - Поддержка photo, image document, media groups (альбомы)
 - Текст и фото склеиваются через `PromptCoalesceBuffer` (`PROMPT_COALESCE_SEC`, по умолчанию 5 с) — один run после тишины
-- До `PHOTO_MAX_COUNT` изображений → `SDKImage` в Cursor
+- До `PHOTO_MAX_COUNT` изображений → REST images (лимит Cloud Agents API v1 = **5**)
 - Без caption/текста — дефолтный промпт «Разбери скриншот…»
 
 ### Пересланный контекст

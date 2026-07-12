@@ -1,0 +1,13 @@
+# Optional overlay for beachops-ops MCP (SSH / docker logs).
+# Enable by setting OPS_SSH_KEY_HOST_PATH in .env and including this file:
+#   docker compose -f docker-compose.yml -f docker-compose.ops.yml up -d
+#
+# Do not commit real private keys. Only the host path to a key that already
+# lives on the BeachOps server (outside the git tree).
+
+services:
+  api:
+    volumes:
+      - ${OPS_SSH_KEY_HOST_PATH}:/run/beachops-ssh/id_ed25519:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
