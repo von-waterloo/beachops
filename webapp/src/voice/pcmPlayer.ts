@@ -22,6 +22,10 @@ export class PcmStreamPlayer {
   private activeSources = new Set<AudioBufferSourceNode>()
   private readonly coalesceBytes: number
   private readonly onIdle: (() => void) | undefined
+  /** Guards re-entrancy while drainPending awaits AudioContext.resume(). */
+  private draining = false
+  /** Set when flush() is requested during an in-flight drain. */
+  private flushQueued = false
 
   constructor(onIdle?: () => void) {
     this.onIdle = onIdle
@@ -53,12 +57,12 @@ export class PcmStreamPlayer {
     merged.set(this.pending, 0)
     merged.set(new Uint8Array(chunk), this.pending.length)
     this.pending = merged
-    this.drainPending(false)
+    void this.drainPending(false)
   }
 
   /** Play tail after server signals end of stream. */
   flush(): void {
-    this.drainPending(true)
+    void this.drainPending(true)
   }
 
   stop(): void {
@@ -73,32 +77,64 @@ export class PcmStreamPlayer {
     this.activeSources.clear()
     this.pending = new Uint8Array(0)
     this.scheduledUntil = 0
+    this.draining = false
+    this.flushQueued = false
   }
 
-  private drainPending(flushAll: boolean): void {
-    while (true) {
-      const evenLength = this.pending.length - (this.pending.length % 2)
-      if (evenLength < 2) break
+  /**
+   * Drain pending bytes into the scheduler.
+   *
+   * Scheduling is serialized: we await AudioContext readiness exactly once,
+   * then schedule every coalesced slice synchronously. This keeps reads/writes
+   * of `scheduledUntil` strictly ordered — concurrent enqueue() calls during
+   * the await just append to `pending` and are picked up by the same loop
+   * instead of launching racing schedulePcm() tasks.
+   */
+  private async drainPending(flushAll: boolean): Promise<void> {
+    if (this.draining) {
+      if (flushAll) this.flushQueued = true
+      return
+    }
+    this.draining = true
+    try {
+      const context = await this.ensureContext()
+      // stop() may have closed the context while we were resuming.
+      if (context.state === 'closed') return
+      const gain = this.gain
+      if (!gain) return
 
-      const take = flushAll
-        ? evenLength
-        : evenLength >= this.coalesceBytes
-          ? this.coalesceBytes
-          : 0
-      if (take < 2) break
+      while (true) {
+        const wantFlush = flushAll || this.flushQueued
+        const evenLength = this.pending.length - (this.pending.length % 2)
+        if (evenLength < 2) break
 
-      const slice = this.pending.slice(0, take)
-      this.pending = this.pending.slice(take)
-      void this.schedulePcm(
-        slice.buffer.slice(slice.byteOffset, slice.byteOffset + slice.byteLength),
-      )
+        const take = wantFlush
+          ? evenLength
+          : evenLength >= this.coalesceBytes
+            ? this.coalesceBytes
+            : 0
+        if (take < 2) break
+
+        const slice = this.pending.slice(0, take)
+        this.pending = this.pending.slice(take)
+        this.schedulePcmSync(
+          context,
+          gain,
+          slice.buffer.slice(slice.byteOffset, slice.byteOffset + slice.byteLength),
+        )
+      }
+      this.flushQueued = false
+    } finally {
+      this.draining = false
     }
   }
 
-  private async schedulePcm(raw: ArrayBuffer): Promise<void> {
-    const context = await this.ensureContext()
-    const gain = this.gain
-    if (!gain || raw.byteLength < 2) return
+  private schedulePcmSync(
+    context: AudioContext,
+    gain: GainNode,
+    raw: ArrayBuffer,
+  ): void {
+    if (raw.byteLength < 2) return
 
     const pcm = new Int16Array(raw)
     const buffer = context.createBuffer(1, pcm.length, PLAYBACK_RATE)
@@ -112,7 +148,11 @@ export class PcmStreamPlayer {
     source.connect(gain)
 
     const now = context.currentTime
-    if (this.scheduledUntil < now + SCHEDULE_LEAD_SEC) {
+    // Only re-anchor when the cursor is not strictly ahead of real time (first
+    // chunk, or underrun after a network stall). Re-anchoring while already
+    // scheduled ahead — even inside the lead window — would push the next slice
+    // forward and open a gap between it and the previous slice.
+    if (this.scheduledUntil <= now) {
       this.scheduledUntil = now + SCHEDULE_LEAD_SEC
     }
     source.start(this.scheduledUntil)
@@ -122,7 +162,11 @@ export class PcmStreamPlayer {
     source.onended = () => {
       source.disconnect()
       this.activeSources.delete(source)
-      if (this.activeSources.size === 0 && this.pending.length === 0) {
+      if (
+        this.activeSources.size === 0
+        && this.pending.length === 0
+        && !this.draining
+      ) {
         this.onIdle?.()
       }
     }

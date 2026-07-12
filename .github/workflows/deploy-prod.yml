@@ -1,7 +1,7 @@
 # Prod deploy on self-hosted runner host-185 (185.244.49.94).
 #
 # Triggers:
-#   1) Auto: push to dev -> wait for green CI -> deploy that SHA
+#   1) Auto: push to main or dev -> wait for green CI -> deploy that SHA
 #   2) Manual / bot: workflow_dispatch with input sha (rollback etc.)
 #
 # Secrets: ENV_PROD_BEACHOPS (preferred) or ENV_PROD = full prod .env
@@ -11,7 +11,7 @@ name: Deploy prod
 
 on:
   push:
-    branches: [dev]
+    branches: [main, dev]
   workflow_dispatch:
     inputs:
       sha:
@@ -123,7 +123,7 @@ jobs:
           fi
           if ! git -C "$GITHUB_WORKSPACE" merge-base --is-ancestor "$previous_sha" "$DEPLOY_SHA"; then
             echo "Refusing non-monotonic auto-deploy: $DEPLOY_SHA does not contain live $previous_sha." >&2
-            echo "Merge or rebase the live dev history before deploying." >&2
+            echo "Merge or rebase the current live history before deploying." >&2
             exit 1
           fi
           echo "Deployment order verified: $previous_sha -> $DEPLOY_SHA"
