@@ -22,7 +22,6 @@ def _message() -> MagicMock:
     msg.edit_reply_markup = AsyncMock()
     bot = MagicMock()
     bot.send_chat_action = AsyncMock()
-    bot.send_message_draft = None
     msg.get_bot.return_value = bot
     return msg
 

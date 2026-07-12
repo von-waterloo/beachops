@@ -22,7 +22,6 @@ def _message() -> MagicMock:
     msg.edit_reply_markup = AsyncMock()
     bot = MagicMock()
     bot.send_chat_action = AsyncMock()
-    bot.send_message_draft = None
     msg.get_bot.return_value = bot
     return msg
 
@@ -84,6 +83,23 @@ async def test_finalize_updates_markup_when_text_unchanged() -> None:
     }
     assert CB_CANCEL not in callbacks
     await renderer.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_flush_does_not_send_message_draft() -> None:
+    """Draft streaming must not run alongside edit_text — it duplicates status in chat."""
+    message = _message()
+    bot = message.get_bot()
+    bot.send_message_draft = AsyncMock()
+    renderer = _renderer(message)
+    renderer._min_edit_interval = 0.0
+    state = StreamState(assistant_text="думаю", status="running", agent_id="bc-1")
+
+    await renderer.update(state)
+    await renderer.shutdown()
+
+    message.edit_text.assert_awaited()
+    bot.send_message_draft.assert_not_awaited()
 
 
 @pytest.mark.asyncio

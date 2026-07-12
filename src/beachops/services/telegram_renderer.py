@@ -71,7 +71,6 @@ class TelegramStreamRenderer:
         self._placeholder_animation = placeholder_animation
         self._activity_frame = 0
         self._run_started_at = time.monotonic()
-        self._last_draft_at = 0.0
         self._flush_lock = asyncio.Lock()
         self._activity_task = asyncio.create_task(self._activity_loop())
 
@@ -136,7 +135,7 @@ class TelegramStreamRenderer:
             return
         self._activity_task = None
         task.cancel()
-        # In-flight pulse flush may raise (draft/network); never abort finalize.
+        # In-flight pulse flush may raise (network); never abort finalize.
         with suppress(asyncio.CancelledError, Exception):
             await task
 
@@ -306,29 +305,7 @@ class TelegramStreamRenderer:
             return None
 
         self._last_edit_at = time.monotonic()
-        if not force and not self._closed:
-            await self._maybe_send_draft(plain_text)
         return None
-
-    async def _maybe_send_draft(self, plain_text: str) -> None:
-        if not plain_text or self._closed:
-            return
-        now = time.monotonic()
-        if now - self._last_draft_at < 2.0:
-            return
-        bot = self._message.get_bot()
-        send_draft = getattr(bot, "send_message_draft", None)
-        if send_draft is None:
-            return
-        try:
-            await send_draft(
-                chat_id=self._message.chat_id,
-                draft_id=self._message.message_id,
-                text=plain_text[:4096],
-            )
-            self._last_draft_at = now
-        except Exception:
-            logger.debug("send_message_draft failed", exc_info=True)
 
     def _compose_readable_stream(self, state: StreamState, footer: str) -> str:
         answer = self._answer_text(state)
