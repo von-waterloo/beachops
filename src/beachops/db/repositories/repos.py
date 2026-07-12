@@ -20,7 +20,7 @@ class RepoRepository:
                 SELECT id, tg_user_id, alias, github_url, default_branch, is_active
                 FROM user_repos
                 WHERE tg_user_id = $1
-                ORDER BY alias
+                ORDER BY is_active DESC, alias
                 """,
                 tg_user_id,
             )

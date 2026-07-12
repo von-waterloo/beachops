@@ -1452,7 +1452,9 @@ export function DashboardPanels({
 
           {data.repositories.length ? (
             <div className="repo-grid">
-              {data.repositories.map((repo) => {
+              {[...data.repositories]
+                .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, 'ru'))
+                .map((repo) => {
                 const draft = editingBranch[repo.id] ?? repo.branch
                 return (
                   <motion.article
