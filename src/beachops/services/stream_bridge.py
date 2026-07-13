@@ -15,6 +15,27 @@ from beachops.services.ui_copy import (
 )
 
 
+def merge_stream_chunk(existing: str, chunk: str) -> str:
+    """Merge a stream chunk that may be a delta or a cumulative snapshot.
+
+    Cursor usually sends deltas; some paths (or reconnect replay) may resend the
+    full buffer. Never append a snapshot that already contains ``existing``.
+    """
+    if not chunk:
+        return existing
+    if not existing:
+        return chunk
+    if chunk == existing:
+        return existing
+    # Cumulative snapshot of the buffer so far.
+    if chunk.startswith(existing):
+        return chunk
+    # Stale/older cumulative snapshot.
+    if existing.startswith(chunk):
+        return existing
+    return existing + chunk
+
+
 @dataclass
 class StreamState:
     assistant_text: str = ""
@@ -45,14 +66,19 @@ class StreamState:
             self.plan_name = name
 
     def append_assistant(self, chunk: str) -> None:
-        self.assistant_text = redact_text(self.assistant_text + chunk)
+        self.assistant_text = redact_text(merge_stream_chunk(self.assistant_text, chunk))
 
     def append_thinking(self, chunk: str) -> None:
-        self.thinking_chars += len(chunk)
-        if chunk:
-            self.thinking_text = redact_text(self.thinking_text + chunk)
-            if len(self.thinking_text) > 4000:
-                self.thinking_text = self.thinking_text[-4000:]
+        if not chunk:
+            return
+        before = self.thinking_text
+        merged = merge_stream_chunk(before, chunk)
+        if merged == before:
+            return
+        self.thinking_chars += max(0, len(merged) - len(before))
+        self.thinking_text = redact_text(merged)
+        if len(self.thinking_text) > 4000:
+            self.thinking_text = self.thinking_text[-4000:]
 
     def upsert_tool(self, name: str, status: str) -> None:
         label = format_tool_line(name, status)

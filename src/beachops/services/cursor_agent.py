@@ -514,7 +514,10 @@ class CursorAgentService:
                     if text:
                         state.append_thinking(text)
                 elif etype == "interaction_update":
-                    _apply_interaction_update(state, data)
+                    # Cloud API emits interaction_update *alongside* assistant/thinking/
+                    # tool_call. Handling both doubles every character in Telegram.
+                    # Docs: pick simplified events OR interaction_update, not both.
+                    continue
                 elif etype == "tool_call":
                     name = str(data.get("name") or "tool")
                     status = str(data.get("status") or "running")
@@ -823,27 +826,6 @@ def _sse_text_payload(data: Mapping[str, Any] | None) -> str:
             if parts:
                 return "".join(parts)
     return ""
-
-
-def _apply_interaction_update(state: StreamState, data: Mapping[str, Any] | None) -> None:
-    """Best-effort parse of richer SDK-shaped interaction_update events."""
-    if not isinstance(data, Mapping):
-        return
-    subtype = str(
-        data.get("subtype") or data.get("type") or data.get("kind") or ""
-    ).strip().lower()
-    text = _sse_text_payload(data)
-    if not text and isinstance(data.get("update"), Mapping):
-        text = _sse_text_payload(data["update"])  # type: ignore[index]
-        subtype = subtype or str(
-            data["update"].get("subtype") or data["update"].get("type") or ""
-        ).strip().lower()
-    if not text:
-        return
-    if "think" in subtype:
-        state.append_thinking(text)
-    else:
-        state.append_assistant(text)
 
 
 def _friendly_cursor_error(message: str) -> str:

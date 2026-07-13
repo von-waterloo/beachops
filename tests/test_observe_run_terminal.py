@@ -69,10 +69,64 @@ async def test_observe_run_polls_after_bare_done(monkeypatch: pytest.MonkeyPatch
     assert "finished" in updates
 
 
-def test_sse_text_payload_reads_common_shapes() -> None:
-    assert _sse_text_payload({"text": "hi"}) == "hi"
-    assert _sse_text_payload({"delta": "yo"}) == "yo"
-    assert _sse_text_payload({"content": [{"type": "text", "text": "a"}, {"text": "b"}]}) == "ab"
+@pytest.mark.asyncio
+async def test_consume_sse_ignores_parallel_interaction_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """assistant + interaction_update carry the same delta — only one must apply."""
+    from beachops.services.cursor_sse import SseEvent
+
+    service = CursorAgentService(
+        api_key="test",
+        model="composer-2.5",
+        workspace=Path("."),
+    )
+    state = StreamState(status="running")
+
+    events = [
+        SseEvent(event="assistant", data={"text": "И"}, id="1"),
+        SseEvent(
+            event="interaction_update",
+            data={"type": "text-delta", "text": "И"},
+            id="2",
+        ),
+        SseEvent(event="assistant", data={"text": "щу"}, id="3"),
+        SseEvent(
+            event="interaction_update",
+            data={"type": "text-delta", "text": "щу"},
+            id="4",
+        ),
+        SseEvent(
+            event="result",
+            data={"status": "FINISHED", "text": "Ищу"},
+            id="5",
+        ),
+    ]
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def stream_run(self, *_args, **_kwargs):
+            for event in events:
+                yield event
+
+    monkeypatch.setattr(service, "_client", lambda _api_key=None: _FakeClient())
+
+    terminal = await service._consume_sse(
+        agent_id="bc-1",
+        run_id="run-1",
+        state=state,
+        on_update=AsyncMock(),
+        api_key="test",
+        last_event_id=None,
+    )
+    assert terminal is True
+    assert state.assistant_text == "Ищу"
+    assert state.final_text == "Ищу"
 
 
 @pytest.mark.asyncio

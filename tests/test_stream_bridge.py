@@ -64,3 +64,38 @@ def test_set_plan_stores_text_and_name() -> None:
 def test_empty_stream_hint() -> None:
     state = StreamState()
     assert state.render_body() == EMPTY_STREAM_HINT
+
+
+def test_merge_stream_chunk_delta_and_cumulative() -> None:
+    from beachops.services.stream_bridge import merge_stream_chunk
+
+    assert merge_stream_chunk("", "И") == "И"
+    assert merge_stream_chunk("И", "щ") == "Ищ"
+    assert merge_stream_chunk("Ищ", "Ищу") == "Ищу"
+    assert merge_stream_chunk("Ищу", "Ищ") == "Ищу"
+    assert merge_stream_chunk("Ищу", "Ищу") == "Ищу"
+
+
+def test_append_assistant_ignores_cumulative_replay() -> None:
+    state = StreamState()
+    state.append_assistant("И")
+    state.append_assistant("щ")
+    state.append_assistant("у")
+    assert state.assistant_text == "Ищу"
+    # Cumulative snapshot must replace, not double.
+    state.append_assistant("Ищу UI")
+    assert state.assistant_text == "Ищу UI"
+    # Exact duplicate must not grow.
+    state.append_assistant("Ищу UI")
+    assert state.assistant_text == "Ищу UI"
+
+
+def test_append_thinking_tracks_growth_without_doubling() -> None:
+    state = StreamState()
+    state.append_thinking("ab")
+    state.append_thinking("cd")
+    assert state.thinking_text == "abcd"
+    assert state.thinking_chars == 4
+    state.append_thinking("abcd")  # cumulative replay
+    assert state.thinking_text == "abcd"
+    assert state.thinking_chars == 4
