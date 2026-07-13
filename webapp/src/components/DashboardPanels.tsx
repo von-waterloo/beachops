@@ -1343,57 +1343,6 @@ export function DashboardPanels({
 
       {tab === 'repositories' && (
         <>
-          <RepoPolicyBanner openMode={openMode} allowedCount={allowedRepos.length} />
-
-          <Section eyebrow="Агенты" title="Активный слот">
-            {(data.agents?.length ?? 0) > 0 ? (
-              <>
-                <div className="agent-grid">
-                  {data.agents.map((slot) => (
-                    <SlotCard
-                      key={slot.id}
-                      slot={slot}
-                      onActivate={
-                        onUpdateAgent && !slot.active
-                          ? () => {
-                              feedback('select')
-                              void onUpdateAgent(slot.id, { makeActive: true })
-                            }
-                          : undefined
-                      }
-                      onDelete={
-                        onDeleteAgent && (data.agents?.length ?? 0) > 1
-                          ? () => {
-                              if (!window.confirm(`Удалить «${slot.label}»?`)) return
-                              void onDeleteAgent(slot.id)
-                            }
-                          : undefined
-                      }
-                    />
-                  ))}
-                </div>
-                {onCreateAgent && (
-                  <button
-                    type="button"
-                    className="primary-button"
-                    onClick={() => {
-                      feedback('tap')
-                      void onCreateAgent()
-                    }}
-                  >
-                    <Plus size={16} /> Новый агент
-                  </button>
-                )}
-              </>
-            ) : (
-              <Empty
-                icon={<Cloud />}
-                title="Нет слотов"
-                copy="Агент появится после первого cloud-run или создайте новый слот."
-              />
-            )}
-          </Section>
-
           <Section eyebrow="Репозиторий" title="Какой репо активен">
             {data.repositories.length ? (
               <div className="repo-grid">
@@ -1410,29 +1359,7 @@ export function DashboardPanels({
                     >
                       <div className="repo-mark"><GitBranch size={18} /></div>
                       <div className="repo-body">
-                        <div className="repo-header-row">
-                          <h2>{repo.name}</h2>
-                          <div className="repo-actions">
-                            {repo.active ? (
-                              <span className="repo-state ready">Активен</span>
-                            ) : (
-                              <button
-                                type="button"
-                                className="ghost-link"
-                                disabled={!onUpdateRepository}
-                                onClick={() => {
-                                  if (!onUpdateRepository) return
-                                  feedback('tap')
-                                  void onUpdateRepository(repo.id, { makeActive: true })
-                                    .then(() => feedback('success'))
-                                    .catch(() => feedback('error'))
-                                }}
-                              >
-                                Сделать активным
-                              </button>
-                            )}
-                          </div>
-                        </div>
+                        <h2>{repo.name}</h2>
                         <p>{repo.url ?? repo.name}</p>
                         <div className="repo-branch-row">
                           <input
@@ -1457,6 +1384,26 @@ export function DashboardPanels({
                             Сохранить
                           </button>
                         </div>
+                        <div className="repo-actions">
+                          {repo.active ? (
+                            <span className="repo-state ready">Активен</span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="ghost-link"
+                              disabled={!onUpdateRepository}
+                              onClick={() => {
+                                if (!onUpdateRepository) return
+                                feedback('tap')
+                                void onUpdateRepository(repo.id, { makeActive: true })
+                                  .then(() => feedback('success'))
+                                  .catch(() => feedback('error'))
+                              }}
+                            >
+                              Сделать активным
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </motion.article>
                   )
@@ -1475,7 +1422,50 @@ export function DashboardPanels({
             )}
           </Section>
 
+          <RepoPolicyBanner openMode={openMode} allowedCount={allowedRepos.length} />
+
           <SelfImprovePanel data={data} onSetSelfImprove={onSetSelfImprove} />
+
+          {(data.agents?.length ?? 0) > 0 && (
+            <Section eyebrow="Агенты" title="Активный слот">
+              <div className="agent-grid">
+                {data.agents.map((slot) => (
+                  <SlotCard
+                    key={slot.id}
+                    slot={slot}
+                    onActivate={
+                      onUpdateAgent && !slot.active
+                        ? () => {
+                            feedback('select')
+                            void onUpdateAgent(slot.id, { makeActive: true })
+                          }
+                        : undefined
+                    }
+                    onDelete={
+                      onDeleteAgent && (data.agents?.length ?? 0) > 1
+                        ? () => {
+                            if (!window.confirm(`Удалить «${slot.label}»?`)) return
+                            void onDeleteAgent(slot.id)
+                          }
+                        : undefined
+                    }
+                  />
+                ))}
+              </div>
+              {onCreateAgent && (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => {
+                    feedback('tap')
+                    void onCreateAgent()
+                  }}
+                >
+                  <Plus size={16} /> Новый агент
+                </button>
+              )}
+            </Section>
+          )}
 
           <CursorHealthPanel />
           <GithubConnectPanel
