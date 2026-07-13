@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
 from telegram import Bot
+from telegram.error import RetryAfter
 from telegram.ext import ContextTypes
 
 from beachops.app_context import AppContext
@@ -24,7 +26,6 @@ from beachops.services.run_executor import (
     resolve_run_token_key,
 )
 from beachops.services.run_observer import observe_and_finalize
-from beachops.services.status_animation import AnimatedStatus
 from beachops.services.stream_bridge import StreamState
 from beachops.services.stream_display import resolve_thinking_display
 from beachops.services.telegram_renderer import send_placeholder
@@ -47,7 +48,11 @@ async def launch_durable_cloud_job(
     channel: str | None = None,
     observers,
 ) -> None:
-    """Create/follow-up a Cursor run, persist IDs, then observe in background."""
+    """Create/follow-up a Cursor run, persist IDs, then observe in background.
+
+    Cursor is started *before* the Telegram placeholder so a Telegram flood
+    cannot prevent the cloud agent from receiving the task.
+    """
     slot = run_ctx.slot
     repo = run_ctx.repo
     slot_id = slot.id
@@ -66,27 +71,6 @@ async def launch_durable_cloud_job(
     token_key = await resolve_run_token_key(app, actor_id, slot)
     api_key = app.settings.cursor_api_key_for(token_key)
     ui_token_key, _available = await token_ui_pair(app, actor_id)
-    message, placeholder_anim = await send_placeholder(
-        context,
-        actor_id,
-        header,
-        is_admin=is_admin,
-        mode=mode,
-        current_model_key=model_key,
-        current_token_key=ui_token_key,
-        reply_to_message_id=app.last_user_messages.get(actor_id),
-    )
-    app.active_runs[actor_id] = ActiveRunInfo(
-        message_id=message.message_id,
-        chat_id=message.chat_id,
-    )
-    await app.jobs.set_runtime(
-        actor_id,
-        job_id,
-        telegram_chat_id=message.chat_id,
-        telegram_message_id=message.message_id,
-        cursor_token_key=token_key,
-    )
 
     memory_block: str | None = None
     if mode in (UserMode.ASK, UserMode.PLAN):
@@ -123,7 +107,6 @@ async def launch_durable_cloud_job(
         ):
             raise RunCancelled()
         if current.agent_id:
-            placeholder_anim.set_extra_lines([agent_cursor_link(current.agent_id)])
             await app.agent_slots.update_cursor_agent(
                 slot_id, current.agent_id, token_key=token_key
             )
@@ -137,41 +120,22 @@ async def launch_durable_cloud_job(
             cursor_token_key=token_key,
             cursor_last_event_id=current.last_event_id,
             cursor_run_status=current.status,
-            telegram_message_id=message.message_id,
-            telegram_chat_id=message.chat_id,
         )
         await _maybe_append_run_progress(app, job_id, actor_id, current)
-        if current.run_id:
-            await placeholder_anim.set_preset("waiting_signal")
-        elif current.agent_id:
-            await placeholder_anim.set_preset("run_started")
 
-    try:
-        started = await app.cursor.start_run(
-            prompt=full_prompt,
-            mode=cursor_mode,
-            repo=repo,
-            model=cursor_model,
-            cursor_agent_id=slot.cursor_agent_id,
-            images=images,
-            api_key=api_key,
-            auto_create_pr=auto_create_pr,
-            work_on_current_branch=work_on_current_branch,
-            on_update=on_update,
-            state=state,
-        )
-    except RunCancelled:
-        await placeholder_anim.stop()
-        raise
-    except Exception:
-        await placeholder_anim.stop()
-        raise
-    finally:
-        # Stop placeholder animation; observer owns the message edits next.
-        try:
-            await placeholder_anim.stop()
-        except Exception:
-            logger.debug("placeholder stop failed", exc_info=True)
+    started = await app.cursor.start_run(
+        prompt=full_prompt,
+        mode=cursor_mode,
+        repo=repo,
+        model=cursor_model,
+        cursor_agent_id=slot.cursor_agent_id,
+        images=images,
+        api_key=api_key,
+        auto_create_pr=auto_create_pr,
+        work_on_current_branch=work_on_current_branch,
+        on_update=on_update,
+        state=state,
+    )
 
     await app.agent_slots.update_cursor_agent(
         slot_id, started.agent_id, token_key=token_key
@@ -183,8 +147,29 @@ async def launch_durable_cloud_job(
         cursor_run_id=started.run_id,
         cursor_token_key=token_key,
         cursor_run_status=started.state.status,
-        telegram_message_id=message.message_id,
+    )
+
+    message = await _ensure_run_message(
+        context,
+        actor_id,
+        header,
+        is_admin=is_admin,
+        mode=mode,
+        current_model_key=model_key,
+        current_token_key=ui_token_key,
+        reply_to_message_id=app.last_user_messages.get(actor_id),
+        agent_id=started.agent_id,
+    )
+    app.active_runs[actor_id] = ActiveRunInfo(
+        message_id=message.message_id,
+        chat_id=message.chat_id,
+    )
+    await app.jobs.set_runtime(
+        actor_id,
+        job_id,
         telegram_chat_id=message.chat_id,
+        telegram_message_id=message.message_id,
+        cursor_token_key=token_key,
     )
 
     await observers.spawn(
@@ -207,3 +192,120 @@ async def launch_durable_cloud_job(
             last_event_id=started.state.last_event_id,
         ),
     )
+
+
+async def _ensure_run_message(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    header: str,
+    *,
+    is_admin: bool,
+    mode: UserMode,
+    current_model_key: str,
+    current_token_key: str | None,
+    reply_to_message_id: int | None,
+    agent_id: str | None,
+):
+    """Create the Telegram run card after Cursor is already running."""
+    try:
+        message, animation = await _send_placeholder_resilient(
+            context,
+            chat_id,
+            header,
+            is_admin=is_admin,
+            mode=mode,
+            current_model_key=current_model_key,
+            current_token_key=current_token_key,
+            reply_to_message_id=reply_to_message_id,
+            agent_id=agent_id,
+        )
+        try:
+            await animation.stop()
+        except Exception:
+            logger.debug("placeholder stop failed", exc_info=True)
+        return message
+    except Exception:
+        logger.warning(
+            "Animated placeholder failed after Cursor start; sending plain status",
+            exc_info=True,
+        )
+
+    from beachops.services.inline_keyboards import run_activity_keyboard
+    from beachops.services.status_animation import initial_status_text
+
+    lines = [header]
+    if agent_id:
+        lines.append(agent_cursor_link(agent_id))
+    text = "\n".join(lines) + "\n\n" + initial_status_text(preset="run_started")
+    # Never delete or edit the user's message — only send a new bot card.
+    for attempt in range(4):
+        try:
+            return await context.bot.send_message(
+                chat_id=chat_id,
+                text=text[:4096],
+                reply_markup=run_activity_keyboard(
+                    is_admin=is_admin,
+                    current=mode,
+                    current_model_key=current_model_key,
+                    current_token_key=current_token_key,
+                ),
+                reply_to_message_id=reply_to_message_id,
+            )
+        except RetryAfter as exc:
+            await asyncio.sleep(max(float(exc.retry_after), 1.0) + attempt)
+    # Last resort without reply_to to avoid cascading BadRequest.
+    return await context.bot.send_message(
+        chat_id=chat_id,
+        text=text[:4096],
+        reply_markup=run_activity_keyboard(
+            is_admin=is_admin,
+            current=mode,
+            current_model_key=current_model_key,
+            current_token_key=current_token_key,
+        ),
+    )
+
+
+async def _send_placeholder_resilient(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    header: str,
+    *,
+    is_admin: bool,
+    mode: UserMode,
+    current_model_key: str,
+    current_token_key: str | None,
+    reply_to_message_id: int | None,
+    agent_id: str | None,
+    attempts: int = 4,
+):
+    """Send the Telegram run card; honor flood-control RetryAfter."""
+    last_exc: BaseException | None = None
+    for attempt in range(attempts):
+        try:
+            message, animation = await send_placeholder(
+                context,
+                chat_id,
+                header,
+                is_admin=is_admin,
+                mode=mode,
+                current_model_key=current_model_key,
+                current_token_key=current_token_key,
+                reply_to_message_id=reply_to_message_id,
+            )
+            if agent_id:
+                animation.set_extra_lines([agent_cursor_link(agent_id)])
+                await animation.set_preset("run_started")
+            return message, animation
+        except RetryAfter as exc:
+            last_exc = exc
+            delay = max(float(exc.retry_after), 1.0) + attempt
+            logger.warning(
+                "Telegram flood on placeholder (attempt %s/%s); sleep %.1ss",
+                attempt + 1,
+                attempts,
+                delay,
+            )
+            await asyncio.sleep(delay)
+    assert last_exc is not None
+    raise last_exc

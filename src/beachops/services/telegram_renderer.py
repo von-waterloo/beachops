@@ -424,17 +424,32 @@ async def send_placeholder(
     reply_to_message_id: int | None = None,
 ) -> tuple[Message, AnimatedStatus]:
     header_lines = [header]
-    message = await context.bot.send_message(
-        chat_id=chat_id,
-        text=initial_status_text(preset="starting", header_lines=header_lines),
-        reply_markup=run_activity_keyboard(
-            is_admin=is_admin,
-            current=mode,
-            current_model_key=current_model_key,
-            current_token_key=current_token_key,
-        ),
-        reply_to_message_id=reply_to_message_id,
-    )
+    try:
+        message = await context.bot.send_message(
+            chat_id=chat_id,
+            text=initial_status_text(preset="starting", header_lines=header_lines),
+            reply_markup=run_activity_keyboard(
+                is_admin=is_admin,
+                current=mode,
+                current_model_key=current_model_key,
+                current_token_key=current_token_key,
+            ),
+            reply_to_message_id=reply_to_message_id,
+        )
+    except RetryAfter:
+        raise
+    except BadRequest:
+        # Reply target may be gone — never delete the user message; just post standalone.
+        message = await context.bot.send_message(
+            chat_id=chat_id,
+            text=initial_status_text(preset="starting", header_lines=header_lines),
+            reply_markup=run_activity_keyboard(
+                is_admin=is_admin,
+                current=mode,
+                current_model_key=current_model_key,
+                current_token_key=current_token_key,
+            ),
+        )
     animation = AnimatedStatus(message, preset="starting", header_lines=header_lines)
     await animation.start()
     return message, animation

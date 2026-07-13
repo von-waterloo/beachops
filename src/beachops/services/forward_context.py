@@ -551,6 +551,7 @@ class ForwardContextBuffer:
         chat_id: int | None,
         message_id: int | None,
     ) -> None:
+        """Delete only the bot's forward-hint message — never a user message."""
         if chat_id is None or message_id is None:
             return
         try:

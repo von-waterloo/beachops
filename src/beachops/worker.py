@@ -399,7 +399,26 @@ async def _execute_locked(
                 job.id,
             )
             return
-        await _fail_job(app, transitioned, str(exc))
+        # Telegram flood must not kill a job that never reached Cursor UI —
+        # and if Cursor IDs exist we already returned above. Re-queue briefly.
+        reason = str(exc)
+        if "Flood control" in reason or "Retry in" in reason or "RetryAfter" in type(exc).__name__:
+            logger.warning(
+                "Telegram flood launching job %s; requeue in 15s",
+                job.id,
+            )
+            # Roll status back to queued so execute_job will pick it up again.
+            await app.jobs.transition(
+                transitioned.actor_id,
+                transitioned.id,
+                from_statuses=[JobStatus.RUNNING, JobStatus.PLANNING],
+                to_status=JobStatus.QUEUED,
+                event_type="worker.requeue_flood",
+                details={"reason": reason},
+            )
+            await app.arq.enqueue_job("execute_job", str(job.id), _defer_by=15)
+            return
+        await _fail_job(app, transitioned, reason)
     finally:
         clear_log_context()
         bind_log_context(service="worker")

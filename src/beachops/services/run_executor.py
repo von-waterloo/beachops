@@ -244,13 +244,13 @@ async def submit_user_prompt(
             )
             return SubmitInfo(SubmitResult.REJECTED)
         position = await app.jobs.queue_position(user_id, dispatched.job.id)
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=(
-                f"Задача принята · {dispatched.job.id}"
-                + (f" · очередь #{position}" if position > 1 else "")
-            ),
-        )
+        # No "Задача принята · uuid" ack — the run placeholder is enough.
+        # Only notify when the user is waiting behind another job.
+        if position > 1:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=queued_message(position),
+            )
         return SubmitInfo(
             SubmitResult.QUEUED,
             queue_position=max(1, position),
