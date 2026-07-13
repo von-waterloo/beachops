@@ -1311,7 +1311,6 @@ export function DashboardPanels({
 
       {tab === 'approvals' && (
         <>
-          <SelfImprovePanel data={data} onSetSelfImprove={onSetSelfImprove} />
           {data.approvals.length > 0 ? (
             <>
               <div className="locked-notice">
@@ -1346,84 +1345,137 @@ export function DashboardPanels({
         <>
           <RepoPolicyBanner openMode={openMode} allowedCount={allowedRepos.length} />
 
-          {data.repositories.length ? (
-            <div className="repo-grid repo-grid-connected">
-              {[...data.repositories]
-                .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, 'ru'))
-                .map((repo) => {
-                const draft = editingBranch[repo.id] ?? repo.branch
-                return (
-                  <motion.article
-                    className={`repo-card${repo.active ? ' is-active' : ''}`}
-                    key={repo.id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
+          <Section eyebrow="Агенты" title="Активный слот">
+            {(data.agents?.length ?? 0) > 0 ? (
+              <>
+                <div className="agent-grid">
+                  {data.agents.map((slot) => (
+                    <SlotCard
+                      key={slot.id}
+                      slot={slot}
+                      onActivate={
+                        onUpdateAgent && !slot.active
+                          ? () => {
+                              feedback('select')
+                              void onUpdateAgent(slot.id, { makeActive: true })
+                            }
+                          : undefined
+                      }
+                      onDelete={
+                        onDeleteAgent && (data.agents?.length ?? 0) > 1
+                          ? () => {
+                              if (!window.confirm(`Удалить «${slot.label}»?`)) return
+                              void onDeleteAgent(slot.id)
+                            }
+                          : undefined
+                      }
+                    />
+                  ))}
+                </div>
+                {onCreateAgent && (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => {
+                      feedback('tap')
+                      void onCreateAgent()
+                    }}
                   >
-                    <div className="repo-mark"><GitBranch size={18} /></div>
-                    <div className="repo-body">
-                      <div className="repo-header-row">
-                        <h2>{repo.name}</h2>
-                        <div className="repo-actions">
-                          {repo.active ? (
-                            <span className="repo-state ready">Активен</span>
-                          ) : (
-                            <button
-                              type="button"
-                              className="ghost-link"
-                              disabled={!onUpdateRepository}
-                              onClick={() => {
-                                if (!onUpdateRepository) return
-                                feedback('tap')
-                                void onUpdateRepository(repo.id, { makeActive: true })
-                                  .then(() => feedback('success'))
-                                  .catch(() => feedback('error'))
-                              }}
-                            >
-                              Сделать активным
-                            </button>
-                          )}
+                    <Plus size={16} /> Новый агент
+                  </button>
+                )}
+              </>
+            ) : (
+              <Empty
+                icon={<Cloud />}
+                title="Нет слотов"
+                copy="Агент появится после первого cloud-run или создайте новый слот."
+              />
+            )}
+          </Section>
+
+          <Section eyebrow="Репозиторий" title="Какой репо активен">
+            {data.repositories.length ? (
+              <div className="repo-grid">
+                {[...data.repositories]
+                  .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, 'ru'))
+                  .map((repo) => {
+                  const draft = editingBranch[repo.id] ?? repo.branch
+                  return (
+                    <motion.article
+                      className={`repo-card${repo.active ? ' is-active' : ''}`}
+                      key={repo.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                    >
+                      <div className="repo-mark"><GitBranch size={18} /></div>
+                      <div className="repo-body">
+                        <div className="repo-header-row">
+                          <h2>{repo.name}</h2>
+                          <div className="repo-actions">
+                            {repo.active ? (
+                              <span className="repo-state ready">Активен</span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="ghost-link"
+                                disabled={!onUpdateRepository}
+                                onClick={() => {
+                                  if (!onUpdateRepository) return
+                                  feedback('tap')
+                                  void onUpdateRepository(repo.id, { makeActive: true })
+                                    .then(() => feedback('success'))
+                                    .catch(() => feedback('error'))
+                                }}
+                              >
+                                Сделать активным
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <p>{repo.url ?? repo.name}</p>
+                        <div className="repo-branch-row">
+                          <input
+                            value={draft}
+                            aria-label={`Базовая ветка ${repo.name}`}
+                            onChange={(event) => setEditingBranch((prev) => ({
+                              ...prev,
+                              [repo.id]: event.target.value,
+                            }))}
+                          />
+                          <button
+                            type="button"
+                            disabled={!onUpdateRepository || draft === repo.branch}
+                            onClick={() => {
+                              if (!onUpdateRepository || !draft.trim()) return
+                              feedback('tap')
+                              void onUpdateRepository(repo.id, { branch: draft.trim() })
+                                .then(() => feedback('success'))
+                                .catch(() => feedback('error'))
+                            }}
+                          >
+                            Сохранить
+                          </button>
                         </div>
                       </div>
-                      <p>{repo.url ?? repo.name}</p>
-                      <div className="repo-branch-row">
-                        <input
-                          value={draft}
-                          aria-label={`Базовая ветка ${repo.name}`}
-                          onChange={(event) => setEditingBranch((prev) => ({
-                            ...prev,
-                            [repo.id]: event.target.value,
-                          }))}
-                        />
-                        <button
-                          type="button"
-                          disabled={!onUpdateRepository || draft === repo.branch}
-                          onClick={() => {
-                            if (!onUpdateRepository || !draft.trim()) return
-                            feedback('tap')
-                            void onUpdateRepository(repo.id, { branch: draft.trim() })
-                              .then(() => feedback('success'))
-                              .catch(() => feedback('error'))
-                          }}
-                        >
-                          Сохранить
-                        </button>
-                      </div>
-                    </div>
-                  </motion.article>
-                )
-              })}
-            </div>
-          ) : (
-            <Empty
-              icon={<GitBranch />}
-              title="Подключите репозиторий"
-              copy={
-                openMode
-                  ? 'Без активного репо задачи некуда отправлять. Вставьте HTTPS GitHub URL ниже и нажмите «Добавить».'
-                  : 'Выберите репо из списка разрешённых или вставьте URL из allowlist — после этого можно говорить агенту.'
-              }
-            />
-          )}
+                    </motion.article>
+                  )
+                })}
+              </div>
+            ) : (
+              <Empty
+                icon={<GitBranch />}
+                title="Подключите репозиторий"
+                copy={
+                  openMode
+                    ? 'Без активного репо задачи некуда отправлять. Добавьте URL ниже.'
+                    : 'Выберите репо из списка разрешённых или вставьте URL из allowlist.'
+                }
+              />
+            )}
+          </Section>
+
+          <SelfImprovePanel data={data} onSetSelfImprove={onSetSelfImprove} />
 
           <CursorHealthPanel />
           <GithubConnectPanel
@@ -1487,48 +1539,6 @@ export function DashboardPanels({
             </button>
           </form>
           {repoError && <div className="inline-error" role="alert">{repoError}</div>}
-
-          {(data.agents?.length ?? 0) > 0 && (
-            <Section eyebrow="Агенты" title="Cloud-агенты">
-              <div className="agent-grid">
-                {data.agents.map((slot) => (
-                  <SlotCard
-                    key={slot.id}
-                    slot={slot}
-                    onActivate={
-                      onUpdateAgent && !slot.active
-                        ? () => {
-                            feedback('select')
-                            void onUpdateAgent(slot.id, { makeActive: true })
-                          }
-                        : undefined
-                    }
-                    onDelete={
-                      onDeleteAgent && (data.agents?.length ?? 0) > 1
-                        ? () => {
-                            if (!window.confirm(`Удалить «${slot.label}»?`)) return
-                            void onDeleteAgent(slot.id)
-                          }
-                        : undefined
-                    }
-                  />
-                ))}
-              </div>
-              {onCreateAgent && (
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={() => {
-                    feedback('tap')
-                    void onCreateAgent()
-                  }}
-                >
-                  <Plus size={16} /> Новый агент
-                </button>
-              )}
-            </Section>
-          )}
-
         </>
       )}
     </section>

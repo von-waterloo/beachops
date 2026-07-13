@@ -268,8 +268,10 @@ function ControlRoom({
                 onUpdateRepository={(repoId, input) =>
                   dashboard.updateRepository(repoId, input)
                 }
-                onActivateSelfImprove={() => dashboard.activateSelfImprove()}
+                onSetSelfImprove={(input) => dashboard.setSelfImprove(input)}
                 onUpdateAgent={(slotId, input) => dashboard.updateAgent(slotId, input)}
+                onCreateAgent={() => dashboard.createAgent()}
+                onDeleteAgent={(slotId) => dashboard.deleteAgent(slotId)}
                 onSubmitPrompt={async (input) => {
                   await dashboard.submitPrompt(input)
                 }}
