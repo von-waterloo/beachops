@@ -1346,6 +1346,85 @@ export function DashboardPanels({
         <>
           <RepoPolicyBanner openMode={openMode} allowedCount={allowedRepos.length} />
 
+          {data.repositories.length ? (
+            <div className="repo-grid repo-grid-connected">
+              {[...data.repositories]
+                .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, 'ru'))
+                .map((repo) => {
+                const draft = editingBranch[repo.id] ?? repo.branch
+                return (
+                  <motion.article
+                    className={`repo-card${repo.active ? ' is-active' : ''}`}
+                    key={repo.id}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                  >
+                    <div className="repo-mark"><GitBranch size={18} /></div>
+                    <div className="repo-body">
+                      <div className="repo-header-row">
+                        <h2>{repo.name}</h2>
+                        <div className="repo-actions">
+                          {repo.active ? (
+                            <span className="repo-state ready">Активен</span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="ghost-link"
+                              disabled={!onUpdateRepository}
+                              onClick={() => {
+                                if (!onUpdateRepository) return
+                                feedback('tap')
+                                void onUpdateRepository(repo.id, { makeActive: true })
+                                  .then(() => feedback('success'))
+                                  .catch(() => feedback('error'))
+                              }}
+                            >
+                              Сделать активным
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <p>{repo.url ?? repo.name}</p>
+                      <div className="repo-branch-row">
+                        <input
+                          value={draft}
+                          aria-label={`Базовая ветка ${repo.name}`}
+                          onChange={(event) => setEditingBranch((prev) => ({
+                            ...prev,
+                            [repo.id]: event.target.value,
+                          }))}
+                        />
+                        <button
+                          type="button"
+                          disabled={!onUpdateRepository || draft === repo.branch}
+                          onClick={() => {
+                            if (!onUpdateRepository || !draft.trim()) return
+                            feedback('tap')
+                            void onUpdateRepository(repo.id, { branch: draft.trim() })
+                              .then(() => feedback('success'))
+                              .catch(() => feedback('error'))
+                          }}
+                        >
+                          Сохранить
+                        </button>
+                      </div>
+                    </div>
+                  </motion.article>
+                )
+              })}
+            </div>
+          ) : (
+            <Empty
+              icon={<GitBranch />}
+              title="Подключите репозиторий"
+              copy={
+                openMode
+                  ? 'Без активного репо задачи некуда отправлять. Вставьте HTTPS GitHub URL ниже и нажмите «Добавить».'
+                  : 'Выберите репо из списка разрешённых или вставьте URL из allowlist — после этого можно говорить агенту.'
+              }
+            />
+          )}
+
           <CursorHealthPanel />
           <GithubConnectPanel
             canManage={Boolean(onAddRepository)}
@@ -1450,82 +1529,6 @@ export function DashboardPanels({
             </Section>
           )}
 
-          {data.repositories.length ? (
-            <div className="repo-grid">
-              {[...data.repositories]
-                .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, 'ru'))
-                .map((repo) => {
-                const draft = editingBranch[repo.id] ?? repo.branch
-                return (
-                  <motion.article
-                    className={`repo-card${repo.active ? ' is-active' : ''}`}
-                    key={repo.id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                  >
-                    <div className="repo-mark"><GitBranch size={18} /></div>
-                    <div className="repo-body">
-                      <h2>{repo.name}</h2>
-                      <p>{repo.url ?? repo.name}</p>
-                      <div className="repo-branch-row">
-                        <input
-                          value={draft}
-                          aria-label={`Базовая ветка ${repo.name}`}
-                          onChange={(event) => setEditingBranch((prev) => ({
-                            ...prev,
-                            [repo.id]: event.target.value,
-                          }))}
-                        />
-                        <button
-                          type="button"
-                          disabled={!onUpdateRepository || draft === repo.branch}
-                          onClick={() => {
-                            if (!onUpdateRepository || !draft.trim()) return
-                            feedback('tap')
-                            void onUpdateRepository(repo.id, { branch: draft.trim() })
-                              .then(() => feedback('success'))
-                              .catch(() => feedback('error'))
-                          }}
-                        >
-                          Сохранить
-                        </button>
-                      </div>
-                      <div className="repo-actions">
-                        {repo.active ? (
-                          <span className="repo-state ready">Активен</span>
-                        ) : (
-                          <button
-                            type="button"
-                            className="ghost-link"
-                            disabled={!onUpdateRepository}
-                            onClick={() => {
-                              if (!onUpdateRepository) return
-                              feedback('tap')
-                              void onUpdateRepository(repo.id, { makeActive: true })
-                                .then(() => feedback('success'))
-                                .catch(() => feedback('error'))
-                            }}
-                          >
-                            Сделать активным
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </motion.article>
-                )
-              })}
-            </div>
-          ) : (
-            <Empty
-              icon={<GitBranch />}
-              title="Подключите репозиторий"
-              copy={
-                openMode
-                  ? 'Без активного репо задачи некуда отправлять. Вставьте HTTPS GitHub URL выше и нажмите «Добавить».'
-                  : 'Выберите репо из списка разрешённых или вставьте URL из allowlist — после этого можно говорить агенту.'
-              }
-            />
-          )}
         </>
       )}
     </section>

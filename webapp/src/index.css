@@ -1002,6 +1002,10 @@ main {
   gap: 10px;
 }
 
+.repo-grid-connected {
+  margin-bottom: 16px;
+}
+
 .work-card,
 .approval-card {
   padding: 15px;
@@ -1264,6 +1268,26 @@ button.self-improve-banner:disabled {
   display: grid;
   gap: 8px;
   min-width: 0;
+}
+
+.repo-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.repo-header-row h2 {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-header-row .repo-actions {
+  flex-shrink: 0;
 }
 
 .repo-body h2 {
