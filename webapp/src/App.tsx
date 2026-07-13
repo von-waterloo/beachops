@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
 import {
   Activity,
   CircleHelp,
@@ -22,7 +22,6 @@ import { useAuth } from './hooks/useAuth'
 import { useDashboard } from './hooks/useDashboard'
 import { useJobStream } from './hooks/useJobStream'
 import type { AuthenticatedUser } from './lib/passkeys'
-import { roleLabel } from './lib/uiCopy'
 import {
   initializeTelegram,
 } from './lib/telegram'
@@ -169,12 +168,6 @@ function ControlRoom({
           <span>BeachOps</span>
         </a>
         <div className="top-meta">
-          {(activeJob || running > 0) && (
-            <div className={`live-badge${activeJob ? ' is-hot' : ''}`} title="Идёт стрим задачи">
-              <span className="live-pulse" />
-              Эфир
-            </div>
-          )}
           <button
             className="auth-icon-button"
             type="button"
@@ -212,10 +205,6 @@ function ControlRoom({
               <LogOut size={17} />
             </button>
           )}
-          <div className="role-badge">
-            <span />
-            {roleLabel(dashboard.data.role)}
-          </div>
         </div>
       </div>
 
@@ -313,7 +302,8 @@ function ControlRoom({
         </time>
       </section>
 
-      <nav className="tab-bar" aria-label="Основная навигация">
+      <LayoutGroup id="main-tabs">
+        <nav className="tab-bar" aria-label="Основная навигация">
         {tabs.map((item) => {
           const Icon = item.icon
           const selected = item.id === tab
@@ -326,6 +316,14 @@ function ControlRoom({
               onClick={() => selectTab(item.id)}
             >
               <span className="tab-icon">
+                {selected && (
+                  <motion.span
+                    layoutId="tab-indicator"
+                    className="tab-indicator"
+                    transition={{ type: 'spring', stiffness: 520, damping: 34 }}
+                    aria-hidden="true"
+                  />
+                )}
                 <Icon size={20} strokeWidth={selected ? 2.4 : 1.8} />
                 {item.id === 'approvals' && dashboard.data.approvals.length > 0 && (
                   <i>{Math.min(9, dashboard.data.approvals.length)}</i>
@@ -338,7 +336,8 @@ function ControlRoom({
             </button>
           )
         })}
-      </nav>
+        </nav>
+      </LayoutGroup>
 
       <GuideOverlay mode={guideMode} onClose={() => setGuideMode(null)} />
     </div>

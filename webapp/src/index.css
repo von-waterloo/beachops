@@ -39,6 +39,7 @@
 html {
   background: var(--canvas);
   scroll-behavior: smooth;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -47,6 +48,7 @@ body {
   min-height: 100vh;
   min-height: 100svh;
   overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
   background:
     radial-gradient(ellipse 80% 50% at 10% -10%, color-mix(in srgb, var(--accent) 14%, transparent), transparent),
     radial-gradient(ellipse 60% 40% at 92% 0%, color-mix(in srgb, var(--cyan) 8%, transparent), transparent),
@@ -74,6 +76,14 @@ textarea::placeholder {
 
 button {
   color: inherit;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+a {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 button:focus-visible,
@@ -109,7 +119,9 @@ h2 {
   min-height: 100svh;
   margin-inline: auto;
   padding-top: max(env(safe-area-inset-top), var(--tg-safe-area-inset-top, 0px));
-  padding-bottom: calc(78px + max(env(safe-area-inset-bottom), var(--tg-safe-area-inset-bottom, 0px)));
+  padding-bottom: calc(
+    122px + max(env(safe-area-inset-bottom), var(--tg-safe-area-inset-bottom, 0px))
+  );
   position: relative;
 }
 
@@ -1757,8 +1769,21 @@ button.work-card.is-selected {
 }
 
 .tab-bar button.selected .tab-icon {
+  background: transparent;
+  box-shadow: none;
+}
+
+.tab-indicator {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+  pointer-events: none;
+}
+
+.selected .tab-icon {
+  background: transparent;
 }
 
 .tab-icon {
@@ -1769,10 +1794,6 @@ button.work-card.is-selected {
   place-items: center;
   border-radius: 10px;
   transition: background 170ms ease;
-}
-
-.selected .tab-icon {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .tab-icon i {
@@ -1871,6 +1892,13 @@ button.work-card.is-selected {
 
   main {
     padding-inline: 22px;
+  }
+
+  .worker-strip {
+    width: 680px;
+    right: auto;
+    left: 50%;
+    transform: translateX(-50%);
   }
 }
 
@@ -2017,11 +2045,19 @@ button.work-card.is-selected {
   color: rgba(158, 255, 213, 0.9);
 }
 .worker-strip {
+  position: fixed;
+  z-index: 19;
+  right: 0;
+  bottom: calc(72px + max(env(safe-area-inset-bottom), var(--tg-safe-area-inset-bottom, 0px)));
+  left: 0;
   display: flex;
   gap: 8px;
-  padding: 8px 14px 0;
+  padding: 8px 14px;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-glass) 94%, black);
+  backdrop-filter: blur(20px) saturate(140%);
 }
 .worker-chip {
   display: inline-flex;
@@ -2036,11 +2072,14 @@ button.work-card.is-selected {
   font-size: 0.72rem;
   white-space: nowrap;
   cursor: pointer;
-  transition: border-color 160ms var(--ease-out), color 160ms var(--ease-out), background 160ms var(--ease-out);
+  transition: border-color 160ms var(--ease-out), color 160ms var(--ease-out), background 160ms var(--ease-out), transform 160ms var(--ease-out);
 }
 button.worker-chip:hover {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
   color: var(--ink);
+}
+button.worker-chip:active {
+  transform: scale(0.96);
 }
 .worker-chip.online {
   color: #9dffd5;
@@ -2237,6 +2276,11 @@ button.worker-chip:hover {
   color: var(--accent);
   background: var(--surface-glass);
   cursor: pointer;
+  transition: transform 160ms var(--ease-out), border-color 160ms var(--ease-out), background 160ms var(--ease-out);
+}
+
+.auth-icon-button:active:not(:disabled) {
+  transform: scale(0.92);
 }
 
 .auth-icon-button:disabled {

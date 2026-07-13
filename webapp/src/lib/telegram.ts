@@ -8,8 +8,12 @@ interface TelegramWebApp {
   initData: string
   colorScheme?: 'light' | 'dark'
   isExpanded?: boolean
+  safeAreaInset?: { top: number; bottom: number; left: number; right: number }
+  contentSafeAreaInset?: { top: number; bottom: number; left: number; right: number }
   ready(): void
   expand(): void
+  onEvent?: (eventType: string, callback: () => void) => void
+  offEvent?: (eventType: string, callback: () => void) => void
   requestFullscreen?: () => void
   setHeaderColor?: (color: string) => void
   setBackgroundColor?: (color: string) => void
@@ -54,11 +58,32 @@ export function applyBeachOpsDarkTheme(): void {
   }
 }
 
+function applySafeAreaInsets(): void {
+  const app = telegram()
+  const root = document.documentElement
+  const inset = app?.safeAreaInset ?? app?.contentSafeAreaInset
+  if (!inset) return
+
+  root.style.setProperty('--tg-safe-area-inset-top', `${inset.top}px`)
+  root.style.setProperty('--tg-safe-area-inset-bottom', `${inset.bottom}px`)
+  root.style.setProperty('--tg-safe-area-inset-left', `${inset.left}px`)
+  root.style.setProperty('--tg-safe-area-inset-right', `${inset.right}px`)
+}
+
+let safeAreaListener: (() => void) | null = null
+
 export function initializeTelegram(): void {
   const app = telegram()
   app?.ready()
   app?.expand()
   applyBeachOpsDarkTheme()
+  applySafeAreaInsets()
+
+  if (app?.onEvent && !safeAreaListener) {
+    safeAreaListener = () => applySafeAreaInsets()
+    app.onEvent('viewportChanged', safeAreaListener)
+    app.onEvent('safeAreaChanged', safeAreaListener)
+  }
 }
 
 export function getTelegramInitData(): string {
