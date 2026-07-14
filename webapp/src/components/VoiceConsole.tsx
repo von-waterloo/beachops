@@ -5,6 +5,7 @@ import {
   ArrowRight,
   Captions,
   Check,
+  Cloud,
   Expand,
   ImagePlus,
   Mic,
@@ -465,6 +466,21 @@ export function VoiceConsole({
         />
 
         <div className="voice-stage-top">
+          <div className="voice-stage-top-left">
+            {activeJob ? (
+              <div className="job-chip" role="status" title={activeJob.title}>
+                <Cloud size={12} />
+                <span>{activeJob.title.slice(0, 28)}</span>
+              </div>
+            ) : !isListening ? (
+              <div className="connection-chip">
+                <span className={state.connected ? 'online-dot' : 'offline-dot'} />
+                {state.connected ? 'На связи' : 'Переподключаюсь'}
+              </div>
+            ) : (
+              <span className="voice-stage-top-spacer" aria-hidden="true" />
+            )}
+          </div>
           <div className="voice-mode-toggle voice-mode-toggle-top" role="toolbar" aria-label="Режим">
             {(['ask', 'plan', 'do'] as const).map((item) => (
               <button
@@ -479,12 +495,6 @@ export function VoiceConsole({
             ))}
           </div>
           <div className="voice-stage-top-actions">
-            {!isListening && (
-              <div className="connection-chip">
-                <span className={state.connected ? 'online-dot' : 'offline-dot'} />
-                {state.connected ? 'На связи' : 'Переподключаюсь'}
-              </div>
-            )}
             <button
               className="icon-button icon-button-compact"
               type="button"

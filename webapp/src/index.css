@@ -414,15 +414,32 @@ main {
 }
 
 .voice-stage-top {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  min-height: 28px;
+  min-height: 36px;
   flex: 0 0 auto;
   position: relative;
   z-index: 10;
   pointer-events: auto;
+}
+
+.voice-stage-top-left {
+  min-width: 0;
+  max-width: min(34vw, 132px);
+  display: flex;
+  align-items: center;
+}
+
+.voice-stage-top-left .job-chip,
+.voice-stage-top-left .connection-chip {
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.voice-stage-top-left .connection-chip {
+  margin-left: 0;
 }
 
 .voice-stage-top-spacer {
@@ -481,10 +498,10 @@ main {
 }
 
 .voice-stage-top .voice-mode-toggle-top {
-  flex: 1 1 auto;
   min-width: 0;
+  width: 100%;
   pointer-events: auto;
-  margin-right: 8px;
+  justify-self: stretch;
 }
 
 .voice-mode-toggle-top button {
