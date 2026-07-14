@@ -576,6 +576,55 @@ main {
   background: var(--warning);
 }
 
+.orb-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(10px, 4vw, 18px);
+  width: 100%;
+  max-width: 100%;
+  pointer-events: none;
+}
+
+.orb-swipe-hint {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 44px;
+  color: color-mix(in srgb, var(--muted) 88%, transparent);
+  font-size: 0.6rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  opacity: 0.62;
+  pointer-events: none;
+  user-select: none;
+  transition:
+    opacity 180ms var(--ease-out),
+    color 180ms var(--ease-out),
+    transform 180ms var(--ease-out);
+}
+
+.orb-swipe-hint.is-left.is-armed {
+  opacity: 1;
+  color: #ffb4b4;
+  transform: scale(1.08);
+}
+
+.orb-swipe-hint.is-right.is-armed {
+  opacity: 1;
+  color: var(--cyan);
+  transform: scale(1.08);
+}
+
+.orb-row .orb-button {
+  flex: 0 0 auto;
+  pointer-events: auto;
+}
+
 .orb-button {
   width: 132px;
   height: 132px;

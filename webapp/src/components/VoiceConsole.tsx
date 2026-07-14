@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import {
+  ArrowLeft,
+  ArrowRight,
   Captions,
   Check,
   Cloud,
@@ -216,7 +218,7 @@ export function VoiceConsole({
     : attachArmed
       ? 'Отпусти — выбрать картинку'
       : isListening
-        ? '← отмена · → скрин'
+        ? 'Отпусти — отправить'
         : state.queuedHint ?? state.caption
 
   const addFiles = async (files: FileList | File[]) => {
@@ -497,6 +499,18 @@ export function VoiceConsole({
             ))}
           </div>
 
+          <div className="orb-row">
+            {isListening && (
+              <div
+                className={`orb-swipe-hint is-left${cancelArmed ? ' is-armed' : ''}`}
+                aria-hidden="true"
+              >
+                <ArrowLeft size={18} strokeWidth={2.2} />
+                <X size={15} />
+                <span>Отмена</span>
+              </div>
+            )}
+
           <motion.button
             type="button"
             className={`orb-button${cancelArmed ? ' is-cancel' : ''}${attachArmed ? ' is-attach' : ''}`}
@@ -553,6 +567,18 @@ export function VoiceConsole({
                 : <Mic size={30} />}
             </span>
           </motion.button>
+
+            {isListening && (
+              <div
+                className={`orb-swipe-hint is-right${attachArmed ? ' is-armed' : ''}`}
+                aria-hidden="true"
+              >
+                <ArrowRight size={18} strokeWidth={2.2} />
+                <ImagePlus size={15} />
+                <span>Скрин</span>
+              </div>
+            )}
+          </div>
 
           <div className="spectrum" aria-hidden="true">
             {(state.phase === 'listening' ? voice.spectrum : Array.from({ length: SPECTRUM_BAR_COUNT }, (_, i) =>
