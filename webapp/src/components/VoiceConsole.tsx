@@ -179,7 +179,6 @@ export function VoiceConsole({
   const active = ['listening', 'transcribing', 'planning', 'speaking'].includes(state.phase)
   const canStart = ['idle', 'error', 'planning', 'speaking'].includes(state.phase)
   const showComposer = ['idle', 'error', 'planning', 'speaking'].includes(state.phase)
-  const modeLocked = state.phase === 'transcribing'
 
   useEffect(() => {
     if (reducedMotion || state.phase === 'listening') return undefined
@@ -258,7 +257,7 @@ export function VoiceConsole({
   }
 
   const handleMode = (mode: VoiceAgentMode) => {
-    if (modeLocked || mode === agentMode) return
+    if (mode === agentMode) return
     feedback('select')
     setAgentMode(mode)
     writeVoiceMode(mode)
@@ -473,7 +472,6 @@ export function VoiceConsole({
                 type="button"
                 className={agentMode === item ? 'selected' : ''}
                 aria-pressed={agentMode === item}
-                disabled={modeLocked}
                 onClick={() => handleMode(item)}
               >
                 {modeLabels[item]}

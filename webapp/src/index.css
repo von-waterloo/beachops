@@ -420,7 +420,9 @@ main {
   gap: 8px;
   min-height: 28px;
   flex: 0 0 auto;
-  z-index: 2;
+  position: relative;
+  z-index: 10;
+  pointer-events: auto;
 }
 
 .voice-stage-top-spacer {
@@ -490,6 +492,8 @@ main {
   min-width: 0;
   padding: 5px 9px;
   font-size: 0.72rem;
+  touch-action: manipulation;
+  pointer-events: auto;
 }
 
 .voice-stage-footer {
