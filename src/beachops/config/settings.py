@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     data_encryption_key: str = Field(default="", alias="DATA_ENCRYPTION_KEY")
     repository_policy_json: str = Field(default="{}", alias="REPOSITORY_POLICY_JSON")
     webapp_base_url: str = Field(default="", alias="WEBAPP_BASE_URL")
+    webapp_build_id: str = Field(default="", alias="WEBAPP_BUILD_ID")
     github_token: str = Field(default="", alias="GITHUB_TOKEN")
     github_repo: str = Field(default="", alias="GITHUB_REPO")
     github_oauth_client_id: str = Field(default="", alias="GITHUB_OAUTH_CLIENT_ID")

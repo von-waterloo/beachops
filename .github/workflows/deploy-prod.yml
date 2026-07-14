@@ -201,6 +201,7 @@ jobs:
           COMPOSE_DOCKER_CLI_BUILD: "1"
         run: |
           set -euo pipefail
+          export WEBAPP_BUILD_ID="${DEPLOY_SHA}"
           COMPOSE=(docker compose -p "$COMPOSE_PROJECT" -f docker-compose.yml)
           if [ -f docker-compose.ops.yml ] && grep -qE '^OPS_SSH_KEY_HOST_PATH=.+' .env; then
             COMPOSE+=(-f docker-compose.ops.yml)
@@ -288,6 +289,7 @@ jobs:
           set -euo pipefail
           echo "Restoring application image from $PREVIOUS_DEPLOY_SHA"
           git -C "$GITHUB_WORKSPACE" checkout --force "$PREVIOUS_DEPLOY_SHA"
+          export WEBAPP_BUILD_ID="${PREVIOUS_DEPLOY_SHA}"
           rsync -a --delete \
             --exclude '.env' \
             --exclude '.deployed_sha' \

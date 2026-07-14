@@ -1,5 +1,7 @@
 FROM python:3.12-slim
 
+ARG WEBAPP_BUILD_ID=dev
+
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
@@ -17,6 +19,7 @@ RUN mkdir -p /data/workspace
 
 ENV WORKSPACE_PATH=/data/workspace
 ENV PYTHONUNBUFFERED=1
+ENV WEBAPP_BUILD_ID=$WEBAPP_BUILD_ID
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "-m", "beachops"]

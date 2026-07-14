@@ -52,7 +52,10 @@ services:
     logging: *json-logging
 
   bot:
-    build: .
+    build:
+      context: .
+      args:
+        WEBAPP_BUILD_ID: ${WEBAPP_BUILD_ID:-dev}
     env_file: .env
     init: true
     stop_grace_period: 15s
@@ -76,7 +79,10 @@ services:
     logging: *json-logging
 
   worker:
-    build: .
+    build:
+      context: .
+      args:
+        WEBAPP_BUILD_ID: ${WEBAPP_BUILD_ID:-dev}
     env_file: .env
     init: true
     stop_grace_period: 30s
@@ -101,7 +107,10 @@ services:
     logging: *json-logging
 
   api:
-    build: .
+    build:
+      context: .
+      args:
+        WEBAPP_BUILD_ID: ${WEBAPP_BUILD_ID:-dev}
     env_file: .env
     depends_on:
       postgres:
@@ -129,7 +138,10 @@ services:
     logging: *json-logging
 
   webapp:
-    build: ./webapp
+    build:
+      context: ./webapp
+      args:
+        WEBAPP_BUILD_ID: ${WEBAPP_BUILD_ID:-dev}
     depends_on:
       api:
         condition: service_healthy

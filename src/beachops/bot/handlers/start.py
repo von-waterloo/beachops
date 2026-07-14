@@ -8,11 +8,14 @@ from telegram.ext import ContextTypes
 from beachops.app_context import AppContext
 from beachops.services.cursor_token_ui import token_ui_pair
 from beachops.services.inline_keyboards import welcome_keyboard
-from beachops.services.ui_copy import build_welcome_message
+from beachops.services.webapp_url import webapp_open_url
 
 
 def _webapp_url(app: AppContext) -> str:
-    url = str(getattr(app.settings, "webapp_base_url", "")).strip()
+    url = webapp_open_url(
+        str(getattr(app.settings, "webapp_base_url", "")),
+        version=str(getattr(app.settings, "webapp_build_id", "")),
+    )
     return url if url.lower().startswith("https://") else ""
 
 
