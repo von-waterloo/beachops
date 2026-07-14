@@ -2,13 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
 import {
   Activity,
+  Bot,
   CircleHelp,
-  Clock3,
   Cloud,
   GitBranch,
   LayoutDashboard,
   LogOut,
-  ShieldCheck,
   Siren,
   Volume2,
   VolumeX,
@@ -35,8 +34,7 @@ import { isActiveJobStatus } from './types/api'
 const tabs: Array<{ id: TabId; label: string; icon: typeof LayoutDashboard }> = [
   { id: 'voice', label: 'Голос', icon: LayoutDashboard },
   { id: 'active', label: 'Актив', icon: Activity },
-  { id: 'history', label: 'Лента', icon: Clock3 },
-  { id: 'approvals', label: 'Решения', icon: ShieldCheck },
+  { id: 'agents', label: 'Агенты', icon: Bot },
   { id: 'repositories', label: 'Репо', icon: GitBranch },
 ]
 
@@ -284,9 +282,7 @@ function ControlRoom({
                 onUpdateAgent={(slotId, input) => dashboard.updateAgent(slotId, input)}
                 onCreateAgent={() => dashboard.createAgent()}
                 onDeleteAgent={(slotId) => dashboard.deleteAgent(slotId)}
-                onSubmitPrompt={async (input) => {
-                  await dashboard.submitPrompt(input)
-                }}
+                onSubmitPrompt={async (input) => dashboard.submitPrompt(input)}
               />
             )}
           </motion.div>
@@ -339,9 +335,6 @@ function ControlRoom({
                   />
                 )}
                 <Icon size={20} strokeWidth={selected ? 2.4 : 1.8} />
-                {item.id === 'approvals' && dashboard.data.approvals.length > 0 && (
-                  <i>{Math.min(9, dashboard.data.approvals.length)}</i>
-                )}
                 {item.id === 'active' && running > 0 && (
                   <i>{Math.min(9, running)}</i>
                 )}

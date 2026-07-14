@@ -8,7 +8,7 @@ interface Props {
   pending: number
   cloudJobs: number
   runtimeFilter: RuntimeFilter
-  onSelectFilter: (filter: RuntimeFilter, tabHint?: 'active' | 'voice' | 'approvals') => void
+  onSelectFilter: (filter: RuntimeFilter, tabHint?: 'active' | 'voice' | 'agents') => void
 }
 
 export function ControlRoomHero({

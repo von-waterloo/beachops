@@ -10,7 +10,6 @@ import {
   ExternalLink,
   GitBranch,
   Loader2,
-  LockKeyhole,
   LogIn,
   Plus,
   Radio,
@@ -19,7 +18,6 @@ import {
   ShieldCheck,
   Unplug,
   X,
-  Zap,
 } from 'lucide-react'
 import type {
   AgentSlot,
@@ -56,8 +54,9 @@ import {
   statusLabel,
   statusTone,
 } from '../lib/uiCopy'
+import { AgentControlPanel } from './AgentControlPanel'
 
-export type TabId = 'voice' | 'active' | 'history' | 'approvals' | 'repositories'
+export type TabId = 'voice' | 'active' | 'agents' | 'repositories'
 
 type Decision = 'approve' | 'reject' | 'revision'
 
@@ -85,7 +84,7 @@ interface Props {
     mode?: 'ask' | 'plan' | 'do'
     slotId?: string
     images?: Array<{ mimeType: string; data: string }>
-  }) => Promise<void>
+  }) => Promise<{ job: { id: string }; enqueued: boolean; reason?: string }>
 }
 
 function Empty({ icon, title, copy }: { icon: React.ReactNode; title: string; copy: string }) {
@@ -836,118 +835,6 @@ function TimelineList({
   )
 }
 
-function HistoryPanel({
-  jobs,
-  events,
-  runtimeFilter,
-  focusedJobId,
-  onRuntimeFilterChange,
-  onSelectJob,
-}: {
-  jobs: Job[]
-  events: Event[]
-  runtimeFilter: RuntimeFilter
-  focusedJobId?: string | null
-  onRuntimeFilterChange?: (filter: RuntimeFilter, tabHint?: TabId) => void
-  onSelectJob?: (jobId: string, runtime: string | null | undefined) => void
-}) {
-  const jobsById = new Map(jobs.map((job) => [job.id, job]))
-  const recentJobs = jobs
-    .filter((job) => matchesRuntimeFilter(job.runtime, runtimeFilter))
-    .slice(0, 40)
-  const failedCount = recentJobs.filter((job) => job.status === 'failed').length
-  const doneCount = recentJobs.filter((job) =>
-    ['completed', 'succeeded', 'accepted'].includes(job.status),
-  ).length
-  const waitingCount = recentJobs.filter((job) =>
-    ['awaiting_approval', 'review_required', 'blocked'].includes(job.status),
-  ).length
-
-  return (
-    <div className="history-feed">
-      <RuntimeFilterBar
-        value={runtimeFilter}
-        onChange={(filter) => onRuntimeFilterChange?.(filter, 'history')}
-      />
-
-      <div className="history-stats" aria-label="Сводка ленты">
-        <div>
-          <strong>{recentJobs.length}</strong>
-          <span>Прогонов</span>
-        </div>
-        <div>
-          <strong>{doneCount}</strong>
-          <span>Готово</span>
-        </div>
-        <div>
-          <strong>{waitingCount}</strong>
-          <span>Ждёт</span>
-        </div>
-        <div>
-          <strong>{failedCount}</strong>
-          <span>Сбои</span>
-        </div>
-      </div>
-
-      <Section eyebrow="Прогоны" title="Недавние задачи">
-        {recentJobs.length ? (
-          <div className="card-list history-job-list">
-            {recentJobs.map((job) => {
-              const selected = focusedJobId === job.id
-              const tone = statusTone(job.status)
-              const className = `work-card history-job-card tone-${tone}${onSelectJob ? ' is-clickable' : ''}${selected ? ' is-selected' : ''}`
-              const body = (
-                <>
-                  <div className="card-topline">
-                    <span className={`status-pill status-${job.status} tone-${tone}`}>
-                      <Radio size={12} />
-                      {statusLabel(job.status)}
-                    </span>
-                    <time>{relativeTimeRu(job.createdAt)}</time>
-                  </div>
-                  <h2>{job.title}</h2>
-                  <p>
-                    {runtimeLabel(job.runtime)}
-                    {job.repository ? ` · ${job.repository}` : ''}
-                    {job.branch ? ` · ${job.branch}` : ''}
-                  </p>
-                </>
-              )
-              return onSelectJob ? (
-                <button
-                  className={className}
-                  type="button"
-                  key={job.id}
-                  onClick={() => onSelectJob(job.id, job.runtime)}
-                >
-                  {body}
-                </button>
-              ) : (
-                <article className={className} key={job.id}>{body}</article>
-              )
-            })}
-          </div>
-        ) : (
-          <Empty
-            icon={<Archive />}
-            title="Пока пусто"
-            copy="Запустите задачу голосом или из Telegram — она появится здесь."
-          />
-        )}
-      </Section>
-
-      <Section eyebrow="Активность" title="Что менялось">
-        <TimelineList
-          events={events}
-          jobsById={jobsById}
-          onSelectJob={onSelectJob}
-          limit={24}
-        />
-      </Section>
-    </div>
-  )
-}
-
 function Overview({
   data,
   pendingIds,
@@ -995,11 +882,11 @@ function Overview({
           <strong>{queuedCount}</strong>
           <span>Очередь</span>
         </button>
-        <button type="button" onClick={() => onRuntimeFilterChange?.('all', 'approvals')}>
+        <button type="button" onClick={() => onRuntimeFilterChange?.('all', 'active')}>
           <strong>{blocked}</strong>
           <span>Блок</span>
         </button>
-        <button type="button" onClick={() => onRuntimeFilterChange?.('all', 'approvals')}>
+        <button type="button" onClick={() => onRuntimeFilterChange?.('all', 'active')}>
           <strong>{data.approvals.length}</strong>
           <span>Approve</span>
         </button>
@@ -1121,8 +1008,7 @@ function Overview({
 
 const PANEL_TITLES: Record<string, string> = {
   active: 'Активные задачи',
-  history: 'Лента',
-  approvals: 'Апрувы',
+  agents: 'Агенты',
   repositories: 'Репозитории',
   overview: 'Обзор',
 }
@@ -1144,6 +1030,7 @@ export function DashboardPanels({
   onCreateAgent,
   onUpdateAgent,
   onDeleteAgent,
+  onSubmitPrompt,
 }: Props) {
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
   const [repoUrl, setRepoUrl] = useState('')
@@ -1298,47 +1185,17 @@ export function DashboardPanels({
         </>
       )}
 
-      {tab === 'history' && (
-        <HistoryPanel
-          jobs={data.jobs}
-          events={data.events}
-          runtimeFilter={runtimeFilter}
-          focusedJobId={focusedJobId}
-          onRuntimeFilterChange={onRuntimeFilterChange}
-          onSelectJob={onSelectJob}
+      {tab === 'agents' && onSubmitPrompt && (
+        <AgentControlPanel
+          slots={data.agents}
+          role={data.role}
+          queuedCount={data.queue?.queued ?? data.queue?.pending ?? 0}
+          onUpdateAgent={onUpdateAgent ?? (async () => {})}
+          onCreateAgent={onCreateAgent}
+          onDeleteAgent={onDeleteAgent}
+          onSubmitPrompt={onSubmitPrompt}
+          onJobDispatched={onSelectJob ? (jobId) => onSelectJob(jobId) : undefined}
         />
-      )}
-
-      {tab === 'approvals' && (
-        <>
-          {data.approvals.length > 0 ? (
-            <>
-              <div className="locked-notice">
-                <LockKeyhole size={18} />
-                <div>
-                  <strong>Ждёт вашего решения</strong>
-                  <p>Планы из режима «План» и рискованные действия. Голос сам не одобрит.</p>
-                </div>
-              </div>
-              <ApprovalsList
-                approvals={data.approvals}
-                role={data.role}
-                pendingIds={pendingIds}
-                act={act}
-              />
-            </>
-          ) : (
-            <div className="locked-notice soft">
-              <Zap size={18} />
-              <div>
-                <strong>Пока пусто — так и должно быть</strong>
-                <p>
-                  Сюда попадают только планы и высокий риск. Режим «Сделать» идёт без этого шага.
-                </p>
-              </div>
-            </div>
-          )}
-        </>
       )}
 
       {tab === 'repositories' && (
@@ -1425,47 +1282,6 @@ export function DashboardPanels({
           <RepoPolicyBanner openMode={openMode} allowedCount={allowedRepos.length} />
 
           <SelfImprovePanel data={data} onSetSelfImprove={onSetSelfImprove} />
-
-          {(data.agents?.length ?? 0) > 0 && (
-            <Section eyebrow="Агенты" title="Активный слот">
-              <div className="agent-grid">
-                {data.agents.map((slot) => (
-                  <SlotCard
-                    key={slot.id}
-                    slot={slot}
-                    onActivate={
-                      onUpdateAgent && !slot.active
-                        ? () => {
-                            feedback('select')
-                            void onUpdateAgent(slot.id, { makeActive: true })
-                          }
-                        : undefined
-                    }
-                    onDelete={
-                      onDeleteAgent && (data.agents?.length ?? 0) > 1
-                        ? () => {
-                            if (!window.confirm(`Удалить «${slot.label}»?`)) return
-                            void onDeleteAgent(slot.id)
-                          }
-                        : undefined
-                    }
-                  />
-                ))}
-              </div>
-              {onCreateAgent && (
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={() => {
-                    feedback('tap')
-                    void onCreateAgent()
-                  }}
-                >
-                  <Plus size={16} /> Новый агент
-                </button>
-              )}
-            </Section>
-          )}
 
           <CursorHealthPanel />
           <GithubConnectPanel
