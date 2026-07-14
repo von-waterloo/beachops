@@ -159,6 +159,9 @@ function ControlRoom({
   const pending = dashboard.data.queue?.pending ?? dashboard.data.queue?.queued ?? 0
   const cloudJobs = activeJobs.length
   const liveEvents = stream.events.length ? stream.events : dashboard.data.events
+  const canLogout = user.authMethod === 'passkey'
+    || user.authMethod === 'session'
+    || user.authMethod === 'telegram_login'
 
   return (
     <div className="app-shell control-room">
@@ -166,6 +169,10 @@ function ControlRoom({
         <a className="brand" href="#main" aria-label="BeachOps home">
           <span className="brand-glyph">B</span>
           <span>BeachOps</span>
+          <span className="app-badge" title="BeachOps control plane">
+            <i aria-hidden="true" />
+            App
+          </span>
         </a>
         <div className="top-meta">
           <button
@@ -190,7 +197,7 @@ function ControlRoom({
           >
             {soundMuted ? <VolumeX size={17} /> : <Volume2 size={17} />}
           </button>
-          {user.authMethod === 'passkey' && (
+          {canLogout && (
             <button
               className="auth-icon-button"
               type="button"
@@ -248,6 +255,11 @@ function ControlRoom({
                 cursorModelKey={cursorModelKey || user.cursorModelKey}
                 models={user.models ?? []}
                 onModelChange={setCursorModelKey}
+                onSubmitPrompt={async (input) => {
+                  const result = await dashboard.submitPrompt(input)
+                  if (result.enqueued) selectJob(result.job.id)
+                  return result
+                }}
               />
             ) : (
               <DashboardPanels

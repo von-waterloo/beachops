@@ -126,11 +126,41 @@ h2 {
 }
 
 .top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
   min-height: 64px;
   padding: 12px 18px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  background: color-mix(in srgb, var(--canvas) 88%, transparent);
+  backdrop-filter: blur(18px);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.app-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface-glass);
+  font-size: 0.68rem;
+  font-weight: 680;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.app-badge i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .brand {
@@ -854,8 +884,9 @@ main {
 
 .composer-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr auto;
   gap: 8px;
+  align-items: center;
 }
 
 .composer-row input {
@@ -868,10 +899,95 @@ main {
   background: var(--surface-high);
 }
 
+.composer-attach,
+.ghost-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--surface-high) 88%, transparent);
+  cursor: pointer;
+  font: inherit;
+}
+
+.composer-attach:disabled,
+.ghost-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .composer-send {
   width: 44px;
   min-height: 44px;
   padding: 0;
+}
+
+.attachment-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.voice-attach-row {
+  justify-content: center;
+  margin-top: 10px;
+}
+
+.attachment-thumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface-high);
+  cursor: pointer;
+}
+
+.attachment-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.attachment-thumb svg {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  color: white;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
+}
+
+.composer-actions {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.orb-button.is-attach {
+  border-color: color-mix(in srgb, var(--cyan) 45%, var(--line));
+}
+
+.orb-button.is-attach .orb-halo {
+  background: color-mix(in srgb, var(--cyan) 28%, transparent);
+}
+
+.voice-stage.is-attach {
+  border-color: color-mix(in srgb, var(--cyan) 28%, var(--line));
+}
+
+.privacy-chip.is-attach {
+  color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 35%, var(--line));
 }
 
 .transcript-card {
