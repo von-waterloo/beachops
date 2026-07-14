@@ -20,13 +20,20 @@ from beachops.services.run_executor import submit_user_prompt, validate_prompt_r
 from beachops.services.status_animation import AnimatedStatus, initial_status_text
 from beachops.services.telegram_feedback import clear_reaction, mark_received
 from beachops.services.telegram_images import (
+    TelegramDownloadError,
     UnsupportedImageError,
     build_prompt_text,
     download_message_as_sdk_image,
     extract_group_caption,
     message_has_image,
 )
-from beachops.services.ui_copy import photo_error, photo_too_many, photo_unsupported_document
+from beachops.services.ui_copy import (
+    photo_download_timeout,
+    photo_error,
+    photo_partial_download,
+    photo_too_many,
+    photo_unsupported_document,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +226,7 @@ class PromptCoalesceBuffer:
         images: list[SDKImage] = []
         status_msg: Message | None = None
         anchor = photo_messages[0] if photo_messages else None
+        failed_downloads = 0
 
         try:
             if photo_messages:
@@ -235,6 +243,13 @@ class PromptCoalesceBuffer:
                                     "Skipping unsupported image in coalesce",
                                     exc_info=True,
                                 )
+                                failed_downloads += 1
+                            except TelegramDownloadError:
+                                logger.warning(
+                                    "Telegram image download failed in coalesce",
+                                    exc_info=True,
+                                )
+                                failed_downloads += 1
                     try:
                         await status_msg.delete()
                     except BadRequest:
@@ -249,15 +264,24 @@ class PromptCoalesceBuffer:
                                 "Skipping unsupported image in coalesce",
                                 exc_info=True,
                             )
+                            failed_downloads += 1
+                        except TelegramDownloadError:
+                            logger.warning(
+                                "Telegram image download failed in coalesce",
+                                exc_info=True,
+                            )
+                            failed_downloads += 1
 
                 if not images and not texts:
+                    reply = (
+                        photo_download_timeout()
+                        if failed_downloads
+                        else photo_unsupported_document()
+                    )
                     if anchor is not None:
-                        await anchor.reply_text(photo_unsupported_document())
+                        await anchor.reply_text(reply)
                     else:
-                        await context.bot.send_message(
-                            chat_id=user_id,
-                            text=photo_unsupported_document(),
-                        )
+                        await context.bot.send_message(chat_id=user_id, text=reply)
                     return
 
             if len(images) > self._max_images:
@@ -267,12 +291,28 @@ class PromptCoalesceBuffer:
                 )
                 return
 
+            if failed_downloads and images:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=photo_partial_download(failed_downloads, len(photo_messages)),
+                )
+
             await submit_user_prompt(
                 context=context,
                 user_id=user_id,
                 prompt=prompt,
                 images=images or None,
             )
+        except TelegramDownloadError:
+            logger.exception("Prompt coalesce flush failed for user %s", user_id)
+            reply = photo_download_timeout()
+            if status_msg is not None:
+                try:
+                    await status_msg.edit_text(reply)
+                    return
+                except BadRequest:
+                    pass
+            await context.bot.send_message(chat_id=user_id, text=reply)
         except Exception:
             logger.exception("Prompt coalesce flush failed for user %s", user_id)
             if status_msg is not None:

@@ -205,6 +205,20 @@ def photo_error() -> str:
     return "⚠️ Не удалось обработать изображение.\n\nПовторите или отправьте текстом."
 
 
+def photo_download_timeout() -> str:
+    return (
+        "⚠️ Telegram не отдал изображение вовремя.\n\n"
+        "Подождите пару секунд и отправьте снова — или пришлите текстом."
+    )
+
+
+def photo_partial_download(failed: int, total: int) -> str:
+    return (
+        f"📷 Не удалось скачать {failed} из {total} изображений — "
+        "отправляю задачу с остальными."
+    )
+
+
 def photo_unsupported_document() -> str:
     return (
         "📎 Поддерживаются только изображения (PNG, JPEG, WebP, GIF).\n\n"

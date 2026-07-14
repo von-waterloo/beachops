@@ -31,6 +31,7 @@ from beachops.services.telegram_documents import (
     is_supported_document_message,
 )
 from beachops.services.telegram_images import (
+    TelegramDownloadError,
     UnsupportedImageError,
     build_prompt_text,
     download_message_as_sdk_image,
@@ -338,7 +339,7 @@ class ForwardContextBuffer:
                 )
                 try:
                     images.append(await download_message_as_sdk_image(msg))
-                except UnsupportedImageError:
+                except (UnsupportedImageError, TelegramDownloadError):
                     blocks.append(format_forward_text_block(msg, "(image unavailable)"))
             elif item.kind == "album":
                 msg = item.messages[0]
@@ -353,7 +354,7 @@ class ForwardContextBuffer:
                         continue
                     try:
                         images.append(await download_message_as_sdk_image(msg))
-                    except UnsupportedImageError:
+                    except (UnsupportedImageError, TelegramDownloadError):
                         logger.debug("Skip album image", exc_info=True)
             elif item.kind == "voice":
                 msg = item.messages[0]

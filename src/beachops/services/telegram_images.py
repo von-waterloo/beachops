@@ -13,9 +13,11 @@ from typing import Any
 
 from cursor_sdk import SDKImage
 from telegram import Message
+from telegram.error import NetworkError, RetryAfter, TimedOut
 from telegram.ext import ContextTypes
 
 from beachops.app_context import AppContext
+from beachops.config.settings import get_settings
 from beachops.services.ui_copy import photo_default_prompt
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,10 @@ _MAX_WEB_IMAGES = 5
 
 class UnsupportedImageError(Exception):
     """Raised when a message has no supported raster image."""
+
+
+class TelegramDownloadError(Exception):
+    """Raised when Telegram file download fails after retries."""
 
 
 class WebImageError(ValueError):
@@ -162,6 +168,9 @@ def message_has_image(message: Message) -> bool:
 
 async def download_telegram_image(
     message: Message,
+    *,
+    retries: int | None = None,
+    retry_delay_sec: float | None = None,
 ) -> tuple[bytes, str, str]:
     """Download raster image bytes from a Telegram message."""
     file_id = _image_file_id(message)
@@ -172,15 +181,54 @@ async def download_telegram_image(
     if not is_supported_image_mime(mime_type):
         raise UnsupportedImageError(f"unsupported mime: {mime_type}")
 
-    tg_file = await message.get_bot().get_file(file_id)
-    buffer = BytesIO()
-    await tg_file.download_to_memory(out=buffer)
-    data = buffer.getvalue()
-    if not data:
-        raise UnsupportedImageError("empty image download")
+    if retries is None or retry_delay_sec is None:
+        settings = get_settings()
+    max_attempts = retries if retries is not None else settings.telegram_download_retries
+    delay = (
+        retry_delay_sec
+        if retry_delay_sec is not None
+        else settings.telegram_download_retry_delay_sec
+    )
+    last_exc: Exception | None = None
 
-    filename = message.document.file_name if message.document else "photo.jpg"
-    return data, mime_type, filename
+    for attempt in range(max_attempts):
+        try:
+            tg_file = await message.get_bot().get_file(file_id)
+            buffer = BytesIO()
+            await tg_file.download_to_memory(out=buffer)
+            data = buffer.getvalue()
+            if not data:
+                raise UnsupportedImageError("empty image download")
+
+            filename = message.document.file_name if message.document else "photo.jpg"
+            return data, mime_type, filename
+        except UnsupportedImageError:
+            raise
+        except RetryAfter as exc:
+            last_exc = exc
+            wait = float(exc.retry_after) + 0.5
+            logger.warning(
+                "Telegram rate limit while downloading image (attempt %s/%s), wait %.1fs",
+                attempt + 1,
+                max_attempts,
+                wait,
+            )
+            await asyncio.sleep(wait)
+        except (TimedOut, NetworkError) as exc:
+            last_exc = exc
+            if attempt + 1 >= max_attempts:
+                break
+            wait = delay * (attempt + 1)
+            logger.warning(
+                "Telegram image download failed (attempt %s/%s): %s; retry in %.1fs",
+                attempt + 1,
+                max_attempts,
+                exc,
+                wait,
+            )
+            await asyncio.sleep(wait)
+
+    raise TelegramDownloadError("telegram image download failed") from last_exc
 
 
 async def download_message_as_sdk_image(message: Message) -> SDKImage:

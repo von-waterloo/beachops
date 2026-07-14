@@ -204,6 +204,48 @@ class Settings(BaseSettings):
         ge=0.0,
         le=30.0,
     )
+    telegram_connect_timeout_sec: float = Field(
+        default=30.0,
+        alias="TELEGRAM_CONNECT_TIMEOUT_SEC",
+        ge=5.0,
+        le=120.0,
+    )
+    telegram_read_timeout_sec: float = Field(
+        default=90.0,
+        alias="TELEGRAM_READ_TIMEOUT_SEC",
+        ge=10.0,
+        le=300.0,
+    )
+    telegram_write_timeout_sec: float = Field(
+        default=90.0,
+        alias="TELEGRAM_WRITE_TIMEOUT_SEC",
+        ge=10.0,
+        le=300.0,
+    )
+    telegram_pool_timeout_sec: float = Field(
+        default=30.0,
+        alias="TELEGRAM_POOL_TIMEOUT_SEC",
+        ge=5.0,
+        le=120.0,
+    )
+    telegram_get_updates_timeout_sec: float = Field(
+        default=30.0,
+        alias="TELEGRAM_GET_UPDATES_TIMEOUT_SEC",
+        ge=10.0,
+        le=120.0,
+    )
+    telegram_download_retries: int = Field(
+        default=4,
+        alias="TELEGRAM_DOWNLOAD_RETRIES",
+        ge=1,
+        le=8,
+    )
+    telegram_download_retry_delay_sec: float = Field(
+        default=2.0,
+        alias="TELEGRAM_DOWNLOAD_RETRY_DELAY_SEC",
+        ge=0.5,
+        le=15.0,
+    )
     forward_context_timeout_sec: float = Field(default=25.0, alias="FORWARD_CONTEXT_TIMEOUT_SEC")
     forward_context_max_items: int = Field(default=25, alias="FORWARD_CONTEXT_MAX_ITEMS")
     agent_slots_max: int = Field(default=8, alias="AGENT_SLOTS_MAX", ge=5, le=10)
