@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from beachops.app_context import AppContext
 from beachops.domain.cursor_tokens import normalize_cursor_token_key
 from beachops.domain.security import JobStatus
+from beachops.services.queue_notice import dismiss_queue_notice
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,12 +33,22 @@ def cancel_was_successful(
     )
 
 
-async def cancel_user_work(app: AppContext, user_id: int) -> CancelOutcome:
+async def cancel_user_work(
+    app: AppContext,
+    user_id: int,
+    *,
+    bot=None,
+) -> CancelOutcome:
     cleared_legacy = app.job_queue.clear_pending(user_id)
     app.job_queue.request_cancel(user_id)
     await app.cancel_store.request_cancel(user_id)
 
+    queued_jobs = await app.jobs.list_queued_for_actor(user_id)
     cancelled_queued = await app.jobs.cancel_queued_for_actor(user_id)
+    if bot is not None:
+        for job in queued_jobs:
+            await dismiss_queue_notice(bot, app, job_id=job.id)
+        await dismiss_queue_notice(bot, app, user_id=user_id)
     cleared = cleared_legacy + cancelled_queued
 
     slot = await app.agent_slots.get_active(user_id)

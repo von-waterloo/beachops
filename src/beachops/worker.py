@@ -18,6 +18,7 @@ from beachops.services.run_observer import RunObserverRegistry, observe_and_fina
 from beachops.services.run_reconciler import RunReconciler
 from beachops.services.notification_notifier import NotificationNotifier
 from beachops.services.durable_run import launch_durable_cloud_job
+from beachops.services.queue_notice import dismiss_queue_notice
 
 logger = logging.getLogger(__name__)
 
@@ -328,7 +329,7 @@ async def _execute_locked(
         mode = UserMode(str(payload["mode"]))
         prompt = str(payload["prompt"])
     except (KeyError, ValueError) as exc:
-        await _fail_job(app, job, "invalid encrypted payload")
+        await _fail_job(app, bot, job, "invalid encrypted payload")
         raise RuntimeError("invalid job payload") from exc
 
     from beachops.services.telegram_images import WebImageError, decode_payload_images
@@ -337,7 +338,7 @@ async def _execute_locked(
     try:
         images = decode_payload_images(payload.get("images"))
     except WebImageError:
-        await _fail_job(app, job, "invalid images payload")
+        await _fail_job(app, bot, job, "invalid images payload")
         await bot.send_message(
             chat_id=job.actor_id,
             text="⚠️ Не удалось прочитать вложения. Пришлите скрины ещё раз.",
@@ -346,7 +347,7 @@ async def _execute_locked(
 
     run_context = await app.agent_slots.get_run_context(job.actor_id)
     if run_context is None:
-        await _fail_job(app, job, "repository context is unavailable")
+        await _fail_job(app, bot, job, "repository context is unavailable")
         await bot.send_message(
             chat_id=job.actor_id,
             text="Репозиторий или агент для задачи больше не доступен.",
@@ -364,6 +365,8 @@ async def _execute_locked(
     )
     if transitioned is None:
         return
+
+    await dismiss_queue_notice(bot, app, job_id=job.id)
 
     context = SimpleNamespace(
         application=SimpleNamespace(bot_data={"app": app}),
@@ -423,13 +426,14 @@ async def _execute_locked(
             )
             await app.arq.enqueue_job("execute_job", str(job.id), _defer_by=15)
             return
-        await _fail_job(app, transitioned, reason)
+        await _fail_job(app, bot, transitioned, reason)
     finally:
         clear_log_context()
         bind_log_context(service="worker")
 
 
-async def _fail_job(app: AppContext, job, reason: str | None) -> None:
+async def _fail_job(app: AppContext, bot: Bot, job, reason: str | None) -> None:
+    await dismiss_queue_notice(bot, app, job_id=job.id)
     await app.jobs.transition(
         job.actor_id,
         job.id,

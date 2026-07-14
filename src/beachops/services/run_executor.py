@@ -20,6 +20,11 @@ from beachops.services.job_queue import RunCancelled, SubmitInfo, SubmitResult
 from beachops.services.stream_bridge import StreamState
 from beachops.services.stream_display import resolve_thinking_display
 from beachops.services.telegram_renderer import TelegramStreamRenderer, send_placeholder
+from beachops.services.queue_notice import (
+    dismiss_queue_notice,
+    remember_queue_notice,
+    should_show_queue_notice,
+)
 from beachops.services.ui_copy import (
     access_denied_mode,
     agent_cursor_link,
@@ -244,12 +249,21 @@ async def submit_user_prompt(
             )
             return SubmitInfo(SubmitResult.REJECTED)
         position = await app.jobs.queue_position(user_id, dispatched.job.id)
-        # No "Задача принята · uuid" ack — the run placeholder is enough.
-        # Only notify when the user is waiting behind another job.
-        if position > 1:
-            await context.bot.send_message(
+        show_notice, display_position = await should_show_queue_notice(
+            app,
+            user_id,
+            dispatched.job.id,
+        )
+        if show_notice:
+            sent = await context.bot.send_message(
                 chat_id=user_id,
-                text=queued_message(position),
+                text=queued_message(display_position),
+            )
+            await remember_queue_notice(
+                app,
+                job_id=dispatched.job.id,
+                chat_id=sent.chat_id,
+                message_id=sent.message_id,
             )
         return SubmitInfo(
             SubmitResult.QUEUED,
@@ -271,9 +285,15 @@ async def submit_user_prompt(
 
     info = await app.job_queue.submit(user_id, job)
     if info.result == SubmitResult.QUEUED:
-        await context.bot.send_message(
+        sent = await context.bot.send_message(
             chat_id=user_id,
             text=queued_message(info.queue_position),
+        )
+        await remember_queue_notice(
+            app,
+            user_id=user_id,
+            chat_id=sent.chat_id,
+            message_id=sent.message_id,
         )
     elif info.result == SubmitResult.REJECTED and notify_queue_full:
         await context.bot.send_message(chat_id=user_id, text=queue_full_message())
@@ -313,6 +333,7 @@ async def _run_job(
     )
     app.job_queue.clear_cancel(user_id)
     await app.cancel_store.clear_cancel(user_id)
+    await dismiss_queue_notice(context.bot, app, user_id=user_id)
 
     is_admin = app.settings.is_admin(user_id)
     thinking_display = resolve_thinking_display(

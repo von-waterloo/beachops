@@ -50,7 +50,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     cleared_albums = 0
     if media_groups is not None:
         cleared_albums = await media_groups.clear_for_user(user.id)
-    outcome = await cancel_user_work(app, user.id)
+    outcome = await cancel_user_work(app, user.id, bot=context.bot)
     if cancel_was_successful(
         outcome,
         cleared_forward=bool(cleared_forward),

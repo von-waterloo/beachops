@@ -464,7 +464,7 @@ async def _handle_cancel(query, context, app: AppContext, user_id: int) -> None:
     await query.answer(cancel_inline_answer())
     cleared_forward = await clear_forward_context(context, user_id)
     cleared_coalesce = await clear_prompt_coalesce(context, user_id)
-    outcome = await cancel_user_work(app, user_id)
+    outcome = await cancel_user_work(app, user_id, bot=context.bot)
 
     if cancel_was_successful(
         outcome,

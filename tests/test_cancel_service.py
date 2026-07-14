@@ -41,6 +41,7 @@ async def test_cancel_user_work_clears_active_run_even_if_api_returns_false() ->
             request_cancel=AsyncMock(),
         ),
         jobs=SimpleNamespace(
+            list_queued_for_actor=AsyncMock(return_value=[]),
             cancel_queued_for_actor=AsyncMock(return_value=0),
             latest_active_for_actor=AsyncMock(return_value=None),
         ),
