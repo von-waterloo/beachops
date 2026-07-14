@@ -478,6 +478,20 @@ main {
   cursor: default;
 }
 
+.voice-stage-top .voice-mode-toggle-top {
+  flex: 1 1 auto;
+  min-width: 0;
+  pointer-events: auto;
+  margin-right: 8px;
+}
+
+.voice-mode-toggle-top button {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 9px;
+  font-size: 0.72rem;
+}
+
 .voice-stage-footer {
   position: relative;
   width: 100%;
@@ -588,17 +602,16 @@ main {
 
 .orb-swipe-hint {
   flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 6px;
   min-width: 44px;
   color: color-mix(in srgb, var(--muted) 88%, transparent);
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   font-weight: 650;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   opacity: 0.62;
   pointer-events: none;
   user-select: none;
@@ -606,6 +619,19 @@ main {
     opacity 180ms var(--ease-out),
     color 180ms var(--ease-out),
     transform 180ms var(--ease-out);
+}
+
+.orb-swipe-hint span {
+  white-space: nowrap;
+}
+
+.orb-drag-wrap {
+  flex: 0 0 auto;
+  will-change: transform;
+}
+
+.orb-row .orb-drag-wrap .orb-button {
+  pointer-events: auto;
 }
 
 .orb-swipe-hint.is-left.is-armed {

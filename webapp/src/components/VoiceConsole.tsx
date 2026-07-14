@@ -5,7 +5,6 @@ import {
   ArrowRight,
   Captions,
   Check,
-  Cloud,
   Expand,
   ImagePlus,
   Mic,
@@ -31,9 +30,10 @@ import {
   type PromptAttachment,
 } from '../lib/promptAttachments'
 import { JobChatPanel } from './JobChatPanel'
+import { readVoiceMode, writeVoiceMode } from '../lib/voiceMode'
 
-const CANCEL_SWIPE_PX = 72
-const ATTACH_SWIPE_PX = 72
+const CANCEL_SWIPE_PX = 56
+const ATTACH_SWIPE_PX = 56
 const MODEL_PREVIEW_COUNT = 4
 
 const phaseLabels: Record<VoicePhase, string> = {
@@ -46,8 +46,9 @@ const phaseLabels: Record<VoicePhase, string> = {
   error: 'Сбой',
 }
 
-const modeLabels: Record<'ask' | 'do', string> = {
+const modeLabels: Record<VoiceAgentMode, string> = {
   ask: 'Чат',
+  plan: 'План',
   do: 'Действие',
 }
 
@@ -105,7 +106,7 @@ export function VoiceConsole({
   const [modelBusy, setModelBusy] = useState(false)
   const [modelsExpanded, setModelsExpanded] = useState(false)
   const [rippleKey, setRippleKey] = useState(0)
-  const [agentMode, setAgentMode] = useState<VoiceAgentMode>('ask')
+  const [agentMode, setAgentMode] = useState<VoiceAgentMode>(() => readVoiceMode())
   const [dragX, setDragX] = useState(0)
   const [cancelArmed, setCancelArmed] = useState(false)
   const [attachArmed, setAttachArmed] = useState(false)
@@ -152,6 +153,10 @@ export function VoiceConsole({
   const { state } = voice
 
   useEffect(() => {
+    voice.setMode(agentMode)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- hydrate persisted mode once
+
+  useEffect(() => {
     if (cursorModelKey) setSelectedModel(cursorModelKey)
   }, [cursorModelKey])
 
@@ -174,7 +179,7 @@ export function VoiceConsole({
   const active = ['listening', 'transcribing', 'planning', 'speaking'].includes(state.phase)
   const canStart = ['idle', 'error', 'planning', 'speaking'].includes(state.phase)
   const showComposer = ['idle', 'error', 'planning', 'speaking'].includes(state.phase)
-  const modeLocked = ['listening', 'transcribing'].includes(state.phase)
+  const modeLocked = state.phase === 'transcribing'
 
   useEffect(() => {
     if (reducedMotion || state.phase === 'listening') return undefined
@@ -252,10 +257,11 @@ export function VoiceConsole({
     fileInputRef.current?.click()
   }
 
-  const handleMode = (mode: 'ask' | 'do') => {
+  const handleMode = (mode: VoiceAgentMode) => {
     if (modeLocked || mode === agentMode) return
     feedback('select')
     setAgentMode(mode)
+    writeVoiceMode(mode)
     voice.setMode(mode)
   }
 
@@ -288,8 +294,14 @@ export function VoiceConsole({
     setDragX(delta)
     const cancel = delta <= -CANCEL_SWIPE_PX
     const attach = delta >= ATTACH_SWIPE_PX
-    if (cancel !== cancelArmed) setCancelArmed(cancel)
-    if (attach !== attachArmed) setAttachArmed(attach)
+    if (cancel !== cancelArmed) {
+      if (cancel) feedback('select')
+      setCancelArmed(cancel)
+    }
+    if (attach !== attachArmed) {
+      if (attach) feedback('select')
+      setAttachArmed(attach)
+    }
   }
 
   const onOrbPointerUp = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -454,14 +466,20 @@ export function VoiceConsole({
         />
 
         <div className="voice-stage-top">
-          {!isListening && activeJob ? (
-            <div className="job-chip" role="status">
-              <Cloud size={12} />
-              <span>{activeJob.title.slice(0, 36)}</span>
-            </div>
-          ) : (
-            <span className="voice-stage-top-spacer" aria-hidden="true" />
-          )}
+          <div className="voice-mode-toggle voice-mode-toggle-top" role="toolbar" aria-label="Режим">
+            {(['ask', 'plan', 'do'] as const).map((item) => (
+              <button
+                key={item}
+                type="button"
+                className={agentMode === item ? 'selected' : ''}
+                aria-pressed={agentMode === item}
+                disabled={modeLocked}
+                onClick={() => handleMode(item)}
+              >
+                {modeLabels[item]}
+              </button>
+            ))}
+          </div>
           <div className="voice-stage-top-actions">
             {!isListening && (
               <div className="connection-chip">
@@ -484,33 +502,22 @@ export function VoiceConsole({
         </div>
 
         <div className="voice-stage-center">
-          <div className="voice-mode-toggle" role="toolbar" aria-label="Режим">
-            {(['ask', 'do'] as const).map((item) => (
-              <button
-                key={item}
-                type="button"
-                className={agentMode === item ? 'selected' : ''}
-                aria-pressed={agentMode === item}
-                disabled={modeLocked}
-                onClick={() => handleMode(item)}
-              >
-                {modeLabels[item]}
-              </button>
-            ))}
-          </div>
-
           <div className="orb-row">
             {isListening && (
               <div
                 className={`orb-swipe-hint is-left${cancelArmed ? ' is-armed' : ''}`}
                 aria-hidden="true"
               >
-                <ArrowLeft size={18} strokeWidth={2.2} />
-                <X size={15} />
+                <ArrowLeft size={17} strokeWidth={2.2} />
+                <X size={14} />
                 <span>Отмена</span>
               </div>
             )}
 
+          <div
+            className="orb-drag-wrap"
+            style={isListening ? { transform: `translateX(${dragX}px)` } : undefined}
+          >
           <motion.button
             type="button"
             className={`orb-button${cancelArmed ? ' is-cancel' : ''}${attachArmed ? ' is-attach' : ''}`}
@@ -532,10 +539,9 @@ export function VoiceConsole({
             whileTap={reducedMotion || state.phase === 'listening' ? undefined : { scale: 0.9 }}
             whileHover={reducedMotion ? undefined : { scale: 1.03 }}
             animate={{
-              x: state.phase === 'listening' ? dragX * 0.45 : 0,
               scale: 1 + displayEnergy * (state.phase === 'listening' ? 0.06 : 0.02),
             }}
-            transition={{ type: 'spring', stiffness: 460, damping: 24 }}
+            transition={{ type: 'spring', stiffness: 520, damping: 28 }}
           >
             {!reducedMotion && rippleKey > 0 && (
               <span key={`ripple-${rippleKey}`} className="orb-ripple is-firing" aria-hidden="true" />
@@ -567,15 +573,16 @@ export function VoiceConsole({
                 : <Mic size={30} />}
             </span>
           </motion.button>
+          </div>
 
             {isListening && (
               <div
                 className={`orb-swipe-hint is-right${attachArmed ? ' is-armed' : ''}`}
                 aria-hidden="true"
               >
-                <ArrowRight size={18} strokeWidth={2.2} />
-                <ImagePlus size={15} />
                 <span>Скрин</span>
+                <ImagePlus size={14} />
+                <ArrowRight size={17} strokeWidth={2.2} />
               </div>
             )}
           </div>
@@ -717,7 +724,13 @@ export function VoiceConsole({
               type="text"
               value={composer}
               maxLength={4000}
-              placeholder={agentMode === 'do' ? 'Что сделать в репо.' : 'Короткий вопрос.'}
+              placeholder={
+                agentMode === 'do'
+                  ? 'Что сделать в репо.'
+                  : agentMode === 'plan'
+                    ? 'Что спланировать.'
+                    : 'Короткий вопрос.'
+              }
               onChange={(event) => setComposer(event.target.value)}
               onPaste={onPasteImages}
               onKeyDown={(event) => {
@@ -797,7 +810,9 @@ export function VoiceConsole({
             <p className="security-note">
               {agentMode === 'do'
                 ? 'Режим действия: после отправки агент пойдёт в репо.'
-                : 'Режим чата: ответит коротко, код не меняет.'}
+                : agentMode === 'plan'
+                  ? 'Режим плана: агент соберёт план без правок кода.'
+                  : 'Режим чата: ответит коротко, код не меняет.'}
             </p>
             <div className="action-row">
               <button className="secondary-button" type="button" onClick={voice.cancel}>
