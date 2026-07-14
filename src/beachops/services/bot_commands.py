@@ -26,7 +26,7 @@ def bot_commands(*, is_admin: bool, is_owner: bool = False) -> list[BotCommand]:
         commands.extend(
             [
                 BotCommand("plan", "Режим · план"),
-                BotCommand("do", "Режим · действие"),
+                BotCommand("do", "Режим · агент"),
                 BotCommand("task", "Задача · через план"),
             ]
         )

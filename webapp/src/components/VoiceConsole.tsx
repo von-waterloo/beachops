@@ -5,8 +5,6 @@ import {
   ArrowRight,
   Captions,
   Check,
-  Cloud,
-  Expand,
   ImagePlus,
   Mic,
   MicOff,
@@ -15,7 +13,6 @@ import {
   Square,
   X,
 } from 'lucide-react'
-import { requestTelegramFullscreen } from '../lib/telegram'
 import { feedback } from '../lib/feedback'
 import { setCursorModel, type CursorModelOption } from '../lib/passkeys'
 import { useVoiceSession } from '../voice/useVoiceSession'
@@ -50,7 +47,7 @@ const phaseLabels: Record<VoicePhase, string> = {
 const modeLabels: Record<VoiceAgentMode, string> = {
   ask: 'Чат',
   plan: 'План',
-  do: 'Действие',
+  do: 'Агент',
 }
 
 const confirmLabels: Record<VoiceAgentMode, string> = {
@@ -203,7 +200,7 @@ export function VoiceConsole({
   const planningLabel = agentMode === 'ask'
     ? 'Чат'
     : agentMode === 'do'
-      ? 'Действие'
+      ? 'Агент'
       : 'План'
 
   const isListening = state.phase === 'listening'
@@ -466,21 +463,6 @@ export function VoiceConsole({
         />
 
         <div className="voice-stage-top">
-          <div className="voice-stage-top-left">
-            {activeJob ? (
-              <div className="job-chip" role="status" title={activeJob.title}>
-                <Cloud size={12} />
-                <span>{activeJob.title.slice(0, 28)}</span>
-              </div>
-            ) : !isListening ? (
-              <div className="connection-chip">
-                <span className={state.connected ? 'online-dot' : 'offline-dot'} />
-                {state.connected ? 'На связи' : 'Переподключаюсь'}
-              </div>
-            ) : (
-              <span className="voice-stage-top-spacer" aria-hidden="true" />
-            )}
-          </div>
           <div className="voice-mode-toggle voice-mode-toggle-top" role="toolbar" aria-label="Режим">
             {(['ask', 'plan', 'do'] as const).map((item) => (
               <button
@@ -493,19 +475,6 @@ export function VoiceConsole({
                 {modeLabels[item]}
               </button>
             ))}
-          </div>
-          <div className="voice-stage-top-actions">
-            <button
-              className="icon-button icon-button-compact"
-              type="button"
-              aria-label="На весь экран"
-              onClick={() => {
-                feedback('tap')
-                requestTelegramFullscreen()
-              }}
-            >
-              <Expand size={16} />
-            </button>
           </div>
         </div>
 
@@ -817,9 +786,9 @@ export function VoiceConsole({
             </div>
             <p className="security-note">
               {agentMode === 'do'
-                ? 'Режим действия: после отправки агент пойдёт в репо.'
+                ? 'Режим агента: после отправки пойдёт в репо.'
                 : agentMode === 'plan'
-                  ? 'Режим плана: агент соберёт план без правок кода.'
+                  ? 'Режим плана: соберёт план без правок кода.'
                   : 'Режим чата: ответит коротко, код не меняет.'}
             </p>
             <div className="action-row">
@@ -857,7 +826,7 @@ export function VoiceConsole({
 
       {state.phase === 'planning' && agentMode === 'do' && (
         <div className="plan-safety" role="status">
-          <Check size={17} /> Действие: пишу и пушу в выбранную базу.
+          <Check size={17} /> Агент: пишу в выбранную базу; push — только если явно попросишь.
         </div>
       )}
 

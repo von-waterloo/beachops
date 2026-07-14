@@ -133,7 +133,7 @@ def _mode_buttons(*, is_admin: bool, current: UserMode) -> list[InlineKeyboardBu
     row: list[InlineKeyboardButton] = []
     for mode in modes:
         label = MODE_LABELS.get(mode.value, mode.value).capitalize()
-        # Leading checkmark + no emoji — keeps "✓ Действие" visible on narrow screens.
+        # Leading checkmark + no emoji — keeps "✓ Агент" visible on narrow screens.
         prefix = "✓ " if mode == current else ""
         row.append(
             InlineKeyboardButton(

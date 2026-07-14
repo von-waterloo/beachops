@@ -36,7 +36,7 @@ def test_mode_buttons_leading_checkmark_no_icons() -> None:
     assert mode_row[0].text == "Чат"
     assert mode_row[1].text == "✓ План"
     assert mode_row[1].callback_data == f"{CB_MODE_PREFIX}plan"
-    assert mode_row[2].text == "Действие"
+    assert mode_row[2].text == "Агент"
     assert mode_row[2].callback_data == f"{CB_MODE_PREFIX}do"
     assert all("❓" not in b.text and "📋" not in b.text and "⚡" not in b.text for b in mode_row)
 

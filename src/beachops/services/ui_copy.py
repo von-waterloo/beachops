@@ -7,7 +7,7 @@ from beachops.domain.models import AgentSlot, MemoryEntry, RepoConfig, UserMode
 MODE_LABELS: dict[str, str] = {
     "ask": "чат",
     "plan": "план",
-    "do": "действие",
+    "do": "агент",
 }
 
 MODE_ICONS: dict[str, str] = {

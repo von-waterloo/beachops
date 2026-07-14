@@ -56,7 +56,9 @@ def test_do_mode_includes_git_safety_and_guidance() -> None:
     assert git_safety_prefix(default_branch="dev") in text
     assert "Переиспользуй" in text
     assert "не раздувай scope" in text
+    assert "Режим агента" in text
     assert "делай сразу и смело" in text
+    assert "push в dev — только по явной просьбе owner" in text
     assert "кайф" in text
     assert "Миграции БД не запускай" in text
     assert "project-skills" in text

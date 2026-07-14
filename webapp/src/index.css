@@ -414,15 +414,15 @@ main {
 }
 
 .voice-stage-top {
-  display: grid;
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
   min-height: 36px;
   flex: 0 0 auto;
   position: relative;
   z-index: 10;
   pointer-events: auto;
+  width: 100%;
 }
 
 .voice-stage-top-left {
@@ -499,9 +499,8 @@ main {
 
 .voice-stage-top .voice-mode-toggle-top {
   min-width: 0;
-  width: 100%;
+  width: min(100%, 280px);
   pointer-events: auto;
-  justify-self: stretch;
 }
 
 .voice-mode-toggle-top button {
