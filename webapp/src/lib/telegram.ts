@@ -58,11 +58,17 @@ export function applyBeachOpsDarkTheme(): void {
   }
 }
 
+let lastSafeAreaKey = ''
+
 function applySafeAreaInsets(): void {
   const app = telegram()
   const root = document.documentElement
   const inset = app?.safeAreaInset ?? app?.contentSafeAreaInset
   if (!inset) return
+
+  const key = `${inset.top}|${inset.bottom}|${inset.left}|${inset.right}`
+  if (key === lastSafeAreaKey) return
+  lastSafeAreaKey = key
 
   root.style.setProperty('--tg-safe-area-inset-top', `${inset.top}px`)
   root.style.setProperty('--tg-safe-area-inset-bottom', `${inset.bottom}px`)

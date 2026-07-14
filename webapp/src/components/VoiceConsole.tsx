@@ -392,24 +392,7 @@ export function VoiceConsole({
   }
 
   return (
-    <section className="voice-console" aria-labelledby="voice-heading">
-      <header className="voice-heading">
-        <div>
-          <p className="eyebrow">Диалог</p>
-          <h1 id="voice-heading">BeachOps</h1>
-        </div>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label="На весь экран"
-          onClick={() => {
-            feedback('tap')
-            requestTelegramFullscreen()
-          }}
-        >
-          <Expand size={18} />
-        </button>
-      </header>
+    <section className="voice-console" aria-label="Диалог">
 
       {models.length > 0 && (
         <div className="model-picker" role="group" aria-label="Модель Cursor">
@@ -476,12 +459,25 @@ export function VoiceConsole({
           ) : (
             <span className="voice-stage-top-spacer" aria-hidden="true" />
           )}
-          {!isListening && (
-            <div className="connection-chip">
-              <span className={state.connected ? 'online-dot' : 'offline-dot'} />
-              {state.connected ? 'На связи' : 'Переподключаюсь'}
-            </div>
-          )}
+          <div className="voice-stage-top-actions">
+            {!isListening && (
+              <div className="connection-chip">
+                <span className={state.connected ? 'online-dot' : 'offline-dot'} />
+                {state.connected ? 'На связи' : 'Переподключаюсь'}
+              </div>
+            )}
+            <button
+              className="icon-button icon-button-compact"
+              type="button"
+              aria-label="На весь экран"
+              onClick={() => {
+                feedback('tap')
+                requestTelegramFullscreen()
+              }}
+            >
+              <Expand size={16} />
+            </button>
+          </div>
         </div>
 
         <div className="voice-stage-center">

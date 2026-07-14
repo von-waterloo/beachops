@@ -135,9 +135,12 @@ h2 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: color-mix(in srgb, var(--canvas) 88%, transparent);
-  backdrop-filter: blur(18px);
+  background: color-mix(in srgb, var(--canvas) 94%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  contain: layout style;
 }
 
 .app-badge {
@@ -394,6 +397,20 @@ main {
     var(--shadow),
     inset 0 1px rgba(255, 255, 255, 0.05),
     0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.voice-stage-top-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  z-index: 2;
+}
+
+.icon-button-compact {
+  width: 32px;
+  height: 32px;
+  border-radius: 11px;
 }
 
 .voice-stage-top {
@@ -1964,6 +1981,11 @@ button.work-card.is-selected {
   to { transform: translate(-50%, -50%) rotate(16deg) scale(1.12); border-radius: 57% 43% 43% 57% / 41% 54% 46% 59%; }
 }
 
+@keyframes hero-glow-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.75; }
+}
+
 @keyframes orb-glow {
   0%, 100% { opacity: 0.32; }
   50% { opacity: 0.62; }
@@ -2025,6 +2047,16 @@ button.work-card.is-selected {
 
 @keyframes skeleton {
   to { background-position-x: -160%; }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .top-bar,
+  .tab-bar,
+  .worker-strip {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--surface);
+  }
 }
 
 @media (min-width: 681px) {
@@ -2104,6 +2136,8 @@ button.work-card.is-selected {
   border-radius: 20px;
   color: #f2faf6;
   background: linear-gradient(160deg, #1a3a34 0%, #0b1613 100%);
+  contain: layout style paint;
+  transform: translateZ(0);
 }
 
 .control-hero-copy h1 {
@@ -2120,6 +2154,11 @@ button.work-card.is-selected {
   line-height: 1.35;
 }
 
+.control-hero-copy {
+  position: relative;
+  z-index: 1;
+}
+
 .control-hero-glow {
   position: absolute;
   inset: -40% auto auto 40%;
@@ -2128,6 +2167,13 @@ button.work-card.is-selected {
   border-radius: 50%;
   background: radial-gradient(circle, rgba(72, 255, 198, 0.28), transparent 70%);
   pointer-events: none;
+  z-index: 0;
+  opacity: 0.28;
+  will-change: opacity;
+}
+
+.control-hero-glow.is-live {
+  animation: hero-glow-pulse 2.6s ease-in-out infinite;
 }
 
 .control-hero-copy .eyebrow {
@@ -2139,6 +2185,8 @@ button.work-card.is-selected {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-top: 14px;
+  position: relative;
+  z-index: 1;
 }
 
 .control-metrics article,

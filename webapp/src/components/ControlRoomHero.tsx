@@ -1,4 +1,4 @@
-import { motion } from 'motion/react'
+import { memo } from 'react'
 import { CloudLightning, Layers3 } from 'lucide-react'
 import type { RuntimeFilter } from '../lib/runtimeFilter'
 import { feedback } from '../lib/feedback'
@@ -11,7 +11,7 @@ interface Props {
   onSelectFilter: (filter: RuntimeFilter, tabHint?: 'active' | 'voice' | 'agents') => void
 }
 
-export function ControlRoomHero({
+export const ControlRoomHero = memo(function ControlRoomHero({
   running,
   pending,
   cloudJobs,
@@ -25,10 +25,9 @@ export function ControlRoomHero({
 
   return (
     <section className="control-hero" aria-label="Статус агентов">
-      <motion.div
-        className="control-hero-glow"
-        animate={{ opacity: running > 0 ? [0.4, 0.75, 0.4] : 0.28 }}
-        transition={{ duration: 2.6, repeat: Infinity, ease: 'easeInOut' }}
+      <div
+        className={`control-hero-glow${running > 0 ? ' is-live' : ''}`}
+        aria-hidden="true"
       />
       <div className="control-hero-copy">
         <p className="eyebrow">Ваши агенты</p>
@@ -67,4 +66,4 @@ export function ControlRoomHero({
       </div>
     </section>
   )
-}
+})
