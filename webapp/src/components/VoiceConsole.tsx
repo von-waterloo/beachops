@@ -639,8 +639,15 @@ export function VoiceConsole({
         </div>
       </div>
 
+      <JobChatPanel
+        jobId={activeJob?.id ?? null}
+        enabled={Boolean(activeJob?.id)}
+        liveCaption={state.caption}
+        pollMs={1_500}
+      />
+
       {showComposer && (
-        <div className="composer-card">
+        <div className="composer-card voice-manual-compose">
           <label htmlFor="voice-composer">
             {state.phase === 'planning' || state.phase === 'speaking'
               ? 'Ещё в очередь'
@@ -817,13 +824,6 @@ export function VoiceConsole({
           </p>
         </>
       )}
-
-      <JobChatPanel
-        jobId={activeJob?.id ?? null}
-        enabled={Boolean(activeJob?.id)}
-        liveCaption={state.caption}
-        pollMs={1_500}
-      />
     </section>
   )
 }
