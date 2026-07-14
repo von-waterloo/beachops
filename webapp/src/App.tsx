@@ -33,8 +33,8 @@ import { isActiveJobStatus } from './types/api'
 
 const tabs: Array<{ id: TabId; label: string; icon: typeof LayoutDashboard }> = [
   { id: 'voice', label: 'Голос', icon: LayoutDashboard },
-  { id: 'active', label: 'Актив', icon: Activity },
   { id: 'agents', label: 'Агенты', icon: Bot },
+  { id: 'active', label: 'Актив', icon: Activity },
   { id: 'repositories', label: 'Репо', icon: GitBranch },
 ]
 

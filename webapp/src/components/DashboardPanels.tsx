@@ -1137,24 +1137,26 @@ export function DashboardPanels({
   }
 
   return (
-    <section className="panel-page">
-      <header className="panel-header">
-        <div>
-          <p className="eyebrow">BeachOps</p>
-          <h1>{PANEL_TITLES[tab]}</h1>
-        </div>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label="Обновить"
-          onClick={() => {
-            feedback('tap')
-            onRefresh()
-          }}
-        >
-          <RefreshCw size={17} />
-        </button>
-      </header>
+    <section className={`panel-page${tab === 'agents' ? ' panel-page-agents' : ''}`}>
+      {tab !== 'agents' && (
+        <header className="panel-header">
+          <div>
+            <p className="eyebrow">BeachOps</p>
+            <h1>{PANEL_TITLES[tab]}</h1>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Обновить"
+            onClick={() => {
+              feedback('tap')
+              onRefresh()
+            }}
+          >
+            <RefreshCw size={17} />
+          </button>
+        </header>
+      )}
 
       {error && <div className="inline-error" role="alert">{error}</div>}
 
