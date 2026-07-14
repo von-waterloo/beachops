@@ -73,7 +73,10 @@ function voiceErrorMessage(event: VoiceEvent): string {
   return 'Voice service unavailable'
 }
 
-export function useVoiceSession() {
+export function useVoiceSession(options?: {
+  shouldDeferAutoDispatch?: () => boolean
+  onDeferredAutoDispatch?: (text: string, mode: VoiceAgentMode) => void | Promise<void>
+}) {
   const [state, dispatch] = useReducer(voiceReducer, initialVoiceState)
   const [energy, setEnergy] = useState(0)
   const [spectrum, setSpectrum] = useState<number[]>(() => Array(SPECTRUM_BAR_COUNT).fill(0.04))
@@ -98,6 +101,8 @@ export function useVoiceSession() {
   const modeRef = useRef<VoiceAgentMode>('ask')
   const requireConfirmRef = useRef(false)
   const pcmPlayerRef = useRef<PcmStreamPlayer | null>(null)
+  const optionsRef = useRef(options)
+  optionsRef.current = options
 
   useEffect(() => {
     pcmPlayerRef.current = new PcmStreamPlayer(() => {
@@ -159,12 +164,18 @@ export function useVoiceSession() {
         dispatch({ type: 'FINAL', text: event.text ?? '', mode: modeRef.current })
         feedback('success')
         // Confirm UI off → dispatch immediately (was stuck with no plan.request).
+        // When screenshots are attached, defer to HTTP so images are not dropped.
         if (text && !requireConfirmRef.current) {
-          sendJson({
-            type: 'plan.request',
-            transcript: text,
-            mode: modeRef.current,
-          })
+          const opts = optionsRef.current
+          if (opts?.shouldDeferAutoDispatch?.()) {
+            void opts.onDeferredAutoDispatch?.(text, modeRef.current)
+          } else {
+            sendJson({
+              type: 'plan.request',
+              transcript: text,
+              mode: modeRef.current,
+            })
+          }
         }
         break
       }

@@ -24,6 +24,8 @@ import { runtimeLabel, statusLabel } from '../lib/uiCopy'
 import {
   attachmentPayload,
   collectAttachments,
+  isAcceptedImageFile,
+  MAX_ATTACHMENTS,
   type PromptAttachment,
 } from '../lib/promptAttachments'
 
@@ -91,9 +93,6 @@ export function VoiceConsole({
   onModelChange,
   onSubmitPrompt,
 }: Props) {
-  const voice = useVoiceSession()
-  const reducedMotion = useReducedMotion()
-  const { state } = voice
   const [composer, setComposer] = useState('')
   const [attachments, setAttachments] = useState<PromptAttachment[]>([])
   const [attachError, setAttachError] = useState<string | null>(null)
@@ -111,6 +110,43 @@ export function VoiceConsole({
   const dragXRef = useRef(0)
   const didSwipeRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const attachmentsRef = useRef(attachments)
+  attachmentsRef.current = attachments
+  const onSubmitPromptRef = useRef(onSubmitPrompt)
+  onSubmitPromptRef.current = onSubmitPrompt
+
+  const voice = useVoiceSession({
+    shouldDeferAutoDispatch: () => attachmentsRef.current.length > 0,
+    onDeferredAutoDispatch: async (text, mode) => {
+      const submit = onSubmitPromptRef.current
+      if (!submit) return
+      setPromptBusy(true)
+      setAttachError(null)
+      try {
+        const result = await submit({
+          prompt: text,
+          mode: mode === 'plan' ? 'plan' : mode,
+          images: attachmentsRef.current.length
+            ? attachmentPayload(attachmentsRef.current)
+            : undefined,
+        })
+        if (!result.enqueued) {
+          feedback('warning')
+          setAttachError(result.reason || 'Запрос заблокирован')
+          return
+        }
+        feedback('success')
+        setAttachments([])
+      } catch (err: unknown) {
+        feedback('error')
+        setAttachError(err instanceof Error ? err.message : 'Не удалось отправить')
+      } finally {
+        setPromptBusy(false)
+      }
+    },
+  })
+  const reducedMotion = useReducedMotion()
+  const { state } = voice
 
   useEffect(() => {
     if (cursorModelKey) setSelectedModel(cursorModelKey)
@@ -184,13 +220,18 @@ export function VoiceConsole({
 
   const addFiles = async (files: FileList | File[]) => {
     try {
-      const { next, error } = await collectAttachments(files, attachments)
+      let nextState: PromptAttachment[] = attachmentsRef.current
+      let error: string | null = null
+      const collected = await collectAttachments(files, attachmentsRef.current)
+      nextState = collected.next
+      error = collected.error
+      attachmentsRef.current = nextState
+      setAttachments(nextState)
       if (error) {
         setAttachError(error)
-        feedback('warning')
+        feedback(nextState.length > attachments.length ? 'select' : 'warning')
         return
       }
-      setAttachments(next)
       setAttachError(null)
       feedback('select')
     } catch (err: unknown) {
@@ -200,6 +241,11 @@ export function VoiceConsole({
   }
 
   const openFilePicker = () => {
+    if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
+      setAttachError(`Максимум ${MAX_ATTACHMENTS} скринов за раз`)
+      feedback('warning')
+      return
+    }
     fileInputRef.current?.click()
   }
 
@@ -243,12 +289,17 @@ export function VoiceConsole({
     if (attach !== attachArmed) setAttachArmed(attach)
   }
 
-  const onOrbPointerUp = () => {
+  const onOrbPointerUp = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (state.phase !== 'listening' || pointerStartX.current === null) return
     pointerStartX.current = null
     const delta = dragXRef.current
     dragXRef.current = 0
     setDragX(0)
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    } catch {
+      // ignore if capture was already released
+    }
     if (delta <= -CANCEL_SWIPE_PX) {
       didSwipeRef.current = true
       setCancelArmed(false)
@@ -308,7 +359,7 @@ export function VoiceConsole({
 
   const handleConfirm = () => {
     const trimmed = state.transcript.trim()
-    if (!trimmed || promptBusy) return
+    if ((!trimmed && attachments.length === 0) || promptBusy) return
     if (attachments.length > 0) {
       void dispatchPrompt(trimmed).then((ok) => {
         if (ok) voice.cancel()
@@ -318,10 +369,8 @@ export function VoiceConsole({
     voice.confirmPlan()
   }
 
-  const onComposerPaste = (event: ReactClipboardEvent<HTMLInputElement>) => {
-    const files = Array.from(event.clipboardData.files || []).filter((file) =>
-      file.type.startsWith('image/'),
-    )
+  const onPasteImages = (event: ReactClipboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const files = Array.from(event.clipboardData.files || []).filter(isAcceptedImageFile)
     if (!files.length) return
     event.preventDefault()
     void addFiles(files)
@@ -567,7 +616,7 @@ export function VoiceConsole({
               Прикрепить скрин
             </motion.div>
           )}
-          {attachments.length > 0 && !cancelArmed && (
+          {isListening && attachments.length > 0 && !cancelArmed && (
             <div className="attachment-row voice-attach-row" aria-label="Вложения">
               {attachments.map((item) => (
                 <button
@@ -577,7 +626,11 @@ export function VoiceConsole({
                   title="Убрать"
                   onClick={() => {
                     feedback('tap')
-                    setAttachments((prev) => prev.filter((entry) => entry.id !== item.id))
+                    setAttachments((prev) => {
+                      const next = prev.filter((entry) => entry.id !== item.id)
+                      attachmentsRef.current = next
+                      return next
+                    })
                   }}
                 >
                   <img src={item.previewUrl} alt="" />
@@ -621,7 +674,7 @@ export function VoiceConsole({
               className="ghost-button composer-attach"
               title="Прикрепить картинку"
               aria-label="Прикрепить картинку"
-              disabled={promptBusy}
+              disabled={promptBusy || attachments.length >= MAX_ATTACHMENTS}
               onClick={() => {
                 feedback('tap')
                 openFilePicker()
@@ -636,7 +689,7 @@ export function VoiceConsole({
               maxLength={4000}
               placeholder={agentMode === 'do' ? 'Что сделать в репо.' : 'Короткий вопрос.'}
               onChange={(event) => setComposer(event.target.value)}
-              onPaste={onComposerPaste}
+              onPaste={onPasteImages}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
                   event.preventDefault()
@@ -674,6 +727,7 @@ export function VoiceConsole({
               id="voice-transcript"
               value={state.transcript}
               onChange={(event) => voice.editTranscript(event.target.value)}
+              onPaste={onPasteImages}
               rows={4}
               maxLength={4000}
               autoFocus
@@ -701,6 +755,7 @@ export function VoiceConsole({
               <button
                 type="button"
                 className="ghost-button"
+                disabled={attachments.length >= MAX_ATTACHMENTS}
                 onClick={() => {
                   feedback('tap')
                   openFilePicker()
@@ -722,7 +777,7 @@ export function VoiceConsole({
                 className="primary-button"
                 type="button"
                 onClick={handleConfirm}
-                disabled={promptBusy || !state.transcript.trim()}
+                disabled={promptBusy || (!state.transcript.trim() && attachments.length === 0)}
               >
                 <Send size={17} /> {confirmLabels[agentMode]}
               </button>

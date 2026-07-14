@@ -478,6 +478,10 @@ main {
   min-height: 28px;
 }
 
+.phase-listening .voice-stage-footer:has(.voice-attach-row) {
+  min-height: 92px;
+}
+
 .voice-stage::before {
   content: "";
   width: 280px;
