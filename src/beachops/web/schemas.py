@@ -116,7 +116,7 @@ class PromptRequest(ApiModel):
     prompt: str = Field(default="", max_length=8000)
     mode: str = Field(default="ask", pattern="^(ask|plan|do)$")
     slotId: str | None = Field(default=None, max_length=32)
-    images: list[PromptImage] | None = Field(default=None, max_length=8)
+    images: list[PromptImage] | None = Field(default=None, max_length=5)
 
     @model_validator(mode="after")
     def require_prompt_or_images(self) -> PromptRequest:

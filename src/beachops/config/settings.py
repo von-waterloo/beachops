@@ -199,7 +199,7 @@ class Settings(BaseSettings):
     media_group_delay_sec: float = Field(default=6.0, alias="MEDIA_GROUP_DELAY_SEC")
     shutdown_drain_sec: float = Field(default=15.0, alias="SHUTDOWN_DRAIN_SEC")
     prompt_coalesce_sec: float = Field(
-        default=5.0,
+        default=7.0,
         alias="PROMPT_COALESCE_SEC",
         ge=0.0,
         le=30.0,

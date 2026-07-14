@@ -146,7 +146,7 @@ Tools: `ssh_exec`, `docker_ps`, `docker_logs`. Suggested aliases: `eu` (BeachOps
 | `PHOTO_MAX_COUNT` | `5` | max изображений в одном промпте (1–5; жёсткий потолок Cloud Agents API v1) |
 | `MEDIA_GROUP_DELAY_SEC` | `6.0` | задержка сборки альбома (фото и пересылки) |
 | `SHUTDOWN_DRAIN_SEC` | `15.0` | ожидание активных run при остановке бота |
-| `PROMPT_COALESCE_SEC` | `5` | debounce текста и фото в один промпт (0–30): ждёт тишины после последнего апдейта, чтобы подпись и картинки не уезжали разными run |
+| `PROMPT_COALESCE_SEC` | `7` | debounce текста и фото в один промпт (0–30): ждёт тишины после последнего апдейта, чтобы подпись и картинки не уезжали разными run (≥ `MEDIA_GROUP_DELAY_SEC`) |
 
 ## Пересланный контекст
 

@@ -36,6 +36,7 @@ from beachops.services.telegram_images import (
     build_prompt_text,
     download_message_as_sdk_image,
     extract_group_caption,
+    limit_sdk_images,
     message_has_image,
 )
 from beachops.services.ui_copy import (
@@ -414,12 +415,12 @@ class ForwardContextBuffer:
             blocks.append(forward_context_default_prompt())
 
         prompt = join_prompt_blocks(blocks)
-        if len(images) > self._photo_max_count:
+        images, dropped = limit_sdk_images(images, max_count=self._photo_max_count)
+        if dropped:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=photo_too_many(len(images), self._photo_max_count),
+                text=photo_too_many(len(images) + dropped, self._photo_max_count),
             )
-            return
 
         if trigger and trigger.voice_message is not None:
             app.remember_user_message(user_id, trigger.voice_message.message_id or 0)

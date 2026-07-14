@@ -8,16 +8,17 @@ import binascii
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from io import BytesIO
 from typing import Any
 
 from cursor_sdk import SDKImage
 from telegram import Message
-from telegram.error import NetworkError, RetryAfter, TimedOut
 from telegram.ext import ContextTypes
 
 from beachops.app_context import AppContext
-from beachops.config.settings import get_settings
+from beachops.services.telegram_download import (
+    TelegramFileDownloadError,
+    download_telegram_file_bytes,
+)
 from beachops.services.ui_copy import photo_default_prompt
 
 logger = logging.getLogger(__name__)
@@ -184,73 +185,21 @@ async def download_telegram_image(
     if not is_supported_image_mime(mime_type):
         raise UnsupportedImageError(f"unsupported mime: {mime_type}")
 
-    settings = get_settings() if retries is None or retry_delay_sec is None else None
-    max_attempts = (
-        retries
-        if retries is not None
-        else settings.telegram_download_retries  # type: ignore[union-attr]
-    )
-    delay = (
-        retry_delay_sec
-        if retry_delay_sec is not None
-        else settings.telegram_download_retry_delay_sec  # type: ignore[union-attr]
-    )
-    if settings is not None:
-        file_timeouts = {
-            "read_timeout": settings.telegram_read_timeout_sec,
-            "write_timeout": settings.telegram_write_timeout_sec,
-            "connect_timeout": settings.telegram_connect_timeout_sec,
-            "pool_timeout": settings.telegram_pool_timeout_sec,
-        }
-    else:
-        # Explicit retries in tests / callers: keep generous per-call timeouts.
-        file_timeouts = {
-            "read_timeout": 90.0,
-            "write_timeout": 90.0,
-            "connect_timeout": 30.0,
-            "pool_timeout": 30.0,
-        }
-    last_exc: Exception | None = None
-    bot = message.get_bot()
+    try:
+        data = await download_telegram_file_bytes(
+            message.get_bot(),
+            file_id,
+            retries=retries,
+            retry_delay_sec=retry_delay_sec,
+        )
+    except TelegramFileDownloadError as exc:
+        raise TelegramDownloadError("telegram image download failed") from exc
 
-    for attempt in range(max_attempts):
-        try:
-            tg_file = await bot.get_file(file_id, **file_timeouts)
-            buffer = BytesIO()
-            await tg_file.download_to_memory(out=buffer, **file_timeouts)
-            data = buffer.getvalue()
-            if not data:
-                raise UnsupportedImageError("empty image download")
+    if not data:
+        raise UnsupportedImageError("empty image download")
 
-            filename = message.document.file_name if message.document else "photo.jpg"
-            return data, mime_type, filename
-        except UnsupportedImageError:
-            raise
-        except RetryAfter as exc:
-            last_exc = exc
-            wait = float(exc.retry_after) + 0.5
-            logger.warning(
-                "Telegram rate limit while downloading image (attempt %s/%s), wait %.1fs",
-                attempt + 1,
-                max_attempts,
-                wait,
-            )
-            await asyncio.sleep(wait)
-        except (TimedOut, NetworkError, TimeoutError, OSError) as exc:
-            last_exc = exc
-            if attempt + 1 >= max_attempts:
-                break
-            wait = delay * (attempt + 1)
-            logger.warning(
-                "Telegram image download failed (attempt %s/%s): %s; retry in %.1fs",
-                attempt + 1,
-                max_attempts,
-                exc,
-                wait,
-            )
-            await asyncio.sleep(wait)
-
-    raise TelegramDownloadError("telegram image download failed") from last_exc
+    filename = message.document.file_name if message.document else "photo.jpg"
+    return data, mime_type, filename
 
 
 async def download_message_as_sdk_image(message: Message) -> SDKImage:
@@ -302,16 +251,16 @@ class MediaGroupCollector:
             return False
 
         async with self._lock:
-            if group_id in self._processed:
-                return True
-
+            # Allow late album parts even while a flush is in progress: they go
+            # into a fresh buffer and schedule a follow-up flush.
             buf = self._buffers.get(group_id)
             if buf is None:
                 buf = _MediaGroupBuffer(user_id=user_id)
                 self._buffers[group_id] = buf
 
             if message.message_id not in {m.message_id for m in buf.messages}:
-                buf.messages.append(message)
+                if len(buf.messages) < self._max_count:
+                    buf.messages.append(message)
 
             if buf.flush_task is not None:
                 buf.flush_task.cancel()
@@ -340,7 +289,7 @@ class MediaGroupCollector:
     ) -> None:
         async with self._lock:
             buf = self._buffers.pop(group_id, None)
-            if buf is None or group_id in self._processed:
+            if buf is None:
                 return
             self._processed.add(group_id)
             messages = sorted(buf.messages, key=lambda m: m.message_id or 0)
@@ -350,9 +299,34 @@ class MediaGroupCollector:
             await self._on_flush(user_id, messages)
         except Exception:
             logger.exception("Media group flush failed for %s", group_id)
+            try:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text="⚠️ Не удалось обработать альбом. Пришлите фото ещё раз.",
+                )
+            except Exception:
+                logger.debug("Failed to notify user about media group flush error", exc_info=True)
         finally:
             async with self._lock:
                 self._processed.discard(group_id)
+
+    async def clear_for_user(self, user_id: int) -> int:
+        """Cancel pending album buffers for a user. Returns cleared group count."""
+        async with self._lock:
+            doomed = [
+                group_id
+                for group_id, buf in self._buffers.items()
+                if buf.user_id == user_id
+            ]
+            for group_id in doomed:
+                buf = self._buffers.pop(group_id, None)
+                if buf and buf.flush_task is not None:
+                    buf.flush_task.cancel()
+                self._processed.discard(group_id)
+            return len(doomed)
+
+    def has_pending_for_user(self, user_id: int) -> bool:
+        return any(buf.user_id == user_id for buf in self._buffers.values())
 
 
 def get_media_group_collector(context: ContextTypes.DEFAULT_TYPE) -> MediaGroupCollector:

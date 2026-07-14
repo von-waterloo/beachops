@@ -238,12 +238,19 @@ async def execute_claimed_job(
         extra={"job_id": job_id, "action": "windows_run"},
     )
 
-    from beachops.services.telegram_images import decode_payload_images
+    from beachops.services.telegram_images import WebImageError, decode_payload_images
 
     try:
         images = decode_payload_images(job.get("images"))
-    except Exception:
-        images = []
+    except WebImageError as exc:
+        logger.error("Invalid images payload: %s", exc, extra={"job_id": job_id})
+        await client.post_event(
+            job_id,
+            event_type="run.failed",
+            payload={"status": "error", "error": "invalid images payload"},
+            idempotency_key=f"{job_id}:run.failed",
+        )
+        return
 
     outcome, new_agent_id = await cursor.run_prompt(
         prompt=prompt,

@@ -331,13 +331,18 @@ async def _execute_locked(
         await _fail_job(app, job, "invalid encrypted payload")
         raise RuntimeError("invalid job payload") from exc
 
-    from beachops.services.telegram_images import decode_payload_images
+    from beachops.services.telegram_images import WebImageError, decode_payload_images
 
     channel = str(payload.get("channel") or "").strip().lower() or None
     try:
         images = decode_payload_images(payload.get("images"))
-    except Exception:
-        images = []
+    except WebImageError:
+        await _fail_job(app, job, "invalid images payload")
+        await bot.send_message(
+            chat_id=job.actor_id,
+            text="⚠️ Не удалось прочитать вложения. Пришлите скрины ещё раз.",
+        )
+        return
 
     run_context = await app.agent_slots.get_run_context(job.actor_id)
     if run_context is None:

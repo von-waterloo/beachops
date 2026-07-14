@@ -118,10 +118,18 @@ def _extract_docx_text(data: bytes) -> str:
     return "\n".join(parts).strip()
 
 
+from beachops.services.telegram_download import (
+    TelegramFileDownloadError,
+    download_telegram_file_bytes,
+)
+
+
 async def download_telegram_document(
     message: Message,
     *,
     max_bytes: int,
+    retries: int | None = None,
+    retry_delay_sec: float | None = None,
 ) -> tuple[bytes, str, str]:
     """Download a PDF/DOCX from Telegram. Returns (bytes, kind, filename)."""
     doc = message.document
@@ -137,10 +145,16 @@ async def download_telegram_document(
     if doc.file_size is not None and doc.file_size > max_bytes:
         raise DocumentTooLargeError(doc.file_size)
 
-    tg_file = await message.get_bot().get_file(doc.file_id)
-    buffer = BytesIO()
-    await tg_file.download_to_memory(out=buffer)
-    data = buffer.getvalue()
+    try:
+        data = await download_telegram_file_bytes(
+            message.get_bot(),
+            doc.file_id,
+            retries=retries,
+            retry_delay_sec=retry_delay_sec,
+        )
+    except TelegramFileDownloadError as exc:
+        raise DocumentEmptyError("telegram document download failed") from exc
+
     if not data:
         raise DocumentEmptyError("empty download")
     if len(data) > max_bytes:
