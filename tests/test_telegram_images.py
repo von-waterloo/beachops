@@ -80,7 +80,7 @@ async def test_download_telegram_image_retries_on_timeout() -> None:
     message = _photo_message()
     attempts = {"download": 0}
 
-    async def download_side_effect(*, out: BytesIO) -> None:
+    async def download_side_effect(*, out: BytesIO, **_kwargs: object) -> None:
         attempts["download"] += 1
         if attempts["download"] == 1:
             raise TimedOut("timed out")

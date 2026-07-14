@@ -243,7 +243,6 @@ class PromptCoalesceBuffer:
                                     "Skipping unsupported image in coalesce",
                                     exc_info=True,
                                 )
-                                failed_downloads += 1
                             except TelegramDownloadError:
                                 logger.warning(
                                     "Telegram image download failed in coalesce",
@@ -264,7 +263,6 @@ class PromptCoalesceBuffer:
                                 "Skipping unsupported image in coalesce",
                                 exc_info=True,
                             )
-                            failed_downloads += 1
                         except TelegramDownloadError:
                             logger.warning(
                                 "Telegram image download failed in coalesce",

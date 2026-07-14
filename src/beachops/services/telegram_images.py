@@ -172,7 +172,10 @@ async def download_telegram_image(
     retries: int | None = None,
     retry_delay_sec: float | None = None,
 ) -> tuple[bytes, str, str]:
-    """Download raster image bytes from a Telegram message."""
+    """Download raster image bytes from a Telegram message.
+
+    Retries on Telegram timeouts / network blips — common for large photos.
+    """
     file_id = _image_file_id(message)
     if file_id is None:
         raise UnsupportedImageError("no supported image in message")
@@ -181,21 +184,40 @@ async def download_telegram_image(
     if not is_supported_image_mime(mime_type):
         raise UnsupportedImageError(f"unsupported mime: {mime_type}")
 
-    if retries is None or retry_delay_sec is None:
-        settings = get_settings()
-    max_attempts = retries if retries is not None else settings.telegram_download_retries
+    settings = get_settings() if retries is None or retry_delay_sec is None else None
+    max_attempts = (
+        retries
+        if retries is not None
+        else settings.telegram_download_retries  # type: ignore[union-attr]
+    )
     delay = (
         retry_delay_sec
         if retry_delay_sec is not None
-        else settings.telegram_download_retry_delay_sec
+        else settings.telegram_download_retry_delay_sec  # type: ignore[union-attr]
     )
+    if settings is not None:
+        file_timeouts = {
+            "read_timeout": settings.telegram_read_timeout_sec,
+            "write_timeout": settings.telegram_write_timeout_sec,
+            "connect_timeout": settings.telegram_connect_timeout_sec,
+            "pool_timeout": settings.telegram_pool_timeout_sec,
+        }
+    else:
+        # Explicit retries in tests / callers: keep generous per-call timeouts.
+        file_timeouts = {
+            "read_timeout": 90.0,
+            "write_timeout": 90.0,
+            "connect_timeout": 30.0,
+            "pool_timeout": 30.0,
+        }
     last_exc: Exception | None = None
+    bot = message.get_bot()
 
     for attempt in range(max_attempts):
         try:
-            tg_file = await message.get_bot().get_file(file_id)
+            tg_file = await bot.get_file(file_id, **file_timeouts)
             buffer = BytesIO()
-            await tg_file.download_to_memory(out=buffer)
+            await tg_file.download_to_memory(out=buffer, **file_timeouts)
             data = buffer.getvalue()
             if not data:
                 raise UnsupportedImageError("empty image download")
@@ -214,7 +236,7 @@ async def download_telegram_image(
                 wait,
             )
             await asyncio.sleep(wait)
-        except (TimedOut, NetworkError) as exc:
+        except (TimedOut, NetworkError, TimeoutError, OSError) as exc:
             last_exc = exc
             if attempt + 1 >= max_attempts:
                 break
