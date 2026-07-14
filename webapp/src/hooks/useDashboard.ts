@@ -30,7 +30,7 @@ const emptySnapshot: DashboardSnapshot = {
   role: 'Operator',
   defaultBranch: 'dev',
   workers: [],
-  queue: { pending: 0, running: 0, active: 0, queued: 0, blocked: 0, total: 0 },
+  queue: { pending: 0, running: 0, active: 0, queued: 0, blocked: 0, awaitingApproval: 0, total: 0 },
   repositoryPolicy: { openMode: true, repositories: [] },
   selfImprove: { enabled: false, branches: ['dev'], canToggle: true, needsRepo: true },
 }
@@ -69,6 +69,7 @@ function normalize(snapshot: Partial<DashboardSnapshot>): DashboardSnapshot {
       active: queue?.active ?? queue?.running ?? 0,
       queued: queue?.queued ?? queue?.pending ?? 0,
       blocked: queue?.blocked ?? 0,
+      awaitingApproval: queue?.awaitingApproval ?? 0,
       total: queue?.total ?? jobs.length,
     },
   }

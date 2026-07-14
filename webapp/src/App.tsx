@@ -246,9 +246,14 @@ function ControlRoom({
               <VoiceConsole
                 activeJob={activeJob}
                 latestEvent={stream.latestEvent}
+                agents={dashboard.data.agents}
+                activeJobs={activeJobs}
                 cursorModelKey={cursorModelKey || user.cursorModelKey}
                 models={user.models ?? []}
                 onModelChange={setCursorModelKey}
+                onActivateAgent={(slotId) =>
+                  dashboard.updateAgent(slotId, { makeActive: true })
+                }
                 onSubmitPrompt={async (input) => {
                   const result = await dashboard.submitPrompt(input)
                   if (result.enqueued) selectJob(result.job.id)

@@ -887,8 +887,8 @@ function Overview({
           <span>Блок</span>
         </button>
         <button type="button" onClick={() => onRuntimeFilterChange?.('all', 'active')}>
-          <strong>{data.approvals.length}</strong>
-          <span>Approve</span>
+          <strong>{data.approvals.length || data.queue?.awaitingApproval || 0}</strong>
+          <span>Решения</span>
         </button>
       </div>
 
@@ -981,7 +981,7 @@ function Overview({
       </Section>
 
       {data.approvals.length > 0 && (
-        <Section eyebrow="Approve" title="Ждёт владельца">
+        <Section eyebrow="Решения" title="Ждёт владельца">
           <ApprovalsList
             approvals={data.approvals}
             role={data.role}

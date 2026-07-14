@@ -138,7 +138,11 @@ class RunFinalizer:
         return True
 
     async def _finalize_plan(self, job, actor_id: int) -> None:
-        if self._app.settings.auto_approve_plans:
+        is_owner_actor = actor_id in {
+            *self._app.settings.owner_user_ids,
+            *self._app.settings.admin_user_ids,
+        }
+        if self._app.settings.auto_approve_plans or is_owner_actor:
             await self._app.jobs.transition(
                 actor_id,
                 job.id,

@@ -3,6 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import {
   ArrowLeft,
   ArrowRight,
+  Bot,
   Captions,
   Check,
   ImagePlus,
@@ -18,7 +19,8 @@ import { setCursorModel, type CursorModelOption } from '../lib/passkeys'
 import { useVoiceSession } from '../voice/useVoiceSession'
 import { SPECTRUM_BAR_COUNT } from '../voice/constants'
 import type { VoiceAgentMode, VoicePhase } from '../voice/state'
-import type { Event, Job } from '../types/api'
+import type { Event, Job, AgentSlot } from '../types/api'
+import { isActiveJobStatus } from '../types/api'
 import { runtimeLabel, statusLabel } from '../lib/uiCopy'
 import {
   attachmentPayload,
@@ -81,19 +83,25 @@ interface SubmitPromptResult {
 interface Props {
   activeJob?: Job | null
   latestEvent?: Event | null
+  agents?: AgentSlot[]
+  activeJobs?: Job[]
   cursorModelKey?: string
   models?: CursorModelOption[]
   onModelChange?: (modelKey: string) => void
   onSubmitPrompt?: (input: SubmitPromptInput) => Promise<SubmitPromptResult>
+  onActivateAgent?: (slotId: string) => Promise<void>
 }
 
 export function VoiceConsole({
   activeJob = null,
   latestEvent = null,
+  agents = [],
+  activeJobs = [],
   cursorModelKey,
   models = [],
   onModelChange,
   onSubmitPrompt,
+  onActivateAgent,
 }: Props) {
   const [composer, setComposer] = useState('')
   const [attachments, setAttachments] = useState<PromptAttachment[]>([])
@@ -103,6 +111,7 @@ export function VoiceConsole({
   const [selectedModel, setSelectedModel] = useState(cursorModelKey ?? '')
   const [modelBusy, setModelBusy] = useState(false)
   const [modelsExpanded, setModelsExpanded] = useState(false)
+  const [agentBusy, setAgentBusy] = useState(false)
   const [rippleKey, setRippleKey] = useState(0)
   const [agentMode, setAgentMode] = useState<VoiceAgentMode>(() => readVoiceMode())
   const [dragX, setDragX] = useState(0)
@@ -190,6 +199,17 @@ export function VoiceConsole({
   const displayEnergy = state.phase === 'listening'
     ? voice.energy
     : Math.max(phaseEnergy[state.phase], pulse)
+
+  const activeSlot = agents.find((slot) => slot.active) ?? agents[0] ?? null
+
+  const slotHasLiveJob = useMemo(() => {
+    const live = new Set<string>()
+    for (const job of activeJobs) {
+      if (!isActiveJobStatus(job.status) || !job.cursorAgentId) continue
+      live.add(job.cursorAgentId)
+    }
+    return live
+  }, [activeJobs])
 
   const jobCaption = useMemo(() => {
     if (!activeJob) return null
@@ -443,6 +463,35 @@ export function VoiceConsole({
         </div>
       )}
 
+      {agents.length > 0 && (
+        <div className="voice-agent-switcher" role="listbox" aria-label="Агенты">
+          {agents.map((slot) => {
+            const selected = slot.id === activeSlot?.id
+            const live = Boolean(slot.cursorAgentId && slotHasLiveJob.has(slot.cursorAgentId))
+            return (
+              <button
+                key={slot.id}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                className={`${selected ? 'selected' : ''}${live ? ' is-live' : ''}`}
+                disabled={agentBusy || !onActivateAgent}
+                onClick={() => {
+                  if (!onActivateAgent || selected) return
+                  setAgentBusy(true)
+                  feedback('select')
+                  void onActivateAgent(slot.id).finally(() => setAgentBusy(false))
+                }}
+              >
+                <Bot size={13} aria-hidden="true" />
+                <span>{slot.label}</span>
+                {live && <i className="live-dot" aria-label="В работе" />}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       <div className={`voice-stage phase-${state.phase} ${active ? 'is-active' : ''} ${cancelArmed ? 'is-cancel' : ''} ${attachArmed ? 'is-attach' : ''}`}>
         {!reducedMotion && (
           <div className="particles" aria-hidden="true">
@@ -463,6 +512,20 @@ export function VoiceConsole({
         />
 
         <div className="voice-stage-top">
+          <div className="voice-stage-top-left">
+            {activeSlot ? (
+              <div className="agent-chip" role="status" title={activeSlot.label}>
+                <Bot size={12} aria-hidden="true" />
+                <span>{activeSlot.label}</span>
+              </div>
+            ) : activeJob ? (
+              <div className="job-chip" role="status" title={activeJob.title}>
+                <span>{activeJob.title.slice(0, 24)}</span>
+              </div>
+            ) : (
+              <span className="voice-stage-top-spacer" aria-hidden="true" />
+            )}
+          </div>
           <div className="voice-mode-toggle voice-mode-toggle-top" role="toolbar" aria-label="Режим">
             {(['ask', 'plan', 'do'] as const).map((item) => (
               <button
@@ -476,6 +539,7 @@ export function VoiceConsole({
               </button>
             ))}
           </div>
+          <span className="voice-stage-top-spacer" aria-hidden="true" />
         </div>
 
         <div className="voice-stage-center">

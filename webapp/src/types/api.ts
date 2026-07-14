@@ -118,6 +118,7 @@ export interface QueueSnapshot {
   active: number
   queued: number
   blocked: number
+  awaitingApproval?: number
   total?: number
 }
 

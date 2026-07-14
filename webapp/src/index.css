@@ -414,9 +414,10 @@ main {
 }
 
 .voice-stage-top {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) minmax(0, auto);
   align-items: center;
-  justify-content: center;
+  gap: 8px;
   min-height: 36px;
   flex: 0 0 auto;
   position: relative;
@@ -433,7 +434,8 @@ main {
 }
 
 .voice-stage-top-left .job-chip,
-.voice-stage-top-left .connection-chip {
+.voice-stage-top-left .connection-chip,
+.voice-stage-top-left .agent-chip {
   max-width: 100%;
   white-space: nowrap;
 }
@@ -499,8 +501,9 @@ main {
 
 .voice-stage-top .voice-mode-toggle-top {
   min-width: 0;
-  width: min(100%, 280px);
+  width: 100%;
   pointer-events: auto;
+  justify-self: stretch;
 }
 
 .voice-mode-toggle-top button {
@@ -561,8 +564,11 @@ main {
 }
 
 .connection-chip,
-.job-chip {
+.job-chip,
+.agent-chip {
   position: relative;
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
   max-width: min(56vw, 210px);
   padding: 5px 8px;
@@ -574,6 +580,60 @@ main {
   font-weight: 680;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.agent-chip {
+  color: var(--cyan);
+}
+
+.voice-agent-switcher {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 0 8px;
+  margin-bottom: 4px;
+  scrollbar-width: none;
+}
+
+.voice-agent-switcher::-webkit-scrollbar {
+  display: none;
+}
+
+.voice-agent-switcher button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-high) 82%, transparent);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: border-color 160ms var(--ease-out), color 160ms var(--ease-out), background 160ms var(--ease-out);
+}
+
+.voice-agent-switcher button.selected {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-high));
+}
+
+.voice-agent-switcher button.is-live .live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.voice-agent-switcher button:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .connection-chip {

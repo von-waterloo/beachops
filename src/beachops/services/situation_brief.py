@@ -61,11 +61,14 @@ async def collect_control_room_counts(
         if job.status
         in {
             JobStatus.BLOCKED,
-            JobStatus.AWAITING_APPROVAL,
-            JobStatus.REVIEW_REQUIRED,
             JobStatus.PAUSED,
             JobStatus.REVISION_REQUESTED,
         }
+    )
+    awaiting_approval = sum(
+        1
+        for job in active
+        if job.status in {JobStatus.AWAITING_APPROVAL, JobStatus.REVIEW_REQUIRED}
     )
     approvals = (
         await app.approvals.list_pending(limit=20)
@@ -76,7 +79,7 @@ async def collect_control_room_counts(
         running=running,
         queued=queued,
         blocked=blocked,
-        pending_approvals=len(approvals),
+        pending_approvals=len(approvals) or awaiting_approval,
         workers_online=0,
     )
 
@@ -142,11 +145,14 @@ async def build_situation_brief(
         if job.status
         in {
             JobStatus.BLOCKED,
-            JobStatus.AWAITING_APPROVAL,
-            JobStatus.REVIEW_REQUIRED,
             JobStatus.PAUSED,
             JobStatus.REVISION_REQUESTED,
         }
+    )
+    awaiting_approval = sum(
+        1
+        for job in active
+        if job.status in {JobStatus.AWAITING_APPROVAL, JobStatus.REVIEW_REQUIRED}
     )
     approvals = (
         await app.approvals.list_pending(limit=20)
@@ -156,7 +162,7 @@ async def build_situation_brief(
 
     lines = [
         "Ситуация BeachOps:",
-        f"- Очередь: активно {running}, ждёт {queued}, блок/approve {blocked}",
+        f"- Очередь: активно {running}, ждёт {queued}, решения {awaiting_approval}, блок {blocked}",
     ]
 
     if run_context is not None:
@@ -170,7 +176,7 @@ async def build_situation_brief(
             lines.append(f"- Cursor agent: `{slot.cursor_agent_id}`")
 
     if approvals:
-        lines.append(f"- Ждёт owner approve: {len(approvals)}")
+        lines.append(f"- Ждёт решения владельца: {len(approvals)}")
         for item in approvals[:3]:
             lines.append(f"  · {item.kind.value} · job {str(item.job_id)[:8]}")
 

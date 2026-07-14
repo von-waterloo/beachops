@@ -43,17 +43,17 @@ interface VoiceEvent {
 }
 
 const VOICE_ERROR_MESSAGES: Record<string, string> = {
-  provider_unavailable: 'Voice service unavailable',
-  chunk_too_large: 'Audio chunk too large',
-  session_limit: 'Voice session limit reached',
-  invalid_event: 'Invalid voice event',
-  invalid_transcript: 'Transcript is empty or too long',
+  provider_unavailable: 'Голосовой сервис недоступен',
+  chunk_too_large: 'Слишком большой фрагмент аудио',
+  session_limit: 'Лимит голосовых сессий',
+  invalid_event: 'Некорректное событие',
+  invalid_transcript: 'Пустой или слишком длинный текст',
   empty_audio: TOO_SHORT,
-  job_missing: 'Task disappeared',
-  missing_run_id: 'Task finished without a run id',
-  memory_missing: 'Task result is not ready yet',
-  no_repository: 'Select a repository first',
-  dispatch_blocked: 'Request blocked',
+  job_missing: 'Задача пропала',
+  missing_run_id: 'Задача завершилась без run id',
+  memory_missing: 'Результат задачи ещё не готов',
+  no_repository: 'Сначала выберите репозиторий',
+  dispatch_blocked: 'Запрос заблокирован политикой',
   unauthorized: AUTH_FAILED,
   rate_limited: RATE_LIMITED,
 }
@@ -69,8 +69,8 @@ function voiceErrorMessage(event: VoiceEvent): string {
   if (event.code && VOICE_ERROR_MESSAGES[event.code]) {
     return VOICE_ERROR_MESSAGES[event.code]
   }
-  if (event.code) return `Voice error: ${event.code}`
-  return 'Voice service unavailable'
+  if (event.code) return `Ошибка голоса: ${event.code}`
+  return 'Голосовой сервис недоступен'
 }
 
 export function useVoiceSession(options?: {

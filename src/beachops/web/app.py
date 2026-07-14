@@ -1555,8 +1555,8 @@ def _job_json(job) -> dict:
     status_map = {
         JobStatus.SUCCEEDED: "completed",
         JobStatus.ACCEPTED: "completed",
-        JobStatus.AWAITING_APPROVAL: "blocked",
-        JobStatus.REVIEW_REQUIRED: "blocked",
+        JobStatus.AWAITING_APPROVAL: "awaiting_approval",
+        JobStatus.REVIEW_REQUIRED: "review_required",
     }
     mapped = status_map.get(job.status, job.status.value)
     agent_id = getattr(job, "cursor_agent_id", None)
@@ -1690,16 +1690,17 @@ def _queue_stats(jobs) -> dict[str, int]:
     active = 0
     queued = 0
     blocked = 0
+    awaiting_approval = 0
     for job in jobs:
         value = job.status.value if hasattr(job.status, "value") else str(job.status)
         if value in {"running", "approved", "planning"}:
             active += 1
         elif value == "queued":
             queued += 1
+        elif value in {"awaiting_approval", "review_required"}:
+            awaiting_approval += 1
         elif value in {
             "blocked",
-            "awaiting_approval",
-            "review_required",
             "paused",
             "revision_requested",
         }:
@@ -1708,6 +1709,7 @@ def _queue_stats(jobs) -> dict[str, int]:
         "active": active,
         "queued": queued,
         "blocked": blocked,
+        "awaitingApproval": awaiting_approval,
         "total": len(jobs),
         "running": active,
         "pending": queued,
