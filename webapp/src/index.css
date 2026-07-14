@@ -3210,3 +3210,26 @@ button.worker-chip:active {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+
+.voice-live-feed {
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+
+.voice-live-feed .job-chat-header .eyebrow {
+  gap: 8px;
+}
+
+.voice-live-feed .job-chat-log {
+  max-height: min(42svh, 360px);
+}
+
+.job-chat-message.is-streaming {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent) inset;
+}
+
+.job-chat-message.is-streaming p {
+  color: var(--ink);
+}

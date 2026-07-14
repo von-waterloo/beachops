@@ -28,6 +28,7 @@ import {
   MAX_ATTACHMENTS,
   type PromptAttachment,
 } from '../lib/promptAttachments'
+import { JobChatPanel } from './JobChatPanel'
 
 const CANCEL_SWIPE_PX = 72
 const ATTACH_SWIPE_PX = 72
@@ -816,6 +817,13 @@ export function VoiceConsole({
           </p>
         </>
       )}
+
+      <JobChatPanel
+        jobId={activeJob?.id ?? null}
+        enabled={Boolean(activeJob?.id)}
+        liveCaption={state.caption}
+        pollMs={1_500}
+      />
     </section>
   )
 }

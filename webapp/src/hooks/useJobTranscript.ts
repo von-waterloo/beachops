@@ -8,7 +8,7 @@ const POLL_MS = 2_000
  * Poll `/api/jobs/{id}/stream` every 2s while a job chat is open.
  * Pass `jobId=null` to idle the poll.
  */
-export function useJobTranscript(jobId: string | null, enabled = true) {
+export function useJobTranscript(jobId: string | null, enabled = true, pollMs = POLL_MS) {
   const [snapshot, setSnapshot] = useState<JobStreamSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const jobIdRef = useRef(jobId)
@@ -41,7 +41,7 @@ export function useJobTranscript(jobId: string | null, enabled = true) {
     void pull()
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void pull()
-    }, POLL_MS)
+    }, pollMs)
     const onVisible = () => {
       if (document.visibilityState === 'visible') void pull()
     }
@@ -52,7 +52,7 @@ export function useJobTranscript(jobId: string | null, enabled = true) {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
     }
-  }, [jobId, enabled, pull])
+  }, [jobId, enabled, pull, pollMs])
 
   return { snapshot, error, refresh: pull }
 }
