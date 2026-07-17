@@ -8,6 +8,7 @@ from telegram.ext import ContextTypes
 from beachops.app_context import AppContext
 from beachops.services.cursor_token_ui import token_ui_pair
 from beachops.services.inline_keyboards import welcome_keyboard
+from beachops.services.ui_copy import build_welcome_message
 from beachops.services.webapp_url import webapp_open_url
 
 

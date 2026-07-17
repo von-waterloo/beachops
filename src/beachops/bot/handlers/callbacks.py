@@ -23,6 +23,7 @@ from beachops.bot.handlers.agent_list_ui import (
     build_agent_list_markup,
     build_agent_list_text,
     edit_agent_list_page,
+    send_agent_list,
 )
 from beachops.bot.handlers.agent_rename import start_agent_rename
 from beachops.services.agent_rename_pending import clear_pending, peek_pending
