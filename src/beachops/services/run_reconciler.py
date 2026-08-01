@@ -85,10 +85,15 @@ class RunReconciler:
         if status in {"", "running", "creating", "in_progress"}:
             return ReconcileResult(job.id, "still_running")
 
-        if job.status not in _ACTIVE_JOB_STATUSES and not (
-            job.status == JobStatus.FAILED
-            and status in {"finished", "completed", "cancelled"}
-        ):
+        if job.status == JobStatus.FAILED:
+            if status in {"finished", "completed", "cancelled"}:
+                pass  # recover success after premature failure
+            elif status in {"error", "cancelled"} or run_info.get("gone"):
+                await self._app.jobs.mark_finalized(job.actor_id, job.id)
+                return ReconcileResult(job.id, "failed_closed", status)
+            else:
+                return ReconcileResult(job.id, "noop", status)
+        elif job.status not in _ACTIVE_JOB_STATUSES:
             return ReconcileResult(job.id, "noop", status)
 
         payload: dict[str, Any] = {}
@@ -161,8 +166,8 @@ class RunReconciler:
             )
         except CursorCloudError as exc:
             if is_agent_gone_error(exc):
-                logger.warning(
-                    "Cursor agent gone for job %s — failing to unblock queue",
+                logger.info(
+                    "Cursor agent gone for job %s",
                     job.id,
                     extra={
                         "job_id": str(job.id),

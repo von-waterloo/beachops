@@ -14,11 +14,13 @@ from beachops.app_context import AppContext
 from beachops.config.settings import get_settings
 from beachops.domain.models import UserMode
 from beachops.domain.security import JobStatus
+from beachops.services.cursor_cloud_client import is_resource_exhausted_error
 from beachops.services.run_observer import RunObserverRegistry, observe_and_finalize
 from beachops.services.run_reconciler import RunReconciler
 from beachops.services.notification_notifier import NotificationNotifier
 from beachops.services.durable_run import launch_durable_cloud_job
 from beachops.services.queue_notice import dismiss_queue_notice
+from beachops.services.ui_copy import job_launch_failed
 
 logger = logging.getLogger(__name__)
 
@@ -411,20 +413,30 @@ async def _execute_locked(
         # and if Cursor IDs exist we already returned above. Re-queue briefly.
         reason = str(exc)
         if "Flood control" in reason or "Retry in" in reason or "RetryAfter" in type(exc).__name__:
+            defer_sec = 15
+            event_type = "worker.requeue_flood"
+        elif is_resource_exhausted_error(exc):
+            defer_sec = 60
+            event_type = "worker.requeue_capacity"
+            reason = "Cursor agent capacity exhausted"
             logger.warning(
-                "Telegram flood launching job %s; requeue in 15s",
+                "Cursor capacity exhausted for job %s; requeue in %ss",
                 job.id,
+                defer_sec,
             )
-            # Roll status back to queued so execute_job will pick it up again.
+        else:
+            defer_sec = 0
+
+        if defer_sec:
             await app.jobs.transition(
                 transitioned.actor_id,
                 transitioned.id,
                 from_statuses=[JobStatus.RUNNING, JobStatus.PLANNING],
                 to_status=JobStatus.QUEUED,
-                event_type="worker.requeue_flood",
+                event_type=event_type,
                 details={"reason": reason},
             )
-            await app.arq.enqueue_job("execute_job", str(job.id), _defer_by=15)
+            await app.arq.enqueue_job("execute_job", str(job.id), _defer_by=defer_sec)
             return
         await _fail_job(app, bot, transitioned, reason)
     finally:
@@ -448,6 +460,14 @@ async def _fail_job(app: AppContext, bot: Bot, job, reason: str | None) -> None:
         event_type="worker.failed",
         details={"reason": reason or "unknown"},
     )
+    await app.jobs.mark_finalized(job.actor_id, job.id)
+    try:
+        await bot.send_message(
+            chat_id=job.actor_id,
+            text=job_launch_failed(reason),
+        )
+    except Exception:
+        logger.warning("Could not notify user about failed job %s", job.id, exc_info=True)
 
 
 try:

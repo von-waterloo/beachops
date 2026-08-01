@@ -504,6 +504,20 @@ def cancel_none() -> str:
     return "Нет активной задачи.\n\nОтправьте текст, голос или фото, чтобы начать."
 
 
+def job_launch_failed(reason: str | None) -> str:
+    raw = (reason or "").strip()
+    lower = raw.lower()
+    if "resource_exhausted" in lower:
+        detail = "лимит одновременных Cursor-агентов — попробуйте через минуту"
+    elif "validation_error" in lower and "branch" in lower:
+        detail = "Cursor не видит ветку на GitHub — проверьте имя ветки и push"
+    elif "agent not found" in lower:
+        detail = "Cursor-агент больше не существует"
+    else:
+        detail = raw[:400] if raw else "неизвестная ошибка"
+    return f"❌ Задача не запустилась.\n\n{detail}"
+
+
 def cancel_failed() -> str:
     return "Задача уже завершена или не может быть отменена."
 

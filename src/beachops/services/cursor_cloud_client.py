@@ -69,6 +69,19 @@ def is_agent_gone_error(exc: Exception) -> bool:
     return False
 
 
+def is_resource_exhausted_error(exc: Exception) -> bool:
+    """True when Cursor rejected the request due to concurrent agent limits."""
+    code = ""
+    message = str(exc or "")
+    if isinstance(exc, CursorCloudError):
+        code = (exc.code or "").lower()
+        message = exc.message or message
+    lower = message.lower()
+    if code == "resource_exhausted":
+        return True
+    return "resource_exhausted" in lower
+
+
 @dataclass(frozen=True, slots=True)
 class PromptImage:
     data: str
