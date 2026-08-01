@@ -35,6 +35,7 @@ def test_resolve_opus_5_uses_high_effort_preset() -> None:
         "thinking": "true",
         "context": "300k",
         "effort": "high",
+        "fast": "false",
     }
 
 

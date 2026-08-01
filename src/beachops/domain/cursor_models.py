@@ -118,6 +118,7 @@ def resolve_cursor_model(
                     ModelParam(id="thinking", value="true"),
                     ModelParam(id="context", value="300k"),
                     ModelParam(id="effort", value="high"),
+                    ModelParam(id="fast", value="false"),
                 ),
             )
         )
