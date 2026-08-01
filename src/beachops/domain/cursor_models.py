@@ -10,27 +10,34 @@ from beachops.services.cursor_cloud_client import ModelParam, ModelSelection
 class CursorModelKey(str, Enum):
     COMPOSER_25 = "composer-2.5"
     FABLE_5 = "fable-5"
-    SONNET_5 = "sonnet-5"
+    OPUS_5 = "opus-5"
     GPT_56_TERRA = "gpt-5.6-terra"
 
 
 CURSOR_MODEL_LABELS: dict[str, str] = {
     CursorModelKey.COMPOSER_25.value: "Composer 2.5",
     CursorModelKey.FABLE_5.value: "Fable 5",
-    CursorModelKey.SONNET_5.value: "Sonnet 5",
+    CursorModelKey.OPUS_5.value: "Opus 5",
     CursorModelKey.GPT_56_TERRA.value: "GPT-5.6 Terra",
 }
 
 CURSOR_MODEL_ORDER: tuple[CursorModelKey, ...] = (
     CursorModelKey.COMPOSER_25,
     CursorModelKey.FABLE_5,
-    CursorModelKey.SONNET_5,
+    CursorModelKey.OPUS_5,
     CursorModelKey.GPT_56_TERRA,
 )
+
+# Legacy UI keys remapped after catalog swaps (read path before DB migration).
+_LEGACY_CURSOR_MODEL_KEYS: dict[str, str] = {
+    "sonnet-5": CursorModelKey.OPUS_5.value,
+}
 
 
 def normalize_cursor_model_key(value: str | None, *, default: str) -> str:
     known = {item.value for item in CursorModelKey}
+    if value in _LEGACY_CURSOR_MODEL_KEYS:
+        return _LEGACY_CURSOR_MODEL_KEYS[value]
     if value in known:
         return value  # type: ignore[return-value]
     if value and (
@@ -103,14 +110,14 @@ def resolve_cursor_model(
                 ),
             )
         )
-    if key == CursorModelKey.SONNET_5.value:
+    if key == CursorModelKey.OPUS_5.value:
         return _maybe_override(
             ModelSelection(
-                id="claude-sonnet-5",
+                id="claude-opus-5",
                 params=(
                     ModelParam(id="thinking", value="true"),
                     ModelParam(id="context", value="300k"),
-                    ModelParam(id="effort", value="medium"),
+                    ModelParam(id="effort", value="high"),
                 ),
             )
         )

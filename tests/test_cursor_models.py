@@ -26,16 +26,23 @@ def test_resolve_fable_5_matches_catalog_variant() -> None:
     }
 
 
-def test_resolve_sonnet_5_uses_moderate_preset() -> None:
-    model = resolve_cursor_model(CursorModelKey.SONNET_5.value)
+def test_resolve_opus_5_uses_high_effort_preset() -> None:
+    model = resolve_cursor_model(CursorModelKey.OPUS_5.value)
     assert isinstance(model, ModelSelection)
-    assert model.id == "claude-sonnet-5"
+    assert model.id == "claude-opus-5"
     params = {p.id: p.value for p in model.params}
     assert params == {
         "thinking": "true",
         "context": "300k",
-        "effort": "medium",
+        "effort": "high",
     }
+
+
+def test_normalize_legacy_sonnet_5_maps_to_opus_5() -> None:
+    assert (
+        normalize_cursor_model_key("sonnet-5", default="composer-2.5")
+        == CursorModelKey.OPUS_5.value
+    )
 
 
 def test_resolve_gpt_56_terra_uses_standard_context_and_medium_reasoning() -> None:

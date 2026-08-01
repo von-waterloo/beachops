@@ -79,7 +79,7 @@ Merge и деплой агент сам не делает.
 
 ### Режимы и модели
 
-- Кнопки на `/start`, `/status`, post-run: Composer 2.5 · Fable 5 · Sonnet 5 · GPT-5.6 Terra.
+- Кнопки на `/start`, `/status`, post-run: Composer 2.5 · Fable 5 · Opus 5 · GPT-5.6 Terra.
 - Во время run — только «Отменить»; смена модели через `/status` или вкладку **Пульт**.
 - Токены Cursor `mt` / `mt2` (если настроен второй ключ) — per-user; уже созданный
   агент остаётся на своём ключе → `/new` для нового токена.
