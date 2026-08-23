@@ -42,11 +42,25 @@ def test_resolve_opus_5_uses_complete_catalog_variant() -> None:
     }
 
 
+def test_resolve_grok_46_uses_xhigh_effort() -> None:
+    model = resolve_cursor_model("grok-4.6")
+    assert isinstance(model, ModelSelection)
+    assert model.id == "grok-4.6"
+    assert {p.id: p.value for p in model.params} == {
+        "effort": "xhigh",
+        "fast": "false",
+    }
+
+
 def test_normalize_legacy_sonnet_5_maps_to_opus_5() -> None:
     assert (
-        normalize_cursor_model_key("sonnet-5", default="composer-2.5")
+        normalize_cursor_model_key("sonnet-5", default="grok-4.6")
         == CursorModelKey.OPUS_5.value
     )
+
+
+def test_normalize_legacy_composer_maps_to_grok_46() -> None:
+    assert normalize_cursor_model_key("composer-2.5", default="grok-4.6") == "grok-4.6"
 
 
 def test_resolve_gpt_56_terra_uses_standard_context_and_medium_reasoning() -> None:
@@ -61,8 +75,8 @@ def test_resolve_gpt_56_terra_uses_standard_context_and_medium_reasoning() -> No
     }
 
 
-def test_normalize_unknown_falls_back_to_composer() -> None:
-    assert normalize_cursor_model_key("unknown", default="composer-2.5") == "composer-2.5"
+def test_normalize_unknown_falls_back_to_grok() -> None:
+    assert normalize_cursor_model_key("unknown", default="composer-2.5") == "grok-4.6"
 
 
 def test_normalize_unknown_falls_back_to_default_when_valid() -> None:

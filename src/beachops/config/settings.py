@@ -159,7 +159,7 @@ class Settings(BaseSettings):
     cursor_api_base_url: str = Field(
         default="https://api.cursor.com", alias="CURSOR_API_BASE_URL"
     )
-    cursor_model: str = Field(default="composer-2.5", alias="CURSOR_MODEL")
+    cursor_model: str = Field(default="grok-4.6", alias="CURSOR_MODEL")
     transcribe_model: str = Field(
         default="gpt-4o-mini-transcribe-2025-12-15", alias="TRANSCRIBE_MODEL"
     )

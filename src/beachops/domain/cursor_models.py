@@ -8,21 +8,21 @@ from beachops.services.cursor_cloud_client import ModelParam, ModelSelection
 
 
 class CursorModelKey(str, Enum):
-    COMPOSER_25 = "composer-2.5"
+    GROK_46 = "grok-4.6"
     FABLE_5 = "fable-5"
     OPUS_5 = "opus-5"
     GPT_56_TERRA = "gpt-5.6-terra"
 
 
 CURSOR_MODEL_LABELS: dict[str, str] = {
-    CursorModelKey.COMPOSER_25.value: "Composer 2.5",
+    CursorModelKey.GROK_46.value: "Grok 4.6",
     CursorModelKey.FABLE_5.value: "Fable 5",
     CursorModelKey.OPUS_5.value: "Opus 5",
     CursorModelKey.GPT_56_TERRA.value: "GPT-5.6 Terra",
 }
 
 CURSOR_MODEL_ORDER: tuple[CursorModelKey, ...] = (
-    CursorModelKey.COMPOSER_25,
+    CursorModelKey.GROK_46,
     CursorModelKey.FABLE_5,
     CursorModelKey.OPUS_5,
     CursorModelKey.GPT_56_TERRA,
@@ -31,6 +31,7 @@ CURSOR_MODEL_ORDER: tuple[CursorModelKey, ...] = (
 # Legacy UI keys remapped after catalog swaps (read path before DB migration).
 _LEGACY_CURSOR_MODEL_KEYS: dict[str, str] = {
     "sonnet-5": CursorModelKey.OPUS_5.value,
+    "composer-2.5": CursorModelKey.GROK_46.value,
 }
 
 
@@ -47,6 +48,8 @@ def normalize_cursor_model_key(value: str | None, *, default: str) -> str:
         or "|" in value
     ):
         return value
+    if default in _LEGACY_CURSOR_MODEL_KEYS:
+        return _LEGACY_CURSOR_MODEL_KEYS[default]
     if default in known or (
         default
         and (
@@ -57,7 +60,7 @@ def normalize_cursor_model_key(value: str | None, *, default: str) -> str:
         )
     ):
         return default
-    return CursorModelKey.COMPOSER_25.value
+    return CursorModelKey.GROK_46.value
 
 
 def cursor_model_label(key: str) -> str:
@@ -92,11 +95,14 @@ def resolve_cursor_model(
             return selection
         return ModelSelection(id=selection.id, params=override_params)
 
-    if key == CursorModelKey.COMPOSER_25.value:
+    if key == CursorModelKey.GROK_46.value:
         return _maybe_override(
             ModelSelection(
-                id="composer-2.5",
-                params=(ModelParam(id="fast", value="true"),),
+                id="grok-4.6",
+                params=(
+                    ModelParam(id="effort", value="xhigh"),
+                    ModelParam(id="fast", value="false"),
+                ),
             )
         )
     if key == CursorModelKey.FABLE_5.value:

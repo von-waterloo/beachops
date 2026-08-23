@@ -74,7 +74,7 @@ def test_selected_model_button_has_leading_checkmark_and_version() -> None:
 
     others = [b for b in all_buttons if b is not selected]
     assert {b.text for b in others} == {
-        "Composer 2.5",
+        "Grok 4.6",
         "Opus 5",
         "GPT-5.6 Terra",
     }
