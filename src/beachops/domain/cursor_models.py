@@ -115,6 +115,7 @@ def resolve_cursor_model(
             ModelSelection(
                 id="claude-opus-5",
                 params=(
+                    ModelParam(id="cyber", value="false"),
                     ModelParam(id="thinking", value="true"),
                     ModelParam(id="context", value="300k"),
                     ModelParam(id="effort", value="high"),

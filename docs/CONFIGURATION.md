@@ -48,7 +48,7 @@ Docker compose переопределяет `DATABASE_URL` на `@postgres:5432`
 
 | Переменная | По умолчанию | Описание |
 |------------|--------------|----------|
-| `CURSOR_MODEL` | `composer-2.5` | UI-preset / fallback; динамический каталог — `GET /v1/models` (кэш Redis) |
+| `CURSOR_MODEL` | `composer-2.5` | UI-preset / fallback; динамический каталог — `GET /v1/models` (кэш Redis). Запуск шлёт полный variant (`id`+params), не голое имя модели. |
 | `CURSOR_API_BASE_URL` | `https://api.cursor.com` | база Cloud Agents API v1 |
 | `CURSOR_API_KEY_MT2` | — (пусто) | второй Cursor API key — кнопка **🔑 mt2**; пусто = кнопка скрыта |
 | `CURSOR_API_KEY_MT3` | — (пусто) | третий Cursor API key — кнопка **🔑 mt3**; ряд токенов виден, если задан MT2 и/или MT3 |

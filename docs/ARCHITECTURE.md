@@ -145,6 +145,8 @@ Setup guide: [OPS_MCP.md](./OPS_MCP.md). Independent of Cursor key presets (`mt`
 
 ### CursorAgentService (Cloud Agents API v1)
 
+Модель запуска — точный `id`+`params` variant из `GET /v1/models`. Пресеты и динамический каталог (`cursor_model_catalog`) снэпят выбор к известному variant; неполный набор params API отвергает как `invalid_model`.
+
 1. `POST /v1/agents` или follow-up `POST /v1/agents/{id}/runs` (`cursor_cloud_client`)
 2. Persist `agent_id` / `run_id` / `Last-Event-ID` в `beachops_jobs`
 3. Фоновый observer читает `GET .../stream` (SSE) → `StreamState`
