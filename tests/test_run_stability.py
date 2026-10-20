@@ -35,7 +35,7 @@ async def test_update_swallows_telegram_timeout() -> None:
         header="repo · ask",
         is_admin=True,
         mode=UserMode.ASK,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
         min_edit_interval=0.0,
     )
     # Must not raise into Cursor run loop.
@@ -52,7 +52,7 @@ async def test_finalize_retries_after_timeout_without_raising() -> None:
         header="repo · ask",
         is_admin=True,
         mode=UserMode.ASK,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
         min_edit_interval=60.0,
     )
     await renderer.finalize(StreamState(assistant_text="done", status="finished"))

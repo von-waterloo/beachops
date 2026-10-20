@@ -288,7 +288,7 @@ async def run_daemon() -> None:
     token = _env("BEACHOPS_WORKER_TOKEN")
     hostname = _env("BEACHOPS_WORKER_HOSTNAME") or socket.gethostname()
     api_key = _env("CURSOR_API_KEY")
-    model = _env("CURSOR_MODEL") or "grok-4.6"
+    model = _env("CURSOR_MODEL") or "grok-4.7"
     workspace = Path(_env("WORKSPACE_PATH") or "./data/workspace")
     workspace.mkdir(parents=True, exist_ok=True)
 

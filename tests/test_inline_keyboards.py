@@ -28,7 +28,7 @@ def test_mode_buttons_leading_checkmark_no_icons() -> None:
     markup = status_reply_markup(
         is_admin=True,
         current=UserMode.PLAN,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
         has_repos=False,
     )
     mode_row = markup.inline_keyboard[0]
@@ -45,7 +45,7 @@ def test_model_buttons_are_two_per_row_grid() -> None:
     markup = status_reply_markup(
         is_admin=False,
         current=UserMode.ASK,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
         has_repos=False,
     )
     # row 0 = mode buttons, rows 1-2 = model buttons (2x2 grid)
@@ -63,20 +63,20 @@ def test_selected_model_button_has_leading_checkmark_and_version() -> None:
     markup = status_reply_markup(
         is_admin=False,
         current=UserMode.ASK,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
         has_repos=False,
     )
     all_buttons = [b for row in markup.inline_keyboard[1:3] for b in row]
     selected = next(
-        b for b in all_buttons if b.callback_data == f"{CB_MODEL_PREFIX}{CursorModelKey.FABLE_5.value}"
+        b for b in all_buttons if b.callback_data == f"{CB_MODEL_PREFIX}{CursorModelKey.GEMINI_4.value}"
     )
-    assert selected.text == "✓ Fable 5"
+    assert selected.text == "✓ Gemini 4"
 
     others = [b for b in all_buttons if b is not selected]
     assert {b.text for b in others} == {
-        "Grok 4.6",
-        "Opus 5",
-        "GPT-5.6 Terra",
+        "Grok 4.7",
+        "Opus 5.5",
+        "Sonnet 5.5",
     }
     assert all(len(b.text) <= 14 for b in all_buttons)
 
@@ -85,7 +85,7 @@ def test_run_activity_keyboard_only_cancel() -> None:
     markup = run_activity_keyboard(
         is_admin=True,
         current=UserMode.ASK,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
     )
     buttons = [b for row in markup.inline_keyboard for b in row]
     assert len(buttons) == 1
@@ -96,7 +96,7 @@ def test_post_run_keyboard_has_no_cancel() -> None:
     markup = post_run_keyboard(
         is_admin=True,
         current=UserMode.ASK,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
         with_retry=True,
         with_build_plan=True,
     )
@@ -108,7 +108,7 @@ def test_post_run_keyboard_build_plan_button_for_admin() -> None:
     markup = post_run_keyboard(
         is_admin=True,
         current=UserMode.PLAN,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
         with_build_plan=True,
     )
     buttons = [b for row in markup.inline_keyboard for b in row]
@@ -120,7 +120,7 @@ def test_post_run_keyboard_no_build_plan_for_non_admin() -> None:
     markup = post_run_keyboard(
         is_admin=False,
         current=UserMode.ASK,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
         with_build_plan=True,
     )
     buttons = [b for row in markup.inline_keyboard for b in row]
@@ -131,7 +131,7 @@ def test_token_row_hidden_without_second_token() -> None:
     markup = status_reply_markup(
         is_admin=False,
         current=UserMode.ASK,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
         has_repos=False,
     )
     buttons = [b for row in markup.inline_keyboard for b in row]
@@ -142,7 +142,7 @@ def test_token_row_shows_mt_and_mt2_with_checkmark() -> None:
     markup = status_reply_markup(
         is_admin=False,
         current=UserMode.ASK,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
         has_repos=False,
         current_token_key="mt2",
         available_token_keys=("mt", "mt2"),
@@ -165,7 +165,7 @@ def test_token_row_shows_only_configured_keys_including_mt3() -> None:
     markup = status_reply_markup(
         is_admin=False,
         current=UserMode.ASK,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
         has_repos=False,
         current_token_key="mt3",
         available_token_keys=("mt", "mt3"),
@@ -207,7 +207,7 @@ def test_welcome_keyboard_reuses_status_nav_without_repos() -> None:
         has_repos=False,
         is_admin=False,
         current=UserMode.ASK,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
     )
     buttons = [b for row in markup.inline_keyboard for b in row]
     callbacks = {b.callback_data for b in buttons}

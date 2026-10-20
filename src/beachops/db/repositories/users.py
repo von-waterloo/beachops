@@ -45,7 +45,7 @@ class UserRepository:
                 tg_user_id,
                 is_admin,
                 UserMode.ASK.value,
-                CursorModelKey.GROK_46.value,
+                CursorModelKey.GROK_47.value,
                 resolved_role.value,
             )
         return existed is None

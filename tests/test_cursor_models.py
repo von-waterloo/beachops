@@ -16,73 +16,70 @@ from beachops.services.cursor_model_catalog import (
 )
 
 
-def test_resolve_fable_5_matches_catalog_variant() -> None:
-    model = resolve_cursor_model(CursorModelKey.FABLE_5.value)
+def test_resolve_gemini_4_uses_high_reasoning() -> None:
+    model = resolve_cursor_model(CursorModelKey.GEMINI_4.value)
     assert isinstance(model, ModelSelection)
-    assert model.id == "claude-fable-5"
-    params = {p.id: p.value for p in model.params}
-    assert params == {
-        "thinking": "true",
-        "context": "300k",
-        "effort": "high",
-    }
-
-
-def test_resolve_opus_5_uses_complete_catalog_variant() -> None:
-    model = resolve_cursor_model(CursorModelKey.OPUS_5.value)
-    assert isinstance(model, ModelSelection)
-    assert model.id == "claude-opus-5"
-    params = {p.id: p.value for p in model.params}
-    assert params == {
-        "cyber": "false",
-        "thinking": "true",
-        "context": "300k",
-        "effort": "high",
-        "fast": "false",
-    }
-
-
-def test_resolve_grok_46_uses_xhigh_effort() -> None:
-    model = resolve_cursor_model("grok-4.6")
-    assert isinstance(model, ModelSelection)
-    assert model.id == "grok-4.6"
+    assert model.id == "gemini-4-argon"
     assert {p.id: p.value for p in model.params} == {
-        "effort": "xhigh",
+        "reasoning_effort": "high",
+    }
+
+
+def test_resolve_opus_55_uses_high_effort_variant() -> None:
+    model = resolve_cursor_model(CursorModelKey.OPUS_55.value)
+    assert isinstance(model, ModelSelection)
+    assert model.id == "claude-opus-5-5"
+    assert {p.id: p.value for p in model.params} == {
+        "context": "300k",
+        "effort": "high",
         "fast": "false",
     }
 
 
-def test_normalize_legacy_sonnet_5_maps_to_opus_5() -> None:
+def test_resolve_grok_47_uses_xhigh_effort() -> None:
+    model = resolve_cursor_model("grok-4.7")
+    assert isinstance(model, ModelSelection)
+    assert model.id == "grok-4.7"
+    assert {p.id: p.value for p in model.params} == {
+        "context": "256k",
+        "reasoning_effort": "xhigh",
+        "fast": "false",
+    }
+
+
+def test_normalize_legacy_sonnet_5_maps_to_sonnet_55() -> None:
     assert (
-        normalize_cursor_model_key("sonnet-5", default="grok-4.6")
-        == CursorModelKey.OPUS_5.value
+        normalize_cursor_model_key("sonnet-5", default="grok-4.7")
+        == CursorModelKey.SONNET_55.value
     )
 
 
-def test_normalize_legacy_composer_maps_to_grok_46() -> None:
-    assert normalize_cursor_model_key("composer-2.5", default="grok-4.6") == "grok-4.6"
+def test_normalize_legacy_keys_map_to_current_presets() -> None:
+    assert normalize_cursor_model_key("composer-2.5", default="grok-4.7") == "grok-4.7"
+    assert normalize_cursor_model_key("grok-4.6", default="grok-4.7") == "grok-4.7"
+    assert normalize_cursor_model_key("fable-5", default="grok-4.7") == "gemini-4"
+    assert normalize_cursor_model_key("opus-5", default="grok-4.7") == "opus-5.5"
+    assert normalize_cursor_model_key("gpt-5.6-terra", default="grok-4.7") == "sonnet-5.5"
 
 
-def test_resolve_gpt_56_terra_uses_standard_context_and_medium_reasoning() -> None:
-    model = resolve_cursor_model(CursorModelKey.GPT_56_TERRA.value)
+def test_resolve_sonnet_55_uses_1m_high_variant() -> None:
+    model = resolve_cursor_model(CursorModelKey.SONNET_55.value)
     assert isinstance(model, ModelSelection)
-    assert model.id == "gpt-5.6-terra"
-    params = {p.id: p.value for p in model.params}
-    assert params == {
-        "context": "272k",
-        "reasoning": "medium",
-        "fast": "false",
+    assert model.id == "claude-sonnet-5-5"
+    assert {p.id: p.value for p in model.params} == {
+        "context": "1m",
+        "reasoning_effort": "high",
     }
 
 
 def test_normalize_unknown_falls_back_to_grok() -> None:
-    assert normalize_cursor_model_key("unknown", default="composer-2.5") == "grok-4.6"
+    assert normalize_cursor_model_key("unknown", default="composer-2.5") == "grok-4.7"
 
 
 def test_normalize_unknown_falls_back_to_default_when_valid() -> None:
     assert (
-        normalize_cursor_model_key("unknown", default=CursorModelKey.FABLE_5.value)
-        == CursorModelKey.FABLE_5.value
+        normalize_cursor_model_key("unknown", default=CursorModelKey.GEMINI_4.value)
+        == CursorModelKey.GEMINI_4.value
     )
 
 

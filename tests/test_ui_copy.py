@@ -14,7 +14,7 @@ from beachops.services.ui_copy import (
 def test_welcome_message_contains_quick_start() -> None:
     text = build_welcome_message(
         mode=UserMode.ASK,
-        model_key="grok-4.6",
+        model_key="grok-4.7",
         repo=None,
         is_admin=False,
         has_repos=False,

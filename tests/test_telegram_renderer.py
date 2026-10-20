@@ -32,7 +32,7 @@ def _renderer(message: MagicMock) -> TelegramStreamRenderer:
         header="repo · ask",
         is_admin=True,
         mode=UserMode.ASK,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
         min_edit_interval=60.0,
     )
 
@@ -45,7 +45,7 @@ async def test_finalize_replaces_cancel_with_post_run_keyboard() -> None:
     markup = post_run_keyboard(
         is_admin=True,
         current=UserMode.ASK,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
     )
 
     await renderer.finalize(state, footer="✅ Готово", reply_markup=markup)
@@ -71,7 +71,7 @@ async def test_finalize_updates_markup_when_text_unchanged() -> None:
     markup = post_run_keyboard(
         is_admin=True,
         current=UserMode.ASK,
-        current_model_key=CursorModelKey.FABLE_5.value,
+        current_model_key=CursorModelKey.GEMINI_4.value,
     )
 
     await renderer.finalize(state, footer="", reply_markup=markup)

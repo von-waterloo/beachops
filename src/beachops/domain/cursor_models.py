@@ -8,30 +8,34 @@ from beachops.services.cursor_cloud_client import ModelParam, ModelSelection
 
 
 class CursorModelKey(str, Enum):
-    GROK_46 = "grok-4.6"
-    FABLE_5 = "fable-5"
-    OPUS_5 = "opus-5"
-    GPT_56_TERRA = "gpt-5.6-terra"
+    GROK_47 = "grok-4.7"
+    GEMINI_4 = "gemini-4"
+    OPUS_55 = "opus-5.5"
+    SONNET_55 = "sonnet-5.5"
 
 
 CURSOR_MODEL_LABELS: dict[str, str] = {
-    CursorModelKey.GROK_46.value: "Grok 4.6",
-    CursorModelKey.FABLE_5.value: "Fable 5",
-    CursorModelKey.OPUS_5.value: "Opus 5",
-    CursorModelKey.GPT_56_TERRA.value: "GPT-5.6 Terra",
+    CursorModelKey.GROK_47.value: "Grok 4.7",
+    CursorModelKey.GEMINI_4.value: "Gemini 4",
+    CursorModelKey.OPUS_55.value: "Opus 5.5",
+    CursorModelKey.SONNET_55.value: "Sonnet 5.5",
 }
 
 CURSOR_MODEL_ORDER: tuple[CursorModelKey, ...] = (
-    CursorModelKey.GROK_46,
-    CursorModelKey.FABLE_5,
-    CursorModelKey.OPUS_5,
-    CursorModelKey.GPT_56_TERRA,
+    CursorModelKey.GROK_47,
+    CursorModelKey.GEMINI_4,
+    CursorModelKey.OPUS_55,
+    CursorModelKey.SONNET_55,
 )
 
 # Legacy UI keys remapped after catalog swaps (read path before DB migration).
 _LEGACY_CURSOR_MODEL_KEYS: dict[str, str] = {
-    "sonnet-5": CursorModelKey.OPUS_5.value,
-    "composer-2.5": CursorModelKey.GROK_46.value,
+    "composer-2.5": CursorModelKey.GROK_47.value,
+    "grok-4.6": CursorModelKey.GROK_47.value,
+    "fable-5": CursorModelKey.GEMINI_4.value,
+    "opus-5": CursorModelKey.OPUS_55.value,
+    "sonnet-5": CursorModelKey.SONNET_55.value,
+    "gpt-5.6-terra": CursorModelKey.SONNET_55.value,
 }
 
 
@@ -60,7 +64,7 @@ def normalize_cursor_model_key(value: str | None, *, default: str) -> str:
         )
     ):
         return default
-    return CursorModelKey.GROK_46.value
+    return CursorModelKey.GROK_47.value
 
 
 def cursor_model_label(key: str) -> str:
@@ -95,48 +99,42 @@ def resolve_cursor_model(
             return selection
         return ModelSelection(id=selection.id, params=override_params)
 
-    if key == CursorModelKey.GROK_46.value:
+    if key == CursorModelKey.GROK_47.value:
         return _maybe_override(
             ModelSelection(
-                id="grok-4.6",
+                id="grok-4.7",
                 params=(
-                    ModelParam(id="effort", value="xhigh"),
+                    ModelParam(id="context", value="256k"),
+                    ModelParam(id="reasoning_effort", value="xhigh"),
                     ModelParam(id="fast", value="false"),
                 ),
             )
         )
-    if key == CursorModelKey.FABLE_5.value:
+    if key == CursorModelKey.GEMINI_4.value:
         return _maybe_override(
             ModelSelection(
-                id="claude-fable-5",
-                params=(
-                    ModelParam(id="thinking", value="true"),
-                    ModelParam(id="context", value="300k"),
-                    ModelParam(id="effort", value="high"),
-                ),
+                id="gemini-4-argon",
+                params=(ModelParam(id="reasoning_effort", value="high"),),
             )
         )
-    if key == CursorModelKey.OPUS_5.value:
+    if key == CursorModelKey.OPUS_55.value:
         return _maybe_override(
             ModelSelection(
-                id="claude-opus-5",
+                id="claude-opus-5-5",
                 params=(
-                    ModelParam(id="cyber", value="false"),
-                    ModelParam(id="thinking", value="true"),
                     ModelParam(id="context", value="300k"),
                     ModelParam(id="effort", value="high"),
                     ModelParam(id="fast", value="false"),
                 ),
             )
         )
-    if key == CursorModelKey.GPT_56_TERRA.value:
+    if key == CursorModelKey.SONNET_55.value:
         return _maybe_override(
             ModelSelection(
-                id="gpt-5.6-terra",
+                id="claude-sonnet-5-5",
                 params=(
-                    ModelParam(id="context", value="272k"),
-                    ModelParam(id="reasoning", value="medium"),
-                    ModelParam(id="fast", value="false"),
+                    ModelParam(id="context", value="1m"),
+                    ModelParam(id="reasoning_effort", value="high"),
                 ),
             )
         )
